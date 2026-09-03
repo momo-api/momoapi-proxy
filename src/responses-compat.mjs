@@ -275,6 +275,13 @@ export function collectRoutedCustomToolNames(body) {
     ) {
       names.add(value.name);
     }
+    if (
+      value.type === "custom_tool_call"
+      && typeof value.name === "string"
+      && (value.name === "exec" || value.name === "apply_patch")
+    ) {
+      names.add(value.name);
+    }
     for (const entry of Object.values(value)) visit(entry);
   };
   visit(body);
