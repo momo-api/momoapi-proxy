@@ -143,9 +143,9 @@ Write-Step "Stopping any existing MOMO Codex Bridge instance on port $Port..."
 try {
   $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
   foreach ($conn in $conns) {
-    Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
+  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
   }
-  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*tray.ps1*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%tray.ps1%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 } catch {}
 
 Write-Step "Starting MOMO Codex Bridge daemon & Taskbar Tray..."

@@ -154,7 +154,7 @@ $portalItem.add_Click({
 $restartItem = $contextMenu.Items.Add("Restart Bridge Daemon")
 $restartItem.add_Click({
   try {
-    Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*momo-codex-bridge.mjs serve*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%momo-codex-bridge.mjs serve%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   } catch {}
   Start-DaemonProcess
   $notifyIcon.ShowBalloonTip(2000, "MOMO Codex Bridge", "Service restarted", [System.Windows.Forms.ToolTipIcon]::Info)

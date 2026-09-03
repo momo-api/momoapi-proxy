@@ -9,6 +9,7 @@ import {
 } from "./responses-compat.mjs";
 import { ResponseStreamEmitter, completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
+import { getCurrentVersion } from "./updater.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -807,7 +808,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     try {
       if (request.method === "GET" && request.url === "/healthz") {
         logRequest({ method: "GET", url: "/healthz", status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
-        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.6.4", host: settings.host, port: settings.port });
+        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: getCurrentVersion(), host: settings.host, port: settings.port });
       }
       if (!authorized(request, settings)) {
         finalStatus = 401;

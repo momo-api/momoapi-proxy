@@ -14,10 +14,11 @@ import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/update
 function killWindowsProcessByPattern(pattern) {
   if (process.platform !== "win32") return;
   try {
+    const wql = "CommandLine LIKE '%" + pattern.replace(/'/g, "''") + "%'";
     spawnSync("powershell.exe", [
       "-NoProfile",
       "-Command",
-      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${pattern}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+      "Get-CimInstance Win32_Process -Filter '" + wql + "' -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
     ], { stdio: "ignore" });
   } catch {}
 }
@@ -25,10 +26,11 @@ function killWindowsProcessByPattern(pattern) {
 function isWindowsProcessRunning(pattern) {
   if (process.platform !== "win32") return false;
   try {
+    const wql = "CommandLine LIKE '%" + pattern.replace(/'/g, "''") + "%'";
     const res = spawnSync("powershell.exe", [
       "-NoProfile",
       "-Command",
-      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${pattern}*' } | Select-Object -ExpandProperty ProcessId`,
+      "Get-CimInstance Win32_Process -Filter '" + wql + "' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessId",
     ], { encoding: "utf8" });
     return Boolean(res.stdout && res.stdout.trim());
   } catch {
