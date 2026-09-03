@@ -72,10 +72,10 @@ if (Test-Path $installDir) {
   Write-Step "Downloading latest release package..."
   $urls = @(
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.6.8.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.6.9.tgz",
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.8/momo-api-codex-bridge-0.6.8.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.8/momo-api-codex-bridge-0.6.8.tgz"
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.9/momo-api-codex-bridge-0.6.9.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.9/momo-api-codex-bridge-0.6.9.tgz"
   )
   $tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
 
@@ -101,6 +101,8 @@ if (Test-Path $installDir) {
 # 4. Generate Windows CLI wrappers in bin
 $binDir = [System.IO.Path]::Combine($installDir, "bin")
 $bridgeBin = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.mjs")
+$momoapiCmd = [System.IO.Path]::Combine($binDir, "momoapi.cmd")
+$momoCmd    = [System.IO.Path]::Combine($binDir, "momo.cmd")
 $bridgeCmd = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.cmd")
 $switchCmd = [System.IO.Path]::Combine($binDir, "momo-codex-switch.cmd")
 $trayPs1   = [System.IO.Path]::Combine($binDir, "tray.ps1")
@@ -108,7 +110,11 @@ $trayPs1   = [System.IO.Path]::Combine($binDir, "tray.ps1")
 # Clean up any legacy .ps1 CLI wrappers to prevent PowerShell ExecutionPolicy restrictions
 Remove-Item -Path (Join-Path $binDir "momo-codex-bridge.ps1") -Force -ErrorAction SilentlyContinue
 Remove-Item -Path (Join-Path $binDir "momo-codex-switch.ps1") -Force -ErrorAction SilentlyContinue
+Remove-Item -Path (Join-Path $binDir "momoapi.ps1") -Force -ErrorAction SilentlyContinue
+Remove-Item -Path (Join-Path $binDir "momo.ps1") -Force -ErrorAction SilentlyContinue
 
+"@echo off`r`nnode `"%~dp0momo-codex-bridge.mjs`" %*" | Set-Content -Path $momoapiCmd -Encoding Ascii
+"@echo off`r`nnode `"%~dp0momo-codex-bridge.mjs`" %*" | Set-Content -Path $momoCmd -Encoding Ascii
 "@echo off`r`nnode `"%~dp0momo-codex-bridge.mjs`" %*" | Set-Content -Path $bridgeCmd -Encoding Ascii
 "@echo off`r`nnode `"%~dp0momo-codex-switch.mjs`" %*" | Set-Content -Path $switchCmd -Encoding Ascii
 
@@ -147,6 +153,8 @@ if ($env:Path -notlike "*$binDir*") {
   $env:Path = "$binDir;$env:Path"
 }
 
+function global:momoapi { & node "$bridgeBin" @args }
+function global:momo { & node "$bridgeBin" @args }
 function global:momo-codex-bridge { & node "$bridgeBin" @args }
 function global:momo-codex-switch { & node "$bridgeBin" @args }
 
@@ -164,10 +172,12 @@ Write-Host ""
 Write-Host "Health Status:" -ForegroundColor Cyan
 & node "$bridgeBin" status
 Write-Host ""
-Write-Host "Commands available in this and new terminals:"
-Write-Host "  momo-codex-bridge status   - Check bridge running status"
-Write-Host "  momo-codex-bridge models   - List available models"
-Write-Host "  momo-codex-bridge doctor   - Run health diagnostics"
-Write-Host "  momo-codex-bridge tray     - Launch System Tray Companion"
-Write-Host "  momo-codex-bridge rollback - Restore previous config"
+Write-Host "Commands available in this and new terminals (short alias 'momoapi' / 'momo'):"
+Write-Host "  momoapi          - Start bridge in background (or check status)"
+Write-Host "  momoapi status   - Check bridge running status"
+Write-Host "  momoapi models   - List available models"
+Write-Host "  momoapi restart  - Restart bridge daemon & taskbar tray"
+Write-Host "  momoapi stop     - Stop bridge daemon"
+Write-Host "  momoapi doctor   - Run health diagnostics"
+Write-Host "  momoapi update   - Update to latest version"
 Write-Host ""

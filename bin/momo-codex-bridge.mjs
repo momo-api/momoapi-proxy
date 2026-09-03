@@ -8,7 +8,9 @@ import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogs } from "../src/logger.mjs";
 import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
 
-const [command = "help", ...args] = process.argv.slice(2);
+const rawArgv = process.argv.slice(2);
+const command = rawArgv.length === 0 ? "auto" : rawArgv[0];
+const args = rawArgv.slice(1);
 const value = (name) => {
   const index = args.indexOf(name);
   return index < 0 ? undefined : args[index + 1];
@@ -16,6 +18,49 @@ const value = (name) => {
 const hasFlag = (name) => args.includes(name);
 
 async function main() {
+  if (command === "auto") {
+    let settings = null;
+    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    const port = settings.port || 18789;
+    let isRunning = false;
+    try {
+      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
+      if (res.ok) isRunning = true;
+    } catch {}
+
+    if (!isRunning) {
+      console.log("Starting MOMO API Proxy in background...");
+      const { spawn } = await import("node:child_process");
+      const { dirname, join } = await import("node:path");
+      const { fileURLToPath } = await import("node:url");
+      const binFile = fileURLToPath(import.meta.url);
+      const scriptDir = dirname(binFile);
+      const daemon = spawn(process.execPath, [binFile, "serve"], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      daemon.unref();
+      if (process.platform === "win32") {
+        const trayScript = join(scriptDir, "tray.ps1");
+        const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        tray.unref();
+      }
+      await new Promise((r) => setTimeout(r, 800));
+      console.log("MOMO API Proxy started successfully! Listening on http://127.0.0.1:" + port + "/v1 (Taskbar Tray active)");
+      console.log("Run 'momoapi models' to view models, or 'momoapi stop' to stop.");
+    } else {
+      console.log("MOMO API Proxy is currently running at http://127.0.0.1:" + port + "/v1");
+      const catalog = readCatalog();
+      console.log("Models synced: " + (catalog?.models?.length || 0) + " (Endpoint: " + (settings.endpoint || "https://momoapi.us") + ")");
+      console.log("\nCommands:\n  momoapi          - Start service in background (or check status)\n  momoapi status   - Check detailed status\n  momoapi models   - List available models\n  momoapi restart  - Restart daemon & tray\n  momoapi stop     - Stop service\n  momoapi update   - Update to latest version");
+    }
+    return;
+  }
   if (command === "setup" || command === "install") {
     const apiKey = value("--api-key") || process.env.MOMO_API_KEY;
     if (!apiKey) {

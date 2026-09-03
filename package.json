@@ -1,10 +1,12 @@
 {
   "name": "@momo-api/codex-bridge",
-  "version": "0.6.8",
+  "version": "0.6.9",
   "private": true,
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",
   "bin": {
+    "momoapi": "bin/momo-codex-bridge.mjs",
+    "momo": "bin/momo-codex-bridge.mjs",
     "momo-codex-bridge": "bin/momo-codex-bridge.mjs",
     "momo-codex-switch": "bin/momo-codex-switch.mjs"
   },
