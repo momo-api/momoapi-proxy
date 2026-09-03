@@ -155,7 +155,7 @@ async function main() {
       const { fileURLToPath } = await import("node:url");
       const scriptDir = dirname(fileURLToPath(import.meta.url));
       const trayScript = join(scriptDir, "tray.ps1");
-      const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(settings.port || 18789)], {
+      const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(settings.port || 18789)], {
         detached: true,
         stdio: "ignore",
         windowsHide: true,

@@ -135,7 +135,7 @@ try {
 Write-Step "Starting MOMO Codex Bridge daemon & Taskbar Tray..."
 Start-Process -FilePath "node" -ArgumentList @($bridgeBin, "serve") -WindowStyle Hidden
 if (Test-Path $trayPs1) {
-  Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $trayPs1) -WindowStyle Hidden
+  Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", $trayPs1) -WindowStyle Hidden
 }
 
 # 7. Register PATH, environment variables & current session function
