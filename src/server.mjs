@@ -1,6 +1,11 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
+import {
+  rewriteRoutedNamespaceToolsForUpstream,
+  rewriteRoutedCustomToolsForUpstream,
+  restoreAllRoutedCallsInJson,
+} from "./responses-compat.mjs";
 import { ResponseStreamEmitter, completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
 
@@ -538,7 +543,12 @@ export function normalizeResponsesPayload(payload) {
 }
 
 async function forwardResponses(request, response, settings, payload, fetchImpl, signal) {
-  const cleanPayload = normalizeResponsesPayload(payload);
+  // 1. Lower custom tools (exec, etc.) to standard functions
+  const { body: customBody, names: customNames } = rewriteRoutedCustomToolsForUpstream(payload);
+  // 2. Lower namespace tools (e.g. personal:codex-canvas) to flat functions
+  const { body: nsBody, aliases: nsAliases } = rewriteRoutedNamespaceToolsForUpstream(customBody);
+  // 3. Normalize schema for upstream OpenAI Responses endpoint
+  const cleanPayload = normalizeResponsesPayload(nsBody);
   const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...cleanPayload, stream: true }), signal });
   if (!upstream.ok) {
     const errText = await upstream.text();
@@ -579,8 +589,10 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
       const lines = block.split("\n");
       const dataLine = lines.find((l) => l.trim().startsWith("data:"));
       let json = null;
+      let rawJsonStr = null;
       if (dataLine) {
-        const jsonStr = dataLine.trim().slice(5).trim();
+        rawJsonStr = dataLine.trim().slice(5).trim();
+        const jsonStr = rawJsonStr;
         if (jsonStr && jsonStr !== "[DONE]") {
           try { json = JSON.parse(jsonStr); } catch {}
         }
@@ -615,6 +627,15 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
           }
           emitter.complete();
           return;
+        }
+
+        if (!hasDsml && rawJsonStr) {
+          const restoredJsonStr = restoreAllRoutedCallsInJson(rawJsonStr, nsAliases, customNames);
+          if (restoredJsonStr !== rawJsonStr) {
+            const rewrittenLines = lines.map((l) => l.trim().startsWith("data:") ? "data: " + restoredJsonStr : l);
+            response.write(rewrittenLines.join("\n") + "\n\n");
+            continue;
+          }
         }
       }
 

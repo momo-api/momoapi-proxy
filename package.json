@@ -1,6 +1,6 @@
 {
   "name": "@momo-api/codex-bridge",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",
@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "node bin/momo-codex-bridge.mjs serve",
-    "test": "node --test test/server.test.mjs test/setup.test.mjs test/updater.test.mjs",
+    "test": "node --test test/server.test.mjs test/setup.test.mjs test/updater.test.mjs test/compat.test.mjs",
     "doctor": "node bin/momo-codex-bridge.mjs doctor",
     "models": "node bin/momo-codex-bridge.mjs models",
     "status": "node bin/momo-codex-bridge.mjs status",

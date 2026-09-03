@@ -72,9 +72,12 @@ if (Test-Path $installDir) {
   Write-Step "Downloading latest release package..."
   $urls = @(
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.2.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.1.tgz",
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.2/momo-api-codex-bridge-0.7.2.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.1/momo-api-codex-bridge-0.7.1.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.2/momo-api-codex-bridge-0.7.2.tgz",
     "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.1/momo-api-codex-bridge-0.7.1.tgz"
   )
   $tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
@@ -136,6 +139,7 @@ try {
   foreach ($conn in $conns) {
     Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
   }
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*tray.ps1*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 } catch {}
 
 Write-Step "Starting MOMO Codex Bridge daemon & Taskbar Tray..."

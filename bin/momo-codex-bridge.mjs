@@ -42,6 +42,10 @@ async function main() {
       });
       daemon.unref();
       if (process.platform === "win32") {
+        try {
+          const { execSync } = await import("node:child_process");
+          execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+        } catch {}
         const trayScript = join(scriptDir, "tray.ps1");
         const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
           detached: true,
@@ -106,6 +110,10 @@ async function main() {
     });
     daemon.unref();
     if (process.platform === "win32") {
+      try {
+        const { execSync } = await import("node:child_process");
+        execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+      } catch {}
       const trayScript = join(scriptDir, "tray.ps1");
       const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
         detached: true,
@@ -134,6 +142,7 @@ async function main() {
     if (process.platform === "win32") {
       try {
         execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_ .OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+        execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_ .CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_ .ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
       } catch {}
     } else {
       try {
@@ -152,6 +161,7 @@ async function main() {
     if (process.platform === "win32") {
       try {
         execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_ .OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+        execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_ .CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_ .ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
       } catch {}
     } else {
       try {

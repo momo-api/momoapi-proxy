@@ -380,3 +380,80 @@ test("preserves additional_tools in input for native Responses models without st
   assert.equal(capturedBody.input[0].tools[0].name, "canvas_open");
   assert.equal(capturedBody.tools[0].name, "canvas_open");
 });
+
+test("forwardResponses: lowers Codex-Canvas namespace tools upstream and restores namespace on SSE return trip", async () => {
+  let capturedBody;
+  const fakeFetch = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    const sse = [
+      "event: response.output_item.added\ndata: " + JSON.stringify({
+        type: "response.output_item.added",
+        item: {
+          type: "function_call",
+          name: "personal:codex-canvas__read_file",
+          call_id: "call_read_1",
+        },
+      }) + "\n\n",
+      "event: response.output_item.done\ndata: " + JSON.stringify({
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          name: "personal:codex-canvas__read_file",
+          call_id: "call_read_1",
+          arguments: JSON.stringify({ file_path: "C:/path/to/SKILL.md" }),
+        },
+      }) + "\n\n",
+      "event: response.completed\ndata: " + JSON.stringify({
+        type: "response.completed",
+        response: {
+          output: [
+            {
+              type: "function_call",
+              name: "personal:codex-canvas__read_file",
+              call_id: "call_read_1",
+              arguments: JSON.stringify({ file_path: "C:/path/to/SKILL.md" }),
+            },
+          ],
+        },
+      }) + "\n\n",
+    ].join("");
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "gpt-5.6-sol",
+        tools: [
+          {
+            type: "namespace",
+            name: "personal:codex-canvas",
+            tools: [
+              {
+                name: "read_file",
+                description: "Read skill instructions",
+                parameters: { type: "object", properties: { file_path: { type: "string" } } },
+              },
+            ],
+          },
+        ],
+        input: [
+          { type: "message", role: "user", content: [{ type: "input_text", text: "@Codex-Canvas open canvas" }] },
+        ],
+      }),
+    });
+    const body = await response.text();
+    assert.equal(response.status, 200);
+    // Verify upstream received lowered wire name
+    assert.equal(capturedBody.tools[0].name, "personal:codex-canvas__read_file");
+    assert.equal(capturedBody.tools[0].type, "function");
+
+    // Verify client SSE received restored namespace
+    assert.match(body, /"name":"read_file"/);
+    assert.match(body, /"namespace":"personal:codex-canvas"/);
+    assert.doesNotMatch(body, /"name":"personal:codex-canvas__read_file"/);
+  });
+});
