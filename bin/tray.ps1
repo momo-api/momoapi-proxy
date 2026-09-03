@@ -14,7 +14,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InstallDir = Split-Path -Parent $ScriptDir
 $BridgeBin = [System.IO.Path]::Combine($ScriptDir, "momo-codex-bridge.mjs")
 $PkgJsonPath = [System.IO.Path]::Combine($InstallDir, "package.json")
-$Version = "v0.7.3"
+$Version = "v0.7.4"
 if (Test-Path $PkgJsonPath) {
   try {
     $pkg = Get-Content $PkgJsonPath -Raw | ConvertFrom-Json

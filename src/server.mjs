@@ -5,6 +5,7 @@ import {
   rewriteRoutedNamespaceToolsForUpstream,
   rewriteRoutedCustomToolsForUpstream,
   restoreAllRoutedCallsInJson,
+  createRoutedCustomToolRestoreBlockRewrite,
 } from "./responses-compat.mjs";
 import { ResponseStreamEmitter, completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
@@ -584,18 +585,18 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
       response.write(ev);
     }
     response.write(sseError(errMessage, "http_" + upstream.status));
-   response.write(completed(respId, cleanPayload.model, []));
-   response.end();
-   return;
- }
- initSseResponse(response);
- if (!upstream.body) return response.end();
+    response.write(completed(respId, cleanPayload.model, []));
+    response.end();
+    return;
+  }
+  initSseResponse(response);
+  if (!upstream.body) return response.end();
 
- const functions = extractFunctions(payload);
- let hasDsml = false;
- let fullAccumulatedText = "";
- let currentResponseId = "resp_" + randomUUID();
- let outputIndex = 0;
+  const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(customNames);
+  const functions = extractFunctions(payload);
+  let hasDsml = false;
+  let fullAccumulatedText = "";
+  let currentResponseId = "resp_" + randomUUID();
   let buffer = "";
 
   for await (const chunk of upstream.body) {
@@ -649,23 +650,36 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
           return;
         }
 
-        if (!hasDsml && rawJsonStr) {
-          const restoredJsonStr = restoreAllRoutedCallsInJson(rawJsonStr, nsAliases, customNames);
-          if (restoredJsonStr !== rawJsonStr) {
-            const rewrittenLines = lines.map((l) => l.trim().startsWith("data:") ? "data: " + restoredJsonStr : l);
-            response.write(rewrittenLines.join("\n") + "\n\n");
-            continue;
+        if (!hasDsml) {
+          let transformedBlock = block;
+          if (nsAliases && nsAliases.size > 0 && rawJsonStr) {
+            const restoredJsonStr = restoreAllRoutedCallsInJson(rawJsonStr, nsAliases, null);
+            if (restoredJsonStr !== rawJsonStr) {
+              const rewrittenLines = lines.map((l) => l.trim().startsWith("data:") ? "data: " + restoredJsonStr : l);
+              transformedBlock = rewrittenLines.join("\n");
+            }
           }
+          const outputBlocks = customToolBlockRewrite(transformedBlock);
+          for (const outBlock of outputBlocks) {
+            response.write(outBlock + "\n\n");
+          }
+          continue;
         }
       }
 
       if (!hasDsml) {
-        response.write(block + "\n\n");
+        const outputBlocks = customToolBlockRewrite(block);
+        for (const outBlock of outputBlocks) {
+          response.write(outBlock + "\n\n");
+        }
       }
     }
   }
   if (buffer.trim() && !hasDsml) {
-    response.write(buffer);
+    const outputBlocks = customToolBlockRewrite(buffer);
+    for (const outBlock of outputBlocks) {
+      response.write(outBlock);
+    }
   }
   response.end();
 }

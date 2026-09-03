@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { spawnSync, spawn, execSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { readSettings, resolveSettings } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
 import { rollback, setup, uninstall } from "../src/setup.mjs";
@@ -7,6 +10,31 @@ import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogs } from "../src/logger.mjs";
 import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
+
+function killWindowsProcessByPattern(pattern) {
+  if (process.platform !== "win32") return;
+  try {
+    spawnSync("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${pattern}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+    ], { stdio: "ignore" });
+  } catch {}
+}
+
+function isWindowsProcessRunning(pattern) {
+  if (process.platform !== "win32") return false;
+  try {
+    const res = spawnSync("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${pattern}*' } | Select-Object -ExpandProperty ProcessId`,
+    ], { encoding: "utf8" });
+    return Boolean(res.stdout && res.stdout.trim());
+  } catch {
+    return false;
+  }
+}
 
 const rawArgv = process.argv.slice(2);
 const command = rawArgv.length === 0 ? "auto" : rawArgv[0];
@@ -28,13 +56,11 @@ async function main() {
       if (res.ok) isRunning = true;
     } catch {}
 
+    const binFile = fileURLToPath(import.meta.url);
+    const scriptDir = dirname(binFile);
+
     if (!isRunning) {
       console.log("Starting MOMO API Proxy in background...");
-      const { spawn } = await import("node:child_process");
-      const { dirname, join } = await import("node:path");
-      const { fileURLToPath } = await import("node:url");
-      const binFile = fileURLToPath(import.meta.url);
-      const scriptDir = dirname(binFile);
       const daemon = spawn(process.execPath, [binFile, "serve"], {
         detached: true,
         stdio: "ignore",
@@ -42,10 +68,7 @@ async function main() {
       });
       daemon.unref();
       if (process.platform === "win32") {
-        try {
-          const { execSync } = await import("node:child_process");
-          execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
-        } catch {}
+        killWindowsProcessByPattern("tray.ps1");
         const trayScript = join(scriptDir, "tray.ps1");
         const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
           detached: true,
@@ -59,18 +82,9 @@ async function main() {
       console.log("Run 'momoapi models' to view models, or 'momoapi stop' to stop.");
     } else {
       if (process.platform === "win32") {
-        const { spawn, execSync } = await import("node:child_process");
-        const { dirname, join } = await import("node:path");
-        const { fileURLToPath } = await import("node:url");
-        const binFile = fileURLToPath(import.meta.url);
-        const scriptDir = dirname(binFile);
-        const trayScript = join(scriptDir, "tray.ps1");
-        let isTrayRunning = false;
-        try {
-          const out = execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_ .CommandLine -like '*tray.ps1*' } | Select-Object -ExpandProperty ProcessId"`, { encoding: "utf8" });
-          if (out && out.trim()) isTrayRunning = true;
-        } catch {}
+        const isTrayRunning = isWindowsProcessRunning("tray.ps1");
         if (!isTrayRunning) {
+          const trayScript = join(scriptDir, "tray.ps1");
           const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
             detached: true,
             stdio: "ignore",
@@ -119,9 +133,6 @@ async function main() {
       return;
     }
     console.log("Starting MOMO Codex Bridge in background...");
-    const { spawn } = await import("node:child_process");
-    const { dirname, join } = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
     const binFile = fileURLToPath(import.meta.url);
     const scriptDir = dirname(binFile);
     const daemon = spawn(process.execPath, [binFile, "serve"], {
@@ -131,10 +142,7 @@ async function main() {
     });
     daemon.unref();
     if (process.platform === "win32") {
-      try {
-        const { execSync } = await import("node:child_process");
-        execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_.CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
-      } catch {}
+      killWindowsProcessByPattern("tray.ps1");
       const trayScript = join(scriptDir, "tray.ps1");
       const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
         detached: true,
@@ -159,11 +167,14 @@ async function main() {
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     console.log("Stopping MOMO Codex Bridge on port " + port + "...");
-    const { execSync } = await import("node:child_process");
     if (process.platform === "win32") {
       try {
-        execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_ .OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
-        execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_ .CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_ .ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+        spawnSync("powershell.exe", [
+          "-NoProfile",
+          "-Command",
+          `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`,
+        ], { stdio: "ignore" });
+        killWindowsProcessByPattern("tray.ps1");
       } catch {}
     } else {
       try {
@@ -176,13 +187,14 @@ async function main() {
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     console.log("Restarting MOMO Codex Bridge...");
-    const { execSync, spawn } = await import("node:child_process");
-    const { dirname, join } = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
     if (process.platform === "win32") {
       try {
-        execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_ .OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
-        execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_ .CommandLine -like '*tray.ps1*' } | ForEach-Object { Stop-Process -Id \$_ .ProcessId -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+        spawnSync("powershell.exe", [
+          "-NoProfile",
+          "-Command",
+          `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`,
+        ], { stdio: "ignore" });
+        killWindowsProcessByPattern("tray.ps1");
       } catch {}
     } else {
       try {
@@ -321,10 +333,9 @@ async function main() {
       console.error("Make sure 'momo-codex-bridge serve' is running.");
       process.exit(1);
     }
-    } else if (command === "tray") {
+  } else if (command === "tray") {
     const settings = resolveSettings();
     if (process.platform === "win32") {
-      const { spawn } = await import("node:child_process");
       const { dirname, join } = await import("node:path");
       const { fileURLToPath } = await import("node:url");
       const scriptDir = dirname(fileURLToPath(import.meta.url));
