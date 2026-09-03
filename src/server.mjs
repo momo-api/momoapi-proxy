@@ -6,12 +6,13 @@ import { logRequest } from "./logger.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
-
-const DESKTOP_MODEL_MAP = {
-  "gpt-5.6-sol": { targetModel: "deepseek-v4-pro", protocol: "responses" },
-  "gpt-5.6-terra": { targetModel: "claude-opus-4-6-thinking", protocol: "claude" },
-  "gpt-5.6-luna": { targetModel: "gemini-3.7-flash", protocol: "gemini" },
-};
+const ALLOWED_CONTENT_TYPES = new Set(["input_text", "output_text", "input_image", "input_file"]);
+const KNOWN_METADATA_TYPES = new Set([
+  "session_meta", "event_msg", "task_started", "world_state", "turn_context",
+  "item_completed", "reasoning", "token_count", "web_search_call", "task_complete",
+  "thread_settings_applied", "compacted", "turn_aborted", "inter_agent_communication_metadata",
+  "agent_message", "additional_tools"
+]);
 
 const GEMINI_REASONING_MAP = {
   none: "",
@@ -51,10 +52,10 @@ async function bodyOf(request) {
 
 function authorized(request, settings) {
   const auth = request.headers.authorization;
-  if (auth && auth === `Bearer ${settings.localToken}`) return true;
-  if (auth && auth === `Bearer ${settings.apiKey}`) return true;
+  if (auth && auth === "Bearer " + settings.localToken) return true;
+  if (auth && auth === "Bearer " + settings.apiKey) return true;
   if (auth && auth === "Bearer momo-local-key") return true;
-  if (auth && auth !== `Bearer ${settings.localToken}`) return false;
+  if (auth && auth !== "Bearer " + settings.localToken) return false;
   
   // When requires_openai_auth = false without env_key, Codex connects to loopback without Authorization header
   const remote = request.socket?.remoteAddress;
@@ -64,28 +65,13 @@ function authorized(request, settings) {
 }
 
 function upstreamHeaders(settings, contentType = "application/json") {
-  return { authorization: `Bearer ${settings.apiKey}`, "content-type": contentType };
+  return { authorization: "Bearer " + settings.apiKey, "content-type": contentType };
 }
 
 function resolveTargetModel(model) {
-  const mapped = DESKTOP_MODEL_MAP[model];
-  if (mapped) return { targetModel: mapped.targetModel, protocol: mapped.protocol };
   if (GEMINI_PREFIX.test(model)) return { targetModel: model, protocol: "gemini" };
   if (CLAUDE_PREFIX.test(model)) return { targetModel: model, protocol: "claude" };
   return { targetModel: model, protocol: "responses" };
-}
-
-function responseInputText(input) {
-  return (Array.isArray(input) ? input : []).flatMap((item) => {
-    if (typeof item === "string") return [item];
-    if (item?.type === "function_call_output" || item?.type === "custom_tool_call_output") return [];
-    const content = Array.isArray(item?.content) ? item.content : [];
-    return content.map((part) => part?.text || part?.input_text || "").filter(Boolean);
-  }).join("\n");
-}
-
-function toolResultsFrom(input) {
-  return asArray(input).filter((item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output");
 }
 
 function customInput(value) {
@@ -95,27 +81,231 @@ function customInput(value) {
   return JSON.stringify(value ?? "");
 }
 
+function parseJsonSafe(value, fallback = {}) {
+  if (typeof value === "object" && value !== null) return value;
+  if (typeof value === "string") {
+    try { return JSON.parse(value); } catch { return { raw: value }; }
+  }
+  return fallback;
+}
+
+export function buildClaudeMessages(input, calls) {
+  const items = asArray(input);
+  const hasOnlyToolResults = items.length > 0 && items.every((i) => i && (i.type === "function_call_output" || i.type === "custom_tool_call_output"));
+  const firstCallId = hasOnlyToolResults ? items[0].call_id : null;
+  const knownFirst = firstCallId ? calls?.get(firstCallId) : null;
+
+  if (hasOnlyToolResults && knownFirst?.claudeMessages) {
+    const messages = structuredClone(knownFirst.claudeMessages);
+    const assistantContent = [];
+    if (knownFirst.toolUseBlock) {
+      assistantContent.push(structuredClone(knownFirst.toolUseBlock));
+    } else {
+      assistantContent.push({
+        type: "tool_use",
+        id: firstCallId,
+        name: knownFirst.name || "tool",
+        input: knownFirst.arguments || {},
+      });
+    }
+    messages.push({ role: "assistant", content: assistantContent });
+    messages.push({
+      role: "user",
+      content: items.map((item) => ({
+        type: "tool_result",
+        tool_use_id: item.call_id || firstCallId,
+        content: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? ""),
+      })),
+    });
+    return messages;
+  }
+
+  const messages = [];
+  let currentRole = null;
+  let currentContent = [];
+
+  function flush() {
+    if (currentRole && currentContent.length > 0) {
+      messages.push({
+        role: currentRole,
+        content: currentContent.length === 1 && typeof currentContent[0] === "string"
+          ? currentContent[0]
+          : currentContent,
+      });
+      currentRole = null;
+      currentContent = [];
+    }
+  }
+
+  for (const item of items) {
+    if (!item) continue;
+    if (typeof item === "string") {
+      if (currentRole && currentRole !== "user") flush();
+      currentRole = "user";
+      currentContent.push({ type: "text", text: item });
+      continue;
+    }
+    if (typeof item !== "object") continue;
+    if (item.type && KNOWN_METADATA_TYPES.has(item.type)) continue;
+
+    if (item.type === "message" || item.role) {
+      const role = item.role === "assistant" ? "assistant" : "user";
+      if (currentRole && currentRole !== role) flush();
+      currentRole = role;
+      const rawParts = Array.isArray(item.content) ? item.content : [item.content];
+      for (const part of rawParts) {
+        if (!part) continue;
+        if (typeof part === "string") {
+          currentContent.push({ type: "text", text: part });
+        } else if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+          if (part.text) currentContent.push({ type: "text", text: part.text });
+        }
+      }
+      continue;
+    }
+
+    if (item.type === "function_call" || item.type === "custom_tool_call") {
+      if (currentRole && currentRole !== "assistant") flush();
+      currentRole = "assistant";
+      const known = calls?.get(item.call_id);
+      const name = known?.name || item.name || "tool";
+      const args = known?.arguments || parseJsonSafe(item.arguments || item.input);
+      currentContent.push({
+        type: "tool_use",
+        id: item.call_id || ("call_" + randomUUID()),
+        name,
+        input: typeof args === "object" && args !== null ? args : { value: args },
+      });
+      continue;
+    }
+
+    if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
+      if (currentRole && currentRole !== "user") flush();
+      currentRole = "user";
+      const textOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+      currentContent.push({
+        type: "tool_result",
+        tool_use_id: item.call_id || "call_unknown",
+        content: textOutput,
+      });
+      continue;
+    }
+  }
+
+  flush();
+  return messages.length ? messages : [{ role: "user", content: "Continue." }];
+}
+
+export function buildGeminiContents(input, calls) {
+  const items = asArray(input);
+  const hasOnlyToolResults = items.length > 0 && items.every((i) => i && (i.type === "function_call_output" || i.type === "custom_tool_call_output"));
+  const firstCallId = hasOnlyToolResults ? items[0].call_id : null;
+  const knownFirst = firstCallId ? calls?.get(firstCallId) : null;
+
+  if (hasOnlyToolResults && knownFirst?.geminiContents) {
+    const contents = structuredClone(knownFirst.geminiContents);
+    if (knownFirst.geminiFunctionCallPart) {
+      contents.push({ role: "model", parts: [structuredClone(knownFirst.geminiFunctionCallPart)] });
+    } else {
+      contents.push({
+        role: "model",
+        parts: [{ functionCall: { name: knownFirst.name || "tool", args: knownFirst.arguments || {} } }],
+      });
+    }
+    contents.push({
+      role: "user",
+      parts: items.map((item) => ({
+        functionResponse: {
+          name: knownFirst.name || item.name || "tool",
+          response: { result: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "") },
+        },
+      })),
+    });
+    return contents;
+  }
+
+  const contents = [];
+  let currentRole = null;
+  let currentParts = [];
+
+  function flush() {
+    if (currentRole && currentParts.length > 0) {
+      contents.push({ role: currentRole, parts: currentParts });
+      currentRole = null;
+      currentParts = [];
+    }
+  }
+
+  for (const item of items) {
+    if (!item) continue;
+    if (typeof item === "string") {
+      if (currentRole && currentRole !== "user") flush();
+      currentRole = "user";
+      currentParts.push({ text: item });
+      continue;
+    }
+    if (typeof item !== "object") continue;
+    if (item.type && KNOWN_METADATA_TYPES.has(item.type)) continue;
+
+    if (item.type === "message" || item.role) {
+      const role = item.role === "assistant" ? "model" : "user";
+      if (currentRole && currentRole !== role) flush();
+      currentRole = role;
+      const rawParts = Array.isArray(item.content) ? item.content : [item.content];
+      for (const part of rawParts) {
+        if (!part) continue;
+        if (typeof part === "string") {
+          currentParts.push({ text: part });
+        } else if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+          if (part.text) currentParts.push({ text: part.text });
+        }
+      }
+      continue;
+    }
+
+    if (item.type === "function_call" || item.type === "custom_tool_call") {
+      if (currentRole && currentRole !== "model") flush();
+      currentRole = "model";
+      const known = calls?.get(item.call_id);
+      if (known?.geminiFunctionCallPart) {
+        currentParts.push(structuredClone(known.geminiFunctionCallPart));
+      } else {
+        const name = known?.name || item.name || "tool";
+        const args = known?.arguments || parseJsonSafe(item.arguments || item.input);
+        currentParts.push({
+          functionCall: {
+            name,
+            args: typeof args === "object" && args !== null ? args : { value: args },
+          },
+        });
+      }
+      continue;
+    }
+
+    if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
+      if (currentRole && currentRole !== "user") flush();
+      currentRole = "user";
+      const known = calls?.get(item.call_id);
+      const name = known?.name || item.name || "tool";
+      const textOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+      currentParts.push({
+        functionResponse: {
+          name,
+          response: { result: textOutput },
+        },
+      });
+      continue;
+    }
+  }
+
+  flush();
+  return contents.length ? contents : [{ role: "user", parts: [{ text: "Continue." }] }];
+}
+
 function geminiRequest(request, model, calls) {
   const functions = extractFunctions(request);
-  const toolResults = toolResultsFrom(request.input);
-  const firstKnownCall = toolResults.length ? calls.get(toolResults[0].call_id) : null;
-  const content = firstKnownCall?.geminiContents ? structuredClone(firstKnownCall.geminiContents) : [];
-  const prompt = responseInputText(request.input);
-  if (prompt) content.push({ role: "user", parts: [{ text: prompt }] });
-  if (toolResults.length) {
-    const functionCalls = toolResults.map((item) => {
-      const known = calls.get(item.call_id) || { name: item.name || "tool", arguments: {} };
-      return known.geminiFunctionCallPart
-        ? structuredClone(known.geminiFunctionCallPart)
-        : { functionCall: { name: known.name, args: known.arguments || {} } };
-    });
-    content.push({ role: "model", parts: functionCalls });
-  }
-  for (const item of toolResults) {
-    const known = calls.get(item.call_id) || { name: item.name || "tool" };
-    content.push({ role: "user", parts: [{ functionResponse: { name: known.name, response: { result: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "") } } }] });
-  }
-  const body = { contents: content.length ? content : [{ role: "user", parts: [{ text: "Continue." }] }] };
+  const contents = buildGeminiContents(request.input, calls);
+  const body = { contents };
   if (request.instructions) body.systemInstruction = { parts: [{ text: String(request.instructions) }] };
   if (functions.length) body.tools = [{ functionDeclarations: functions.map(({ name, description, parameters }) => ({ name, description, parameters })) }];
   const rawEffort = request.reasoning_effort || request.model_reasoning_effort || request.reasoning?.effort;
@@ -133,24 +323,7 @@ function geminiRequest(request, model, calls) {
 
 function claudeRequest(request, model, calls) {
   const functions = extractFunctions(request);
-  const toolResults = toolResultsFrom(request.input);
-  const firstKnownCall = toolResults.length ? calls.get(toolResults[0].call_id) : null;
-  const messages = firstKnownCall?.claudeMessages ? structuredClone(firstKnownCall.claudeMessages) : [];
-  const prompt = responseInputText(request.input);
-  if (prompt) messages.push({ role: "user", content: prompt });
-  if (toolResults.length) {
-    messages.push({
-      role: "assistant",
-      content: toolResults.map((item) => {
-        const known = calls.get(item.call_id) || { name: item.name || "tool", arguments: {} };
-        return { type: "tool_use", id: item.call_id, name: known.name, input: known.arguments || {} };
-      }),
-    });
-    messages.push({
-      role: "user",
-      content: toolResults.map((item) => ({ type: "tool_result", tool_use_id: item.call_id, content: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "") })),
-    });
-  }
+  const messages = buildClaudeMessages(request.input, calls);
   const rawEffort = String(request.reasoning_effort || request.model_reasoning_effort || request.reasoning?.effort || "").toLowerCase();
   const isThinkingModel = model.includes("-thinking") || Boolean(rawEffort);
   const budget = CLAUDE_REASONING_BUDGETS[rawEffort] || 4048;
@@ -162,7 +335,7 @@ function claudeRequest(request, model, calls) {
       max_tokens: maxTokens,
       stream: true,
       ...(request.instructions ? { system: String(request.instructions) } : {}),
-      messages: messages.length ? messages : [{ role: "user", content: "Continue." }],
+      messages,
       ...(functions.length ? { tools: functions.map(({ name, description, parameters }) => ({ name, description, input_schema: parameters })) } : {}),
       ...(isThinkingModel ? { thinking: { type: "enabled", budget_tokens: budget } } : {}),
     },
@@ -215,15 +388,13 @@ function initSseResponse(response) {
   });
 }
 
-function normalizeResponsesPayload(payload) {
+export function normalizeResponsesPayload(payload) {
   const normalized = { ...payload };
   const rawInput = Array.isArray(normalized.input) ? normalized.input : [];
   const cleanInput = [];
 
   for (const item of rawInput) {
-    if (item && typeof item === "object" && item.type === "additional_tools") {
-      continue;
-    }
+    if (!item) continue;
     if (typeof item === "string") {
       cleanInput.push({
         type: "message",
@@ -232,38 +403,92 @@ function normalizeResponsesPayload(payload) {
       });
       continue;
     }
-    if (item && typeof item === "object") {
-      if (item.type === "input_text") {
-        cleanInput.push({
-          type: "message",
-          role: "user",
-          content: [item],
-        });
-        continue;
-      }
-      if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
-        cleanInput.push(item);
-        continue;
-      }
-      if (item.role && item.content && !item.type) {
-        cleanInput.push({
-          type: "message",
-          role: item.role,
-          content: typeof item.content === "string"
-            ? [{ type: "input_text", text: item.content }]
-            : item.content,
-        });
-        continue;
-      }
-      if (item.type === "message" && typeof item.content === "string") {
-        cleanInput.push({
-          ...item,
-          content: [{ type: "input_text", text: item.content }],
-        });
-        continue;
-      }
+    if (typeof item !== "object") continue;
+    if (item.type && KNOWN_METADATA_TYPES.has(item.type)) continue;
+
+    if (item.type === "input_text") {
+      cleanInput.push({
+        type: "message",
+        role: "user",
+        content: [item],
+      });
+      continue;
     }
-    cleanInput.push(item);
+
+    if (item.type === "function_call_output") {
+      cleanInput.push({
+        type: "function_call_output",
+        call_id: item.call_id || "call_unknown",
+        output: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? ""),
+      });
+      continue;
+    }
+
+    if (item.type === "custom_tool_call_output") {
+      cleanInput.push({
+        type: "custom_tool_call_output",
+        call_id: item.call_id || "call_unknown",
+        output: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? ""),
+      });
+      continue;
+    }
+
+    if (item.type === "function_call") {
+      cleanInput.push({
+        type: "function_call",
+        call_id: item.call_id || "call_unknown",
+        name: item.name || "unknown",
+        arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments ?? {}),
+      });
+      continue;
+    }
+
+    if (item.type === "custom_tool_call") {
+      cleanInput.push({
+        type: "custom_tool_call",
+        call_id: item.call_id || "call_unknown",
+        name: item.name || "unknown",
+        input: typeof item.input === "string" ? item.input : JSON.stringify(item.input ?? ""),
+      });
+      continue;
+    }
+
+    const role = item.role || (item.type === "message" ? "user" : null);
+    if (role) {
+      let content = [];
+      if (typeof item.content === "string") {
+        const contentType = role === "assistant" ? "output_text" : "input_text";
+        content = [{ type: contentType, text: item.content }];
+      } else if (Array.isArray(item.content)) {
+        for (const part of item.content) {
+          if (!part) continue;
+          if (typeof part === "string") {
+            const contentType = role === "assistant" ? "output_text" : "input_text";
+            content.push({ type: contentType, text: part });
+          } else if (typeof part === "object") {
+            if (ALLOWED_CONTENT_TYPES.has(part.type)) {
+              content.push(part);
+            } else if (part.text && !part.type) {
+              const contentType = role === "assistant" ? "output_text" : "input_text";
+              content.push({ type: contentType, text: part.text });
+            }
+          }
+        }
+      }
+
+      if (content.length === 0 && role === "assistant") {
+        content = [{ type: "output_text", text: "" }];
+      }
+
+      if (content.length > 0) {
+        cleanInput.push({
+          type: "message",
+          role,
+          content,
+        });
+      }
+      continue;
+    }
   }
 
   normalized.input = cleanInput;
@@ -294,8 +519,20 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
   const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...cleanPayload, stream: true }), signal });
   if (!upstream.ok) {
     const errText = await upstream.text();
-    response.writeHead(upstream.status, { "content-type": "application/json" });
-    response.end(errText);
+    let errMessage = errText;
+    try {
+      const parsed = JSON.parse(errText);
+      errMessage = parsed.error?.message || parsed.message || errText;
+    } catch {}
+    initSseResponse(response);
+    const respId = "resp_err_" + randomUUID();
+    response.write(responseCreated(cleanPayload.model, respId).data);
+    for (const ev of textEvents(respId, 0, "\n\n[MOMO API Error " + upstream.status + "]: " + errMessage)) {
+      response.write(ev);
+    }
+    response.write(sseError(errMessage, "http_" + upstream.status));
+    response.write(completed(respId, cleanPayload.model, []));
+    response.end();
     return;
   }
   initSseResponse(response);
@@ -308,7 +545,23 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
   const { body, functions } = geminiRequest(payload, payload.model, calls);
   const endpoint = settings.endpoint + "/v1beta/models/" + encodeURIComponent(payload.model) + ":streamGenerateContent?alt=sse";
   const upstream = await fetchImpl(endpoint, { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify(body), signal });
-  if (!upstream.ok) throw new Error(`Gemini upstream returned ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
+  if (!upstream.ok) {
+    const errText = await upstream.text();
+    let errMessage = errText;
+    try {
+      const parsed = JSON.parse(errText);
+      errMessage = parsed.error?.message || parsed.message || errText;
+    } catch {}
+    initSseResponse(response);
+    const respId = "resp_err_" + randomUUID();
+    response.write(responseCreated(payload.model, respId).data);
+    for (const ev of textEvents(respId, 0, "\n\n[MOMO Gemini Error " + upstream.status + "]: " + errMessage)) {
+      response.write(ev);
+    }
+    response.write(sseError(errMessage, "http_" + upstream.status));
+    response.write(completed(respId, payload.model, []));
+    return response.end();
+  }
   initSseResponse(response);
   const created = responseCreated(payload.model);
   response.write(created.data);
@@ -346,7 +599,23 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
 async function bridgeClaude(response, settings, payload, calls, fetchImpl, signal) {
   const { body, functions } = claudeRequest(payload, payload.model, calls);
   const upstream = await fetchImpl(settings.endpoint + "/v1/messages", { method: "POST", headers: { ...upstreamHeaders(settings), "anthropic-version": "2023-06-01" }, body: JSON.stringify(body), signal });
-  if (!upstream.ok) throw new Error(`Claude upstream returned ${upstream.status}: ${(await upstream.text()).slice(0, 500)}`);
+  if (!upstream.ok) {
+    const errText = await upstream.text();
+    let errMessage = errText;
+    try {
+      const parsed = JSON.parse(errText);
+      errMessage = parsed.error?.message || parsed.message || errText;
+    } catch {}
+    initSseResponse(response);
+    const respId = "resp_err_" + randomUUID();
+    response.write(responseCreated(payload.model, respId).data);
+    for (const ev of textEvents(respId, 0, "\n\n[MOMO Claude Error " + upstream.status + "]: " + errMessage)) {
+      response.write(ev);
+    }
+    response.write(sseError(errMessage, "http_" + upstream.status));
+    response.write(completed(respId, payload.model, []));
+    return response.end();
+  }
   initSseResponse(response);
   const created = responseCreated(payload.model);
   response.write(created.data);
@@ -375,7 +644,14 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
       const tool = mapped.kind === "custom"
         ? customToolEvents(created.responseId, index++, { callId: block.id, name: mapped.originalName, input: customInput(argumentsValue) })
         : functionEvents(created.responseId, index++, { callId: block.id, name: mapped.originalName, arguments: argumentsValue });
-      calls.set(tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: argumentsValue, claudeMessages: body.messages });
+      calls.set(tool.callId, {
+        name: mapped.name,
+        originalName: mapped.originalName,
+        kind: mapped.kind,
+        arguments: argumentsValue,
+        claudeMessages: body.messages,
+        toolUseBlock: { type: "tool_use", id: block.id, name: block.name, input: argumentsValue },
+      });
       for (const ev of tool.events) response.write(ev);
       output.push(mapped.kind === "custom"
         ? { type: "custom_tool_call", call_id: tool.callId, name: mapped.originalName, input: customInput(argumentsValue) }
@@ -400,7 +676,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     try {
       if (request.method === "GET" && request.url === "/healthz") {
         logRequest({ method: "GET", url: "/healthz", status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
-        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.6.0", host: settings.host, port: settings.port });
+        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.6.4", host: settings.host, port: settings.port });
       }
       if (!authorized(request, settings)) {
         finalStatus = 401;
@@ -439,7 +715,17 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     } catch (error) {
       if (abortController.signal.aborted) return;
       logRequest({ method: request.method, url: request.url, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
-      if (request.url === "/v1/responses") return response.writeHead(200, { "content-type": "text/event-stream" }).end(sseError(error.message));
+      if (request.url === "/v1/responses") {
+        if (!response.headersSent) initSseResponse(response);
+        const respId = "resp_err_" + randomUUID();
+        response.write(responseCreated(requestedModel || "unknown", respId).data);
+        for (const ev of textEvents(respId, 0, "\n\n[MOMO Proxy Error]: " + error.message)) {
+          response.write(ev);
+        }
+        response.write(sseError(error.message));
+        response.write(completed(respId, requestedModel || "unknown", []));
+        return response.end();
+      }
       return json(response, 502, { error: { message: error.message, type: "server_error" } });
     }
   });
