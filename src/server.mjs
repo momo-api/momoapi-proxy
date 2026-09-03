@@ -517,8 +517,28 @@ export function normalizeResponsesPayload(payload) {
 
   normalized.input = cleanInput;
 
-  if (Array.isArray(payload.tools) && payload.tools.length > 0) {
-    normalized.tools = payload.tools;
+  const allPromotedTools = [];
+  if (Array.isArray(payload.tools)) {
+    allPromotedTools.push(...payload.tools);
+  }
+  if (Array.isArray(cleanInput)) {
+    for (const item of cleanInput) {
+      if (item && item.type === "additional_tools" && Array.isArray(item.tools)) {
+        for (const t of item.tools) {
+          if (t && !allPromotedTools.some((existing) => (existing.name || existing.function?.name) === (t.name || t.function?.name))) {
+            allPromotedTools.push(t);
+          }
+        }
+      }
+    }
+  }
+  if (allPromotedTools.length > 0) {
+    normalized.tools = allPromotedTools.map((t) => ({
+      type: "function",
+      name: t.name || t.function?.name,
+      description: t.description || t.function?.description || "Codex tool",
+      parameters: t.parameters || t.function?.parameters || { type: "object", properties: {} },
+    }));
   } else {
     const functions = extractFunctions(payload);
     if (functions.length) {

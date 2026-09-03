@@ -58,6 +58,27 @@ async function main() {
       console.log("MOMO API Proxy started successfully! Listening on http://127.0.0.1:" + port + "/v1 (Taskbar Tray active)");
       console.log("Run 'momoapi models' to view models, or 'momoapi stop' to stop.");
     } else {
+      if (process.platform === "win32") {
+        const { spawn, execSync } = await import("node:child_process");
+        const { dirname, join } = await import("node:path");
+        const { fileURLToPath } = await import("node:url");
+        const binFile = fileURLToPath(import.meta.url);
+        const scriptDir = dirname(binFile);
+        const trayScript = join(scriptDir, "tray.ps1");
+        let isTrayRunning = false;
+        try {
+          const out = execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { \$_ .CommandLine -like '*tray.ps1*' } | Select-Object -ExpandProperty ProcessId"`, { encoding: "utf8" });
+          if (out && out.trim()) isTrayRunning = true;
+        } catch {}
+        if (!isTrayRunning) {
+          const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          });
+          tray.unref();
+        }
+      }
       console.log("MOMO API Proxy is currently running at http://127.0.0.1:" + port + "/v1");
       const catalog = readCatalog();
       console.log("Models synced: " + (catalog?.models?.length || 0) + " (Endpoint: " + (settings.endpoint || "https://momoapi.us") + ")");
