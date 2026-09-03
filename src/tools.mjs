@@ -42,15 +42,71 @@ export function extractFunctions(request) {
       for (const child of asArray(tool.tools)) visit(child, tool.namespace || tool.name || namespace);
       return;
     }
+    if (tool.type === "additional_tools") {
+      for (const child of asArray(tool.tools)) visit(child, namespace);
+      return;
+    }
     if (tool.type === "function" || tool.function?.name || tool.name) {
       const converted = toFunction(tool, namespace);
       if (converted) result.push(converted);
     }
   };
-  for (const tool of [...asArray(request.tools), ...asArray(request.additional_tools)]) visit(tool);
+
+  const allTools = [
+    ...asArray(request?.tools),
+    ...asArray(request?.additional_tools),
+  ];
+
+  if (Array.isArray(request?.input)) {
+    for (const item of request.input) {
+      if (item && typeof item === "object") {
+        if (item.type === "additional_tools" && Array.isArray(item.tools)) {
+          allTools.push(...item.tools);
+        } else if (Array.isArray(item.tools)) {
+          allTools.push(...item.tools);
+        }
+      }
+    }
+  }
+
+  for (const tool of allTools) visit(tool);
   return [...new Map(result.map((tool) => [tool.name, tool])).values()];
 }
 
 export function restoreToolName(name, functions) {
   return functions.find((tool) => tool.name === name) || { name, originalName: name, namespace: null };
+}
+
+export function parseDsmlCalls(text) {
+  if (!text || typeof text !== "string" || !text.includes("<")) return [];
+  const calls = [];
+  const clean = text
+    .replace(/<[\|\uFF5C]{2}DSML[\|\uFF5C]{2}/g, "<")
+    .replace(/<\/[\|\uFF5C]{2}DSML[\|\uFF5C]{2}/g, "</");
+
+  const invokeRegex = /<invoke\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/invoke>/gi;
+  let match;
+  while ((match = invokeRegex.exec(clean)) !== null) {
+    const name = match[1];
+    const body = match[2] || "";
+    const params = {};
+    const paramRegex = /<parameter\s+name=["']([^"']+)["'][^>]*>([\s\S]*?)<\/parameter>/gi;
+    let paramMatch;
+    while ((paramMatch = paramRegex.exec(body)) !== null) {
+      const pName = paramMatch[1];
+      const pVal = paramMatch[2] || "";
+      params[pName] = pVal.trim();
+    }
+    calls.push({ name, arguments: params });
+  }
+  return calls;
+}
+
+export function stripDsmlMarkup(text) {
+  if (!text || typeof text !== "string" || !text.includes("<")) return text;
+  return text
+    .replace(/<[\|\uFF5C]{2}DSML[\|\uFF5C]{2}[^>]*>[\s\S]*?<\/[\|\uFF5C]{2}DSML[\|\uFF5C]{2}[^>]*>/gi, "")
+    .replace(/<tool_calls\b[^>]*>[\s\S]*?<\/tool_calls>/gi, "")
+    .replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke>/gi, "")
+    .replace(/<parameter\b[^>]*>[\s\S]*?<\/parameter>/gi, "");
 }

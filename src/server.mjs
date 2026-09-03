@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { extractFunctions, restoreToolName } from "./tools.mjs";
+import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
 import { completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
 
@@ -493,15 +493,15 @@ export function normalizeResponsesPayload(payload) {
 
   normalized.input = cleanInput;
 
-  const functions = extractFunctions(payload);
-  if (functions.length && (!normalized.tools || !normalized.tools.length)) {
-    normalized.tools = functions.map(({ name, description, parameters }) => ({
-      type: "function",
-      name,
-      description,
-      parameters,
-    }));
-  }
+ const functions = extractFunctions(payload);
+  if (functions.length) {
+   normalized.tools = functions.map(({ name, description, parameters }) => ({
+     type: "function",
+     name,
+     description,
+     parameters,
+   }));
+ }
 
   const rawEffort = normalized.reasoning_effort || normalized.model_reasoning_effort || normalized.reasoning?.effort;
   if (rawEffort) {
@@ -531,13 +531,86 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
       response.write(ev);
     }
     response.write(sseError(errMessage, "http_" + upstream.status));
-    response.write(completed(respId, cleanPayload.model, []));
-    response.end();
-    return;
+   response.write(completed(respId, cleanPayload.model, []));
+   response.end();
+   return;
+ }
+ initSseResponse(response);
+ if (!upstream.body) return response.end();
+
+ const functions = extractFunctions(payload);
+ let hasDsml = false;
+ let fullAccumulatedText = "";
+ let currentResponseId = "resp_" + randomUUID();
+ let outputIndex = 0;
+  let buffer = "";
+
+  for await (const chunk of upstream.body) {
+    const textChunk = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    buffer += textChunk;
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() || "";
+
+    for (const block of blocks) {
+      if (!block.trim()) continue;
+      const lines = block.split("\n");
+      const dataLine = lines.find((l) => l.trim().startsWith("data:"));
+      let json = null;
+      if (dataLine) {
+        const jsonStr = dataLine.trim().slice(5).trim();
+        if (jsonStr && jsonStr !== "[DONE]") {
+          try { json = JSON.parse(jsonStr); } catch {}
+        }
+      }
+
+      if (json) {
+        if (json.type === "response.created" && json.response?.id) {
+          currentResponseId = json.response.id;
+        }
+        if (json.type === "response.output_text.delta" && typeof json.delta === "string") {
+          fullAccumulatedText += json.delta;
+          if (fullAccumulatedText.includes("<｜｜DSML｜｜") || fullAccumulatedText.includes("<||DSML||") || fullAccumulatedText.includes("<tool_calls>") || fullAccumulatedText.includes("<invoke ")) {
+            hasDsml = true;
+            continue;
+          }
+        }
+        if (json.type === "response.completed" && hasDsml) {
+          const dsmlCalls = parseDsmlCalls(fullAccumulatedText);
+          const cleanText = stripDsmlMarkup(fullAccumulatedText).trim();
+          const outputItems = [];
+
+          if (cleanText) {
+            for (const ev of textEvents(currentResponseId, outputIndex++, cleanText)) {
+              response.write(ev);
+            }
+            outputItems.push({ type: "message", role: "assistant", content: [{ type: "output_text", text: cleanText }] });
+          }
+
+          for (const call of dsmlCalls) {
+            const mapped = restoreToolName(call.name, functions);
+            const tool = mapped.kind === "custom"
+              ? customToolEvents(currentResponseId, outputIndex++, { name: mapped.originalName, input: customInput(call.arguments) })
+              : functionEvents(currentResponseId, outputIndex++, { name: mapped.originalName, arguments: call.arguments || {} });
+            for (const ev of tool.events) response.write(ev);
+            outputItems.push(mapped.kind === "custom"
+              ? { type: "custom_tool_call", call_id: tool.callId, name: mapped.originalName, input: customInput(call.arguments) }
+              : { type: "function_call", call_id: tool.callId, name: mapped.originalName, arguments: JSON.stringify(call.arguments || {}) });
+          }
+
+          response.write(completed(currentResponseId, cleanPayload.model, outputItems));
+          response.end();
+          return;
+        }
+      }
+
+      if (!hasDsml) {
+        response.write(block + "\n\n");
+      }
+    }
   }
-  initSseResponse(response);
-  if (!upstream.body) return response.end();
-  for await (const chunk of upstream.body) response.write(chunk);
+  if (buffer.trim() && !hasDsml) {
+    response.write(buffer);
+  }
   response.end();
 }
 

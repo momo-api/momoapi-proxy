@@ -281,3 +281,40 @@ test("auto-sync timer schedules periodic catalog refreshes", async () => {
     autoSync.stop();
   }
 });
+
+test("intercepts leaked DSML tool calls from text stream and emits structured function_call", async () => {
+  const fakeFetch = async () => {
+    const dsmlText = 'Opening canvas\n<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name="read_file">\n<｜｜DSML｜｜parameter name="file_path" string="true">/path/to/skill.md</｜｜DSML｜｜parameter>\n</｜｜DSML｜｜invoke>\n</｜｜DSML｜｜tool_calls>';
+    const sse = [
+      { type: "response.created", response: { id: "resp_dsml_1", object: "response", status: "in_progress", model: "gpt-5.6-sol", output: [] } },
+      { type: "response.output_text.delta", delta: dsmlText },
+      { type: "response.completed", response: { id: "resp_dsml_1", object: "response", status: "completed", model: "gpt-5.6-sol", output: [] } },
+    ].map((ev) => "event: " + ev.type + "\ndata: " + JSON.stringify(ev) + "\n\n").join("");
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "gpt-5.6-sol",
+        input: [
+          {
+            type: "additional_tools",
+            tools: [{ type: "function", name: "read_file", parameters: { type: "object" } }]
+          },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "Open canvas" }] }
+        ]
+      }),
+    });
+    const body = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(body, /response\.output_item\.added/);
+    assert.match(body, /read_file/);
+    assert.ok(body.includes("path/to/skill.md"));
+    assert.match(body, /response\.completed/);
+    assert.ok(!body.includes("<｜｜DSML｜｜"));
+  });
+});
