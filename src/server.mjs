@@ -9,9 +9,9 @@ const CLAUDE_PREFIX = /^claude-/;
 const ALLOWED_CONTENT_TYPES = new Set(["input_text", "output_text", "input_image", "input_file"]);
 const KNOWN_METADATA_TYPES = new Set([
   "session_meta", "event_msg", "task_started", "world_state", "turn_context",
-  "item_completed", "reasoning", "token_count", "web_search_call", "task_complete",
+  "item_completed", "token_count", "web_search_call", "task_complete",
   "thread_settings_applied", "compacted", "turn_aborted", "inter_agent_communication_metadata",
-  "agent_message", "additional_tools"
+  "agent_message"
 ]);
 
 const GEMINI_REASONING_MAP = {
@@ -404,6 +404,25 @@ export function normalizeResponsesPayload(payload) {
       continue;
     }
     if (typeof item !== "object") continue;
+
+    if (item.type === "additional_tools") {
+      cleanInput.push({
+        type: "additional_tools",
+        tools: Array.isArray(item.tools) ? item.tools : [],
+      });
+      continue;
+    }
+
+    if (item.type === "reasoning") {
+      cleanInput.push({
+        type: "reasoning",
+        ...(item.id ? { id: item.id } : {}),
+        summary: Array.isArray(item.summary) ? item.summary : [],
+        content: [],
+      });
+      continue;
+    }
+
     if (item.type && KNOWN_METADATA_TYPES.has(item.type)) continue;
 
     if (item.type === "input_text") {
@@ -493,15 +512,19 @@ export function normalizeResponsesPayload(payload) {
 
   normalized.input = cleanInput;
 
- const functions = extractFunctions(payload);
-  if (functions.length) {
-   normalized.tools = functions.map(({ name, description, parameters }) => ({
-     type: "function",
-     name,
-     description,
-     parameters,
-   }));
- }
+  if (Array.isArray(payload.tools) && payload.tools.length > 0) {
+    normalized.tools = payload.tools;
+  } else {
+    const functions = extractFunctions(payload);
+    if (functions.length) {
+      normalized.tools = functions.map(({ name, description, parameters }) => ({
+        type: "function",
+        name,
+        description,
+        parameters,
+      }));
+    }
+  }
 
   const rawEffort = normalized.reasoning_effort || normalized.model_reasoning_effort || normalized.reasoning?.effort;
   if (rawEffort) {

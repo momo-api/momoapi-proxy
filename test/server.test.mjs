@@ -207,15 +207,18 @@ test("normalizes complex multi-turn history stripping proprietary thought blocks
         ],
       }),
     });
-    assert.equal(response.status, 200);
+  assert.equal(response.status, 200);
   });
 
-  assert.equal(capturedBody.input.length, 8);
-  const assistantMsg = capturedBody.input[1];
+  assert.equal(capturedBody.input.length, 9);
+  const reasoningItem = capturedBody.input[1];
+  assert.equal(reasoningItem.type, "reasoning");
+  assert.deepEqual(reasoningItem.content, []);
+  const assistantMsg = capturedBody.input[2];
   assert.equal(assistantMsg.role, "assistant");
   assert.deepEqual(assistantMsg.content, [{ type: "output_text", text: "Here is the code." }]);
-  assert.equal(capturedBody.input[2].arguments, JSON.stringify({ cmd: "ls" }));
-  assert.equal(capturedBody.input[4].input, JSON.stringify({ file: "main.py" }));
+  assert.equal(capturedBody.input[3].arguments, JSON.stringify({ cmd: "ls" }));
+  assert.equal(capturedBody.input[5].input, JSON.stringify({ file: "main.py" }));
   assert.deepEqual(capturedBody.reasoning, { effort: "xhigh" });
 });
 
@@ -344,4 +347,36 @@ test("bridges streamed Claude text deltas into a single output message item", as
     assert.match(body, /response\.output_text\.done/);
     assert.match(body, /response\.completed/);
   });
+});
+
+test("preserves additional_tools in input for native Responses models without stripping", async () => {
+  let capturedBody;
+  const fakeFetch = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "gpt-5.6-sol",
+        input: [
+          {
+            type: "additional_tools",
+            tools: [
+              { type: "function", name: "canvas_open", description: "Open infinite canvas", parameters: { type: "object" } }
+            ]
+          },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "@Codex-Canvas open canvas" }] }
+        ],
+      }),
+    });
+    assert.equal(response.status, 200);
+  });
+
+  assert.equal(capturedBody.input[0].type, "additional_tools");
+  assert.equal(capturedBody.input[0].tools[0].name, "canvas_open");
+  assert.equal(capturedBody.tools[0].name, "canvas_open");
 });
