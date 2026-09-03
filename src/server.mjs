@@ -400,7 +400,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     try {
       if (request.method === "GET" && request.url === "/healthz") {
         logRequest({ method: "GET", url: "/healthz", status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
-        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.5.9", host: settings.host, port: settings.port });
+        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.6.0", host: settings.host, port: settings.port });
       }
       if (!authorized(request, settings)) {
         finalStatus = 401;

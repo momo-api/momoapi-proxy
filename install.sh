@@ -30,16 +30,33 @@ INSTALL_DIR="$HOME/.momo-codex-bridge/app"
 rm -rf "$INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
   
-  echo "==> [momo-codex-bridge] Downloading latest release from GitHub..."
-  TGZ_URL="https://github.com/momo-api/momo-codex-bridge/releases/download/v0.5.9/momo-api-codex-bridge-0.5.9.tgz"
+  echo "==> [momo-codex-bridge] Downloading latest release..."
+  URLS=(
+    "${ENDPOINT%/}/install/packages/momo-api-codex-bridge-latest.tgz"
+    "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz"
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.0/momo-api-codex-bridge-0.6.0.tgz"
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.0/momo-api-codex-bridge-0.6.0.tgz"
+  )
   
-  if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$TGZ_URL" | tar -xz -C "$INSTALL_DIR" --strip-components=1 || git clone https://github.com/momo-api/momo-codex-bridge.git "$INSTALL_DIR"
-elif command -v wget >/dev/null 2>&1; then
-  wget -qO- "$TGZ_URL" | tar -xz -C "$INSTALL_DIR" --strip-components=1 || git clone https://github.com/momo-api/momo-codex-bridge.git "$INSTALL_DIR"
-else
-  git clone https://github.com/momo-api/momo-codex-bridge.git "$INSTALL_DIR"
-fi
+  DOWNLOADED=0
+  for url in "${URLS[@]}"; do
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsSL --connect-timeout 10 "$url" | tar -xz -C "$INSTALL_DIR" --strip-components=1 2>/dev/null; then
+        DOWNLOADED=1
+        break
+      fi
+    elif command -v wget >/dev/null 2>&1; then
+      if wget -qO- --timeout=10 "$url" | tar -xz -C "$INSTALL_DIR" --strip-components=1 2>/dev/null; then
+        DOWNLOADED=1
+        break
+      fi
+    fi
+  done
+
+  if [ "$DOWNLOADED" -eq 0 ]; then
+    echo "==> [momo-codex-bridge] Direct download failed, falling back to git clone..."
+    git clone https://github.com/momo-api/momo-codex-bridge.git "$INSTALL_DIR"
+  fi
 
 BRIDGE_BIN="$INSTALL_DIR/bin/momo-codex-bridge.mjs"
 chmod +x "$BRIDGE_BIN"

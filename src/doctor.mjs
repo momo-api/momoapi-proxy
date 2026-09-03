@@ -56,10 +56,10 @@ export async function runDoctor({ env = process.env, fetchImpl = fetch } = {}) {
 
   const homeCheck = checkCodexHome(env);
   results.checks.codexHome = {
-    ok: !homeCheck.mismatch,
+    ok: !homeCheck.isOrca,
     ...homeCheck,
   };
-  if (homeCheck.mismatch) results.ok = false;
+  if (homeCheck.isOrca) results.ok = false;
 
   const configCheck = checkCodexConfig(env);
   results.checks.codexConfig = {

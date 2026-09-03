@@ -6,6 +6,7 @@ import { readCatalog } from "../src/catalog.mjs";
 import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogs } from "../src/logger.mjs";
+import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
 
 const [command = "help", ...args] = process.argv.slice(2);
 const value = (name) => {
@@ -167,11 +168,26 @@ async function main() {
 } else if (command === "rollback") {
     const restored = rollback();
     console.log("Restored backup files:", restored);
+  } else if (command === "update" || command === "upgrade") {
+    const settings = resolveSettings();
+    const force = hasFlag("--force");
+    console.log("Checking for MOMO Codex Bridge updates (current: v" + getCurrentVersion() + ")...");
+    const res = await updateSelf({ endpoint: settings.endpoint, force });
+    if (res.updated) {
+      console.log(res.message);
+      console.log("Syncing model catalogs...");
+      try { await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint, desktopAliases: settings.desktopAliases }); } catch {}
+      console.log("Update completed. Please restart 'momo-codex-bridge serve' if running.");
+    } else {
+      console.log(res.message);
+    }
+  } else if (command === "version" || command === "-v" || command === "--version") {
+    console.log("momo-codex-bridge v" + getCurrentVersion());
   } else if (command === "uninstall") {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO Codex Bridge - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momo-codex-bridge install --api-key <MOMO_KEY> [--endpoint URL] [--port PORT]\n  momo-codex-bridge serve\n  momo-codex-bridge status\n  momo-codex-bridge models\n  momo-codex-bridge sync\n  momo-codex-bridge doctor\n  momo-codex-bridge logs [-n 50]\n  momo-codex-bridge test <model>\n  momo-codex-bridge rollback\n  momo-codex-bridge uninstall [--remove-key]\n");
+    console.log("MOMO Codex Bridge - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momo-codex-bridge install --api-key <MOMO_KEY> [--endpoint URL] [--port PORT]\n  momo-codex-bridge serve\n  momo-codex-bridge status\n  momo-codex-bridge models\n  momo-codex-bridge sync\n  momo-codex-bridge update [--force]\n  momo-codex-bridge doctor\n  momo-codex-bridge logs [-n 50]\n  momo-codex-bridge test <model>\n  momo-codex-bridge rollback\n  momo-codex-bridge uninstall [--remove-key]\n");
   }
 }
 

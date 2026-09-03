@@ -69,18 +69,34 @@ if (Test-Path $installDir) {
 }
   New-Item -ItemType Directory -Path $installDir -Force | Out-Null
   
-  Write-Step "Downloading latest release package from GitHub..."
-  $tgzUrl = "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.5.9/momo-api-codex-bridge-0.5.9.tgz"
+  Write-Step "Downloading latest release package..."
+  $urls = @(
+    "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.6.0.tgz",
+    "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.0/momo-api-codex-bridge-0.6.0.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.0/momo-api-codex-bridge-0.6.0.tgz"
+  )
   $tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
 
-try {
-  Invoke-WebRequest -Uri $tgzUrl -OutFile $tgzPath -UseBasicParsing
-  tar -xzf $tgzPath -C $installDir --strip-components=1
-  Remove-Item $tgzPath -Force
-} catch {
-  Write-Step "Direct download failed, falling back to git clone..."
-  git clone https://github.com/momo-api/momo-codex-bridge.git $installDir
-}
+  $downloaded = $false
+  foreach ($url in $urls) {
+    try {
+      Invoke-WebRequest -Uri $url -OutFile $tgzPath -UseBasicParsing -TimeoutSec 15
+      if ((Test-Path $tgzPath) -and (Get-Item $tgzPath).Length -gt 1000) {
+        $downloaded = $true
+        break
+      }
+    } catch {}
+  }
+
+  if ($downloaded) {
+    tar -xzf $tgzPath -C $installDir --strip-components=1
+    Remove-Item $tgzPath -Force -ErrorAction SilentlyContinue
+  } else {
+    Write-Step "Direct download failed, falling back to git clone..."
+    git clone https://github.com/momo-api/momo-codex-bridge.git $installDir
+  }
 
 # 4. Generate Windows CLI wrappers in bin
 $binDir = [System.IO.Path]::Combine($installDir, "bin")

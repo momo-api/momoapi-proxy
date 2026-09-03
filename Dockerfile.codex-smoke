@@ -5,6 +5,5 @@ COPY bin ./bin
 COPY src ./src
 COPY test ./test
 COPY scripts ./scripts
-RUN npm install --global @openai/codex@0.149.0 \
-    && node --test
-CMD ["node", "scripts/codex-cli-smoke.mjs", "--claude"]
+RUN npm install --global @openai/codex@0.149.0 && npm test
+CMD ["node", "scripts/test-all-features-container.mjs"]
