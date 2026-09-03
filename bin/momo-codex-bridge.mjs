@@ -165,7 +165,22 @@ async function main() {
     } else {
       console.log("System Tray Companion is currently supported on Windows.");
     }
-} else if (command === "rollback") {
+  } else if (command === "migrate-history" || command === "history") {
+    const { migrateHistory } = await import("../src/history.mjs");
+    const { codexHome } = await import("../src/catalog.mjs");
+    const { join } = await import("node:path");
+    const dbPath = join(codexHome(), "state_5.sqlite");
+    console.log("Migrating past session history in " + dbPath + " to 'momoapi-proxy'...");
+    const res = await migrateHistory({ dbPath, targetProvider: "momoapi-proxy" });
+    if (!res.dbFound) {
+      console.log("No Codex state_5.sqlite database found (no previous sessions).");
+    } else if (res.error) {
+      console.error("Migration error:", res.error);
+    } else {
+      console.log("Successfully migrated " + res.migrated + " session(s) to 'momoapi-proxy' (method: " + res.method + ")!");
+      console.log("Your previous conversation histories are now unified and preserved under MOMO API Proxy.");
+    }
+  } else if (command === "rollback") {
     const restored = rollback();
     console.log("Restored backup files:", restored);
   } else if (command === "update" || command === "upgrade") {
@@ -187,7 +202,7 @@ async function main() {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO Codex Bridge - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momo-codex-bridge install --api-key <MOMO_KEY> [--endpoint URL] [--port PORT]\n  momo-codex-bridge serve\n  momo-codex-bridge status\n  momo-codex-bridge models\n  momo-codex-bridge sync\n  momo-codex-bridge update [--force]\n  momo-codex-bridge doctor\n  momo-codex-bridge logs [-n 50]\n  momo-codex-bridge test <model>\n  momo-codex-bridge rollback\n  momo-codex-bridge uninstall [--remove-key]\n");
+    console.log("MOMO Codex Bridge - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momo-codex-bridge install --api-key <MOMO_KEY> [--endpoint URL] [--port PORT]\n  momo-codex-bridge serve\n  momo-codex-bridge status\n  momo-codex-bridge models\n  momo-codex-bridge sync\n  momo-codex-bridge update [--force]\n  momo-codex-bridge doctor\n  momo-codex-bridge migrate-history\n  momo-codex-bridge logs [-n 50]\n  momo-codex-bridge test <model>\n  momo-codex-bridge rollback\n  momo-codex-bridge uninstall [--remove-key]\n");
   }
 }
 

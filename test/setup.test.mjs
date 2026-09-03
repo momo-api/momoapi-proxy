@@ -72,6 +72,27 @@ test("doctor and uninstall lifecycle verification", async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("migrateHistory unifies previous session provider to targetProvider", async () => {
+  const { migrateHistory } = await import("../src/history.mjs");
+  const { DatabaseSync } = await import("node:sqlite");
+  const root = mkdtempSync(join(tmpdir(), "momo-history-"));
+  const dbPath = join(root, "state_5.sqlite");
+  const db = new DatabaseSync(dbPath);
+  db.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, title TEXT);");
+  db.exec("INSERT INTO threads (id, model_provider, title) VALUES ('t1', 'openai', 'Session 1'), ('t2', 'Codex', 'Session 2'), ('t3', 'momo-switch', 'Session 3');");
+  db.close();
+
+  const res = await migrateHistory({ dbPath, targetProvider: "momoapi-proxy", backup: false });
+  assert.equal(res.dbFound, true);
+  assert.equal(res.migrated, 3);
+
+  const dbAfter = new DatabaseSync(dbPath);
+  const rows = dbAfter.prepare("SELECT model_provider FROM threads").all();
+  assert.ok(rows.every((r) => r.model_provider === "momoapi-proxy"));
+  dbAfter.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other", async () => {
   const { buildCatalog } = await import("../src/catalog.mjs");
   const mockModels = [

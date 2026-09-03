@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { codexHome, catalogPath, writeCatalog } from "./catalog.mjs";
 import { newLocalToken, writeSettings, settingsPath } from "./config.mjs";
 import { installAutostart, uninstallAutostart } from "./autostart.mjs";
+import { migrateHistory } from "./history.mjs";
 
 const MARKER = "# MOMO_CODEX_SWITCH_MANAGED";
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free"]);
@@ -133,7 +134,14 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
     }
   }
 
-  return { catalog, settingsFile, models: models.length, defaultModel, config, auth, localToken, autostart: autostartResult };
+  let historyResult = null;
+  try {
+    historyResult = await migrateHistory({ dbPath: join(codexHome(env), "state_5.sqlite"), targetProvider: "momoapi-proxy" });
+  } catch (err) {
+    historyResult = { migrated: 0, error: err.message };
+  }
+
+  return { catalog, settingsFile, models: models.length, defaultModel, config, auth, localToken, autostart: autostartResult, historyMigrated: historyResult?.migrated || 0 };
 }
 
 export function rollback(env = process.env) {
@@ -144,6 +152,11 @@ export function rollback(env = process.env) {
     if (!existsSync(source)) continue;
     copyFileSync(source, file);
     restored.push(file);
+  }
+  const dbPath = join(codexHome(env), "state_5.sqlite");
+  const dbBak = dbPath + ".momo-history.bak";
+  if (existsSync(dbBak)) {
+    try { copyFileSync(dbBak, dbPath); restored.push(dbPath); } catch {}
   }
   return restored;
 }
