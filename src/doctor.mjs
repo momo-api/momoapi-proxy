@@ -28,7 +28,7 @@ export function checkCodexConfig(env = process.env) {
     return { exists: false, managed: false, hasResponsesWire: false, error: "config.toml not found at " + configFile };
   }
   const content = readFileSync(configFile, "utf8");
-  const managed = content.includes("MOMO_CODEX_SWITCH_MANAGED") || content.includes("[model_providers.momo-switch]");
+  const managed = content.includes("MOMO_CODEX_SWITCH_MANAGED") || content.includes("[model_providers.momo-switch]") || content.includes("[model_providers.momoapi-proxy]") || content.includes('[model_providers."momoapi proxy"]');
   const hasResponsesWire = /wire_api\s*=\s*"responses"/i.test(content);
   return {
     exists: true,

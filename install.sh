@@ -34,8 +34,8 @@ rm -rf "$INSTALL_DIR"
   URLS=(
     "${ENDPOINT%/}/install/packages/momo-api-codex-bridge-latest.tgz"
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz"
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.0/momo-api-codex-bridge-0.6.0.tgz"
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.0/momo-api-codex-bridge-0.6.0.tgz"
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.1/momo-api-codex-bridge-0.6.1.tgz"
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.1/momo-api-codex-bridge-0.6.1.tgz"
   )
   
   DOWNLOADED=0

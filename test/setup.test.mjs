@@ -19,6 +19,9 @@ test("setup writes a local provider configuration and rollback restores it", asy
     const written = readFileSync(result.config, "utf8");
     assert.equal(result.defaultModel, "gemini-3.7-flash");
     assert.match(written, /model = "gemini-3\.7-flash"/);
+    assert.match(written, /model_provider = "momoapi-proxy"/);
+    assert.match(written, /\[model_providers\.momoapi-proxy\]/);
+    assert.match(written, /name = "MOMO API Proxy"/);
     assert.match(written, /base_url = "http:\/\/127\.0\.0\.1:19999\/v1"/);
     assert.match(written, /requires_openai_auth = false/);
     assert.match(written, /MOMO_CODEX_SWITCH_MANAGED/);
@@ -67,4 +70,28 @@ test("doctor and uninstall lifecycle verification", async () => {
     assert.equal(uninstallResult.uninstalled, true);
     assert.equal(isAutostartInstalled(process.platform, env), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other", async () => {
+  const { buildCatalog } = await import("../src/catalog.mjs");
+  const mockModels = [
+    { id: "muse-spark-1.3-contributor-free", agent_status: "stable" },
+    { id: "deepseek-v4-pro", agent_status: "stable" },
+    { id: "gemini-3.7-flash", agent_status: "stable" },
+    { id: "claude-opus-4-6-thinking", agent_status: "stable" },
+    { id: "gpt-5.5", agent_status: "stable" },
+    { id: "codex-auto-review", agent_status: "stable" },
+    { id: "gpt-5.4", agent_status: "stable" },
+  ];
+  const catalog = buildCatalog(mockModels, { includeDesktopAliases: false });
+  const slugs = catalog.models.map((m) => m.slug);
+  assert.deepEqual(slugs, [
+    "codex-auto-review",
+    "gpt-5.4",
+    "gpt-5.5",
+    "claude-opus-4-6-thinking",
+    "gemini-3.7-flash",
+    "deepseek-v4-pro",
+    "muse-spark-1.3-contributor-free",
+  ]);
 });

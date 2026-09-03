@@ -168,42 +168,73 @@ function parseReasoningLevels(model, fallback) {
   };
 }
 
+export function getModelFamily(slug) {
+  if (!slug) return 4;
+  const s = slug.toLowerCase();
+  if (s.startsWith("gpt-") || s.startsWith("codex") || s.startsWith("o1") || s.startsWith("o3") || s.startsWith("o4") || s.startsWith("momo/gpt-")) {
+    return 0; // 0: gpt
+  }
+  if (s.startsWith("claude-") || s.startsWith("momo/claude-") || s.startsWith("anthropic/")) {
+    return 1; // 1: claude
+  }
+  if (s.startsWith("gemini-") || s.startsWith("momo/gemini-") || s.startsWith("google/")) {
+    return 2; // 2: gemini
+  }
+  if (s.startsWith("deepseek-") || s.startsWith("momo/deepseek-")) {
+    return 3; // 3: deepseek
+  }
+  return 4; // 4: other
+}
+
+export function sortModels(models) {
+  return [...models].sort((a, b) => {
+    const slugA = a.id || a.slug || "";
+    const slugB = b.id || b.slug || "";
+    const famA = getModelFamily(slugA);
+    const famB = getModelFamily(slugB);
+    if (famA !== famB) return famA - famB;
+    return slugA.localeCompare(slugB, undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
 export function buildCatalog(models, { includeDesktopAliases = true } = {}) {
   const template = getBundledTemplate();
-  const items = (models || [])
-    .filter((model) => model?.id && status(model) !== "hidden" && status(model) !== "image" && status(model) !== "video" && !isImageOrNonText(model))
-    .map((model, offset) => {
-      const reasoning = parseReasoningLevels(model, template);
-      return {
-        ...structuredClone(template),
-        slug: model.id,
-        display_name: model.display_name || displayName(model),
-        description: model.description || ("MOMO model (" + (model.provider || "gateway") + ")."),
-        visibility: status(model) !== "hidden" ? "list" : "hide",
-        priority: 200 + offset,
-        context_window: model.context_window || template.context_window || 272000,
-        max_context_window: model.max_context_window || template.max_context_window || 872000,
-        tool_mode: "code_mode_only",
-        supported_in_api: true,
-        availability_nux: null,
-        support_verbosity: true,
-        default_verbosity: "low",
-        default_reasoning_level: reasoning.default_reasoning_level,
-        supported_reasoning_levels: reasoning.supported_reasoning_levels,
-      };
-    });
+  const filtered = (models || [])
+    .filter((model) => model?.id && status(model) !== "hidden" && status(model) !== "image" && status(model) !== "video" && !isImageOrNonText(model));
+
+  const sorted = sortModels(filtered);
+  const items = sorted.map((model, index) => {
+    const reasoning = parseReasoningLevels(model, template);
+    return {
+      ...structuredClone(template),
+      slug: model.id,
+      display_name: model.display_name || displayName(model),
+      description: model.description || ("MOMO model (" + (model.provider || "gateway") + ")."),
+      visibility: status(model) !== "hidden" ? "list" : "hide",
+      priority: 100 + index * 10,
+      context_window: model.context_window || template.context_window || 272000,
+      max_context_window: model.max_context_window || template.max_context_window || 872000,
+      tool_mode: "code_mode_only",
+      supported_in_api: true,
+      availability_nux: null,
+      support_verbosity: true,
+      default_verbosity: "low",
+      default_reasoning_level: reasoning.default_reasoning_level,
+      supported_reasoning_levels: reasoning.supported_reasoning_levels,
+    };
+  });
 
   if (includeDesktopAliases) {
     const existingSlugs = new Set(items.map((i) => i.slug));
     for (const alias of DESKTOP_COMPATIBILITY_ALIASES) {
       if (!existingSlugs.has(alias.slug)) {
-        items.unshift({
+        items.push({
           ...structuredClone(template),
           slug: alias.slug,
           display_name: alias.display_name,
           description: alias.description,
           visibility: alias.visibility,
-          priority: 150,
+          priority: 120,
           tool_mode: "code_mode_only",
           supported_in_api: true,
           support_verbosity: true,
@@ -213,6 +244,17 @@ export function buildCatalog(models, { includeDesktopAliases = true } = {}) {
         });
       }
     }
+    // Re-sort to maintain gpt -> claude -> gemini -> deepseek -> other
+    items.sort((a, b) => {
+      const famA = getModelFamily(a.slug);
+      const famB = getModelFamily(b.slug);
+      if (famA !== famB) return famA - famB;
+      return a.slug.localeCompare(b.slug, undefined, { numeric: true, sensitivity: "base" });
+    });
+    // Reassign sequential priorities
+    items.forEach((item, idx) => {
+      item.priority = 100 + idx * 10;
+    });
   }
 
   if (!items.length) throw new Error("MOMO returned no Codex-compatible models.");

@@ -24,11 +24,19 @@ export function cleanConfigToml(content) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    if (trimmed.includes("MOMO_CODEX_SWITCH_MANAGED")) {
+    if (trimmed.includes("MOMO_CODEX_SWITCH_MANAGED") || trimmed.includes("MOMO_CODEX_BRIDGE_MANAGED")) {
       continue;
     }
     if (trimmed.startsWith("[")) {
-      if (trimmed === "[model_providers.momo-switch]" || trimmed === '[model_providers."momo-switch"]') {
+      if (
+        trimmed === "[model_providers.momo-switch]" ||
+        trimmed === '[model_providers."momo-switch"]' ||
+        trimmed === "[model_providers.momoapi-proxy]" ||
+        trimmed === '[model_providers."momoapi-proxy"]' ||
+        trimmed === '[model_providers."momoapi proxy"]' ||
+        trimmed === "[model_providers.momo]" ||
+        trimmed === '[model_providers."momo"]'
+      ) {
         inMomoSection = true;
         continue;
       } else {
@@ -54,13 +62,13 @@ export function cleanConfigToml(content) {
 
 function managedConfig(catalog, port, defaultModel) {
   return MARKER + "\n" +
-    'model_provider = "momo-switch"\n' +
+    'model_provider = "momoapi-proxy"\n' +
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +
     'model_catalog_json = "' + catalog.replace(/\\/g, "/") + '"\n' +
     'disable_response_storage = false\n\n' +
-    '[model_providers.momo-switch]\n' +
-    'name = "MOMO Codex Bridge"\n' +
+    '[model_providers.momoapi-proxy]\n' +
+    'name = "MOMO API Proxy"\n' +
     'base_url = "http://127.0.0.1:' + port + '/v1"\n' +
     'wire_api = "responses"\n' +
     'requires_openai_auth = false\n';
@@ -108,7 +116,7 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
   writeCatalog(models, env, { includeDesktopAliases: desktopAliases });
   const finalConfig = managedConfig(catalog, port, defaultModel) + (cleanedOther ? "\n\n" + cleanedOther + "\n" : "\n");
   writeFileSync(config, finalConfig);
-  writeFileSync(auth, JSON.stringify({ OPENAI_API_KEY: localToken, "momo-switch": localToken }, null, 2) + "\n");
+  writeFileSync(auth, JSON.stringify({ OPENAI_API_KEY: localToken, "momoapi-proxy": localToken, "momoapi proxy": localToken, "momo-switch": localToken }, null, 2) + "\n");
   const settingsFile = writeSettings(settings, env);
 
   let autostartResult = null;
