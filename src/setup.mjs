@@ -111,7 +111,12 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
   const previousRaw = existsSync(config) ? readFileSync(config, "utf8") : "";
   const cleanedOther = cleanConfigToml(previousRaw);
   const candidates = models.filter(isCodexCandidate);
-  const defaultModel = candidates.find((model) => (model.agent_status || model.agentStatus) === "stable")?.id || candidates[0]?.id;
+  const PREFERRED_DEFAULTS = ["gpt-5.6-sol", "gpt-5.5", "gpt-5.4", "claude-opus-4-6-thinking"];
+  const defaultModel =
+    candidates.find((m) => m.id === "gpt-5.6-sol")?.id ||
+    candidates.find((m) => PREFERRED_DEFAULTS.includes(m.id))?.id ||
+    candidates.find((m) => (m.agent_status || m.agentStatus) === "stable")?.id ||
+    candidates[0]?.id;
   if (!defaultModel) throw new Error("MOMO returned no Codex-compatible models.");
   writeCatalog(models, env, { includeDesktopAliases: desktopAliases });
   const finalConfig = managedConfig(catalog, port, defaultModel) + (cleanedOther ? "\n\n" + cleanedOther + "\n" : "\n");
