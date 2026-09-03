@@ -24,6 +24,16 @@ const GEMINI_REASONING_MAP = {
   ultra: "HIGH",
 };
 
+const CLAUDE_REASONING_BUDGETS = {
+  minimal: 1024,
+  low: 2048,
+  medium: 4048,
+  high: 8192,
+  xhigh: 16384,
+  max: 24576,
+  ultra: 32768,
+};
+
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -141,15 +151,20 @@ function claudeRequest(request, model, calls) {
       content: toolResults.map((item) => ({ type: "tool_result", tool_use_id: item.call_id, content: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "") })),
     });
   }
+  const rawEffort = String(request.reasoning_effort || request.model_reasoning_effort || request.reasoning?.effort || "").toLowerCase();
+  const isThinkingModel = model.includes("-thinking") || Boolean(rawEffort);
+  const budget = CLAUDE_REASONING_BUDGETS[rawEffort] || 4048;
+  const maxTokens = Math.max(8192, budget + 8192);
+
   return {
     body: {
       model,
-      max_tokens: 8192,
+      max_tokens: maxTokens,
       stream: true,
       ...(request.instructions ? { system: String(request.instructions) } : {}),
       messages: messages.length ? messages : [{ role: "user", content: "Continue." }],
       ...(functions.length ? { tools: functions.map(({ name, description, parameters }) => ({ name, description, input_schema: parameters })) } : {}),
-      ...(model.includes("-thinking") || Boolean(request.reasoning_effort || request.model_reasoning_effort || request.reasoning?.effort) ? { thinking: { type: "adaptive" } } : {}),
+      ...(isThinkingModel ? { thinking: { type: "enabled", budget_tokens: budget } } : {}),
     },
     functions,
   };
@@ -200,8 +215,63 @@ function initSseResponse(response) {
   });
 }
 
+function normalizeResponsesInput(input) {
+  if (!Array.isArray(input)) return [];
+  return input.map((item) => {
+    if (typeof item === "string") {
+      return {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: item }],
+      };
+    }
+    if (item && typeof item === "object") {
+      if (item.type === "input_text") {
+        return {
+          type: "message",
+          role: "user",
+          content: [item],
+        };
+      }
+      if (item.role && item.content && !item.type) {
+        return {
+          type: "message",
+          role: item.role,
+          content: typeof item.content === "string"
+            ? [{ type: "input_text", text: item.content }]
+            : item.content,
+        };
+      }
+      if (item.type === "message" && typeof item.content === "string") {
+        return {
+          ...item,
+          content: [{ type: "input_text", text: item.content }],
+        };
+      }
+    }
+    return item;
+  });
+}
+
+function normalizeResponsesPayload(payload) {
+  const normalized = { ...payload };
+  if (normalized.input) {
+    normalized.input = normalizeResponsesInput(normalized.input);
+  }
+  const rawEffort = normalized.reasoning_effort || normalized.model_reasoning_effort || normalized.reasoning?.effort;
+  if (rawEffort) {
+    let effort = String(rawEffort).toLowerCase();
+    if (effort === "ultra") effort = "xhigh";
+    normalized.reasoning = { effort };
+    delete normalized.reasoning_effort;
+    delete normalized.model_reasoning_effort;
+  }
+  return normalized;
+}
+
 async function forwardResponses(request, response, settings, payload, fetchImpl, signal) {
-  const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...payload, stream: true }), signal });
+  const cleanPayload = normalizeResponsesPayload(payload);
+  const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...cleanPayload, stream: true }), signal });
   if (!upstream.ok) {
     const errText = await upstream.text();
     response.writeHead(upstream.status, { "content-type": "application/json" });
@@ -310,7 +380,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     try {
       if (request.method === "GET" && request.url === "/healthz") {
         logRequest({ method: "GET", url: "/healthz", status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
-        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.4.0", host: settings.host, port: settings.port });
+        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.5.8", host: settings.host, port: settings.port });
       }
       if (!authorized(request, settings)) {
         finalStatus = 401;

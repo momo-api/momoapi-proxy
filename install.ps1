@@ -67,11 +67,11 @@ $installDir = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "app")
 if (Test-Path $installDir) {
   Remove-Item -Recurse -Force $installDir
 }
-New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-
-Write-Step "Downloading latest release package from GitHub..."
-$tgzUrl = "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.5.7/momo-api-codex-bridge-0.5.7.tgz"
-$tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
+  New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+  
+  Write-Step "Downloading latest release package from GitHub..."
+  $tgzUrl = "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.5.8/momo-api-codex-bridge-0.5.8.tgz"
+  $tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
 
 try {
   Invoke-WebRequest -Uri $tgzUrl -OutFile $tgzPath -UseBasicParsing

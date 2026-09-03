@@ -164,13 +164,63 @@ test("routes Desktop compatibility aliases to target upstream models and protoco
     await fetch(`${base}/v1/responses`, { method: "POST", headers, body: JSON.stringify({ model: "gpt-5.6-terra", input: [] }) });
     assert.equal(captured[1].url, "https://gateway.example/v1/messages");
     assert.equal(captured[1].body.model, "claude-opus-4-6-thinking");
-    assert.deepEqual(captured[1].body.thinking, { type: "adaptive" });
+    assert.deepEqual(captured[1].body.thinking, { type: "enabled", budget_tokens: 4048 });
 
     // 3. Luna -> Gemini 3.7 Flash (Gemini endpoint)
     await fetch(`${base}/v1/responses`, { method: "POST", headers, body: JSON.stringify({ model: "gpt-5.6-luna", reasoning_effort: "high", input: [] }) });
     assert.match(captured[2].url, /v1beta\/models\/gemini-3\.7-flash:streamGenerateContent/);
     assert.equal(captured[2].body.generationConfig.thinkingConfig.thinkingLevel, "HIGH");
   });
+});
+
+test("normalizes raw string inputs and ultra reasoning effort for Responses API", async () => {
+  let capturedBody;
+  const fakeFetch = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+    const response = await fetch(`${base}/v1/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "muse-spark-1.2-contributor-free",
+        input: ["hi"],
+        reasoning_effort: "ultra",
+      }),
+    });
+    assert.equal(response.status, 200);
+  });
+  assert.deepEqual(capturedBody.input, [{
+    type: "message",
+    role: "user",
+    content: [{ type: "input_text", text: "hi" }],
+  }]);
+  assert.deepEqual(capturedBody.reasoning, { effort: "xhigh" });
+  assert.equal(capturedBody.reasoning_effort, undefined);
+});
+
+test("calculates Claude thinking token budget dynamically from reasoning_effort", async () => {
+  let capturedBody;
+  const fakeFetch = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return new Response("event: message_start\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+    await fetch(`${base}/v1/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "claude-opus-4-6-thinking",
+        input: [{ role: "user", content: [{ type: "input_text", text: "solve this" }] }],
+        reasoning_effort: "high",
+      }),
+    });
+  });
+  assert.deepEqual(capturedBody.thinking, { type: "enabled", budget_tokens: 8192 });
+  assert.equal(capturedBody.max_tokens, 16384);
 });
 
 test("auto-sync timer schedules periodic catalog refreshes", async () => {
