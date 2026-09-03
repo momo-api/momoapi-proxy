@@ -31,7 +31,7 @@ rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 
 echo "==> [momo-codex-bridge] Downloading latest release from GitHub..."
-TGZ_URL="https://github.com/momo-api/momo-codex-bridge/releases/download/v0.5.6/momo-api-codex-bridge-0.5.6.tgz"
+TGZ_URL="https://github.com/momo-api/momo-codex-bridge/releases/download/v0.5.7/momo-api-codex-bridge-0.5.7.tgz"
 
 if command -v curl >/dev/null 2>&1; then
   curl -fsSL "$TGZ_URL" | tar -xz -C "$INSTALL_DIR" --strip-components=1 || git clone https://github.com/momo-api/momo-codex-bridge.git "$INSTALL_DIR"

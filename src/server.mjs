@@ -304,7 +304,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     const remoteIp = request.socket?.remoteAddress || "";
     let requestedModel = null;
     let finalStatus = 200;
-    request.on("close", () => {
+    response.on("close", () => {
       if (!response.writableEnded) abortController.abort();
     });
     try {
