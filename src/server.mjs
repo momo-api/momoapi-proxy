@@ -215,49 +215,69 @@ function initSseResponse(response) {
   });
 }
 
-function normalizeResponsesInput(input) {
-  if (!Array.isArray(input)) return [];
-  return input.map((item) => {
+function normalizeResponsesPayload(payload) {
+  const normalized = { ...payload };
+  const rawInput = Array.isArray(normalized.input) ? normalized.input : [];
+  const cleanInput = [];
+
+  for (const item of rawInput) {
+    if (item && typeof item === "object" && item.type === "additional_tools") {
+      continue;
+    }
     if (typeof item === "string") {
-      return {
+      cleanInput.push({
         type: "message",
         role: "user",
         content: [{ type: "input_text", text: item }],
-      };
+      });
+      continue;
     }
     if (item && typeof item === "object") {
       if (item.type === "input_text") {
-        return {
+        cleanInput.push({
           type: "message",
           role: "user",
           content: [item],
-        };
+        });
+        continue;
+      }
+      if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
+        cleanInput.push(item);
+        continue;
       }
       if (item.role && item.content && !item.type) {
-        return {
+        cleanInput.push({
           type: "message",
           role: item.role,
           content: typeof item.content === "string"
             ? [{ type: "input_text", text: item.content }]
             : item.content,
-        };
+        });
+        continue;
       }
       if (item.type === "message" && typeof item.content === "string") {
-        return {
+        cleanInput.push({
           ...item,
           content: [{ type: "input_text", text: item.content }],
-        };
+        });
+        continue;
       }
     }
-    return item;
-  });
-}
-
-function normalizeResponsesPayload(payload) {
-  const normalized = { ...payload };
-  if (normalized.input) {
-    normalized.input = normalizeResponsesInput(normalized.input);
+    cleanInput.push(item);
   }
+
+  normalized.input = cleanInput;
+
+  const functions = extractFunctions(payload);
+  if (functions.length && (!normalized.tools || !normalized.tools.length)) {
+    normalized.tools = functions.map(({ name, description, parameters }) => ({
+      type: "function",
+      name,
+      description,
+      parameters,
+    }));
+  }
+
   const rawEffort = normalized.reasoning_effort || normalized.model_reasoning_effort || normalized.reasoning?.effort;
   if (rawEffort) {
     let effort = String(rawEffort).toLowerCase();
@@ -380,7 +400,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     try {
       if (request.method === "GET" && request.url === "/healthz") {
         logRequest({ method: "GET", url: "/healthz", status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
-        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.5.8", host: settings.host, port: settings.port });
+        return json(response, 200, { ok: true, service: "momo-codex-bridge", version: "0.5.9", host: settings.host, port: settings.port });
       }
       if (!authorized(request, settings)) {
         finalStatus = 401;

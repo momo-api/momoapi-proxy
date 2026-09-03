@@ -40,17 +40,29 @@ async function runCodexPrompt(model, prompt) {
 }
 
 try {
-  console.log("[3/4] Testing live Responses model (deepseek-v4-pro)...");
+  console.log("[3/6] Testing live Muse model (muse-spark-1.2-contributor-free)...");
+  const out0 = await runCodexPrompt("muse-spark-1.2-contributor-free", "Reply with exactly: MOMO_MUSE_LIVE_OK");
+  console.log("  Output 0 snippet:", out0.slice(0, 150).replace(/\n/g, " "));
+  if (!out0.includes("MOMO_MUSE_LIVE_OK")) throw new Error("Muse response missing expected text");
+  console.log("  -> Muse Spark 1.2: PASS");
+
+  console.log("[4/6] Testing live Responses model (deepseek-v4-pro)...");
   const out1 = await runCodexPrompt("deepseek-v4-pro", "Reply with exactly: MOMO_DEEPSEEK_LIVE_OK");
   console.log("  Output 1 snippet:", out1.slice(0, 150).replace(/\n/g, " "));
   if (!out1.includes("MOMO_DEEPSEEK_LIVE_OK")) throw new Error("DeepSeek response missing expected text");
   console.log("  -> DeepSeek V4 Pro: PASS");
 
-  console.log("[4/4] Testing live Claude thinking model (claude-opus-4-6-thinking)...");
+  console.log("[5/6] Testing live Claude thinking model (claude-opus-4-6-thinking)...");
   const out2 = await runCodexPrompt("claude-opus-4-6-thinking", "Reply with exactly: MOMO_CLAUDE_LIVE_OK");
   console.log("  Output 2 snippet:", out2.slice(0, 150).replace(/\n/g, " "));
   if (!out2.includes("MOMO_CLAUDE_LIVE_OK")) throw new Error("Claude response missing expected text");
   console.log("  -> Claude Opus 4.6 Thinking: PASS");
+
+  console.log("[6/6] Testing live Desktop alias model (gpt-5.6-terra -> Claude)...");
+  const out3 = await runCodexPrompt("gpt-5.6-terra", "Reply with exactly: MOMO_TERRA_LIVE_OK");
+  console.log("  Output 3 snippet:", out3.slice(0, 150).replace(/\n/g, " "));
+  if (!out3.includes("MOMO_TERRA_LIVE_OK")) throw new Error("Terra response missing expected text");
+  console.log("  -> GPT-5.6 Terra: PASS");
 
   console.log("\n=======================================================");
   console.log("  ALL LIVE PODMAN CONTAINER SMOKE TESTS PASSED (100%)");
