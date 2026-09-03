@@ -4,6 +4,7 @@ import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } fr
 import {
   rewriteRoutedNamespaceToolsForUpstream,
   rewriteRoutedCustomToolsForUpstream,
+  rewriteRoutedToolSearchForUpstream,
   restoreAllRoutedCallsInJson,
   createRoutedCustomToolRestoreBlockRewrite,
 } from "./responses-compat.mjs";
@@ -401,6 +402,11 @@ export function normalizeResponsesPayload(payload) {
   const normalized = { ...payload };
   const rawInput = Array.isArray(normalized.input) ? normalized.input : [];
   const cleanInput = [];
+  const loadedToolSpecs = [];
+
+  if (Array.isArray(payload.tools)) {
+    loadedToolSpecs.push(...payload.tools);
+  }
 
   for (const item of rawInput) {
     if (!item) continue;
@@ -415,10 +421,10 @@ export function normalizeResponsesPayload(payload) {
     if (typeof item !== "object") continue;
 
     if (item.type === "additional_tools") {
-      cleanInput.push({
-        type: "additional_tools",
-        tools: Array.isArray(item.tools) ? item.tools : [],
-      });
+      if (Array.isArray(item.tools)) {
+        loadedToolSpecs.push(...item.tools);
+      }
+      cleanInput.push(item);
       continue;
     }
 
@@ -521,38 +527,73 @@ export function normalizeResponsesPayload(payload) {
 
   normalized.input = cleanInput;
 
-  const allPromotedTools = [];
-  if (Array.isArray(payload.tools)) {
-    allPromotedTools.push(...payload.tools);
-  }
-  if (Array.isArray(cleanInput)) {
-    for (const item of cleanInput) {
-      if (item && item.type === "additional_tools" && Array.isArray(item.tools)) {
-        for (const t of item.tools) {
-          if (t && !allPromotedTools.some((existing) => (existing.name || existing.function?.name) === (t.name || t.function?.name))) {
-            allPromotedTools.push(t);
-          }
-        }
-      }
-    }
-  }
-  if (allPromotedTools.length > 0) {
-    normalized.tools = allPromotedTools.map((t) => ({
-      type: "function",
-      name: t.name || t.function?.name,
-      description: t.description || t.function?.description || "Codex tool",
-      parameters: t.parameters || t.function?.parameters || { type: "object", properties: {} },
-    }));
-  } else {
-    const functions = extractFunctions(payload);
-    if (functions.length) {
-      normalized.tools = functions.map(({ name, description, parameters }) => ({
+  // Build tools conforming strictly to OpenCodex buildTools
+  if (loadedToolSpecs.length > 0) {
+    const builtTools = [];
+    const seenNames = new Set();
+
+    const pushFn = (t) => {
+      const name = t.name || t.function?.name;
+      if (!name || seenNames.has(name)) return;
+      seenNames.add(name);
+      builtTools.push({
         type: "function",
         name,
-        description,
-        parameters,
-      }));
+        description: t.description || t.function?.description || "",
+        parameters: t.parameters || t.function?.parameters || { type: "object", properties: {} },
+        ...(t.strict !== undefined ? { strict: t.strict } : {}),
+      });
+    };
+
+    const pushCustom = (t) => {
+      const name = t.name;
+      if (!name || seenNames.has(name)) return;
+      seenNames.add(name);
+      const inputDescription = name === "exec"
+        ? "JavaScript source for unified exec. Use await tools.exec_command(...) for shell commands and text(...) to return textual output; do not provide a bare shell command."
+        : (name === "apply_patch"
+          ? "Raw tool input. For apply_patch, begin exactly with `*** Begin Patch` (no trailing `***`), then use its standard patch envelope."
+          : "Raw freeform input for this tool.");
+      builtTools.push({
+        type: "function",
+        name,
+        description: t.description || "",
+        parameters: {
+          type: "object",
+          properties: {
+            input: {
+              type: "string",
+              description: inputDescription,
+            },
+          },
+          required: ["input"],
+        },
+      });
+    };
+
+    for (const t of loadedToolSpecs) {
+      if (!t || typeof t !== "object") continue;
+      if (t.type === "namespace" && Array.isArray(t.tools)) {
+        for (const inner of t.tools) {
+          if (!inner || typeof inner !== "object") continue;
+          if (inner.type === "custom") pushCustom(inner);
+          else pushFn(inner);
+        }
+        continue;
+      }
+      if (t.type === "custom") {
+        pushCustom(t);
+        continue;
+      }
+      pushFn(t);
     }
+    normalized.tools = builtTools;
+  } else {
+    delete normalized.tools;
+  }
+
+  if (normalized.tools && normalized.tools.length > 0) {
+    normalized.tool_choice = normalized.tool_choice || "auto";
   }
 
   const rawEffort = normalized.reasoning_effort || normalized.model_reasoning_effort || normalized.reasoning?.effort;
@@ -566,14 +607,20 @@ export function normalizeResponsesPayload(payload) {
   return normalized;
 }
 
-async function forwardResponses(request, response, settings, payload, fetchImpl, signal) {
-  // 1. Lower custom tools (exec, etc.) to standard functions
-  const { body: customBody, names: customNames } = rewriteRoutedCustomToolsForUpstream(payload);
-  // 2. Lower namespace tools (e.g. personal:codex-canvas) to flat functions
-  const { body: nsBody, aliases: nsAliases } = rewriteRoutedNamespaceToolsForUpstream(customBody);
-  // 3. Normalize schema for upstream OpenAI Responses endpoint
-  const cleanPayload = normalizeResponsesPayload(nsBody);
-  const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...cleanPayload, stream: true }), signal });
+async function bridgeChatCompletionsToResponses(response, settings, payload, fetchImpl, signal) {
+  const messages = buildClaudeMessages(payload.input || []);
+  const chatBody = {
+    model: payload.model,
+    messages,
+    stream: true,
+  };
+  const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
+    method: "POST",
+    headers: upstreamHeaders(settings),
+    body: JSON.stringify(chatBody),
+    signal,
+  });
+
   if (!upstream.ok) {
     const errText = await upstream.text();
     let errMessage = errText;
@@ -583,19 +630,47 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
     } catch {}
     initSseResponse(response);
     const respId = "resp_err_" + randomUUID();
-    response.write(responseCreated(cleanPayload.model, respId).data);
+    response.write(responseCreated(payload.model, respId).data);
     for (const ev of textEvents(respId, 0, "\n\n[MOMO API Error " + upstream.status + "]: " + errMessage)) {
       response.write(ev);
     }
     response.write(sseError(errMessage, "http_" + upstream.status));
-    response.write(completed(respId, cleanPayload.model, []));
-    response.end();
-    return;
+    response.write(completed(respId, payload.model, []));
+    return response.end();
+  }
+
+  initSseResponse(response);
+  const emitter = new ResponseStreamEmitter(response, payload.model);
+  emitter.start();
+
+  for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
+    const delta = data.choices?.[0]?.delta?.content;
+    if (delta) {
+      emitter.writeTextDelta(delta);
+    }
+  }
+  emitter.complete();
+}
+
+async function forwardResponses(request, response, settings, payload, fetchImpl, signal) {
+  // 1. Lower tool_search to standard function
+  const { body: searchBody, names: searchNames } = rewriteRoutedToolSearchForUpstream(payload);
+  // 2. Lower custom tools (exec, etc.) to standard functions
+  const { body: customBody, names: customNames } = rewriteRoutedCustomToolsForUpstream(searchBody);
+  // 3. Lower namespace tools (e.g. personal:codex-canvas) to flat functions
+  const { body: nsBody, aliases: nsAliases } = rewriteRoutedNamespaceToolsForUpstream(customBody);
+  // 4. Normalize schema for upstream OpenAI Responses endpoint
+  const cleanPayload = normalizeResponsesPayload(nsBody);
+  const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...cleanPayload, stream: true }), signal });
+  if (!upstream.ok) {
+    // Seamless fallback to /v1/chat/completions if upstream /v1/responses returns 400/404/500
+    return bridgeChatCompletionsToResponses(response, settings, cleanPayload, fetchImpl, signal);
   }
   initSseResponse(response);
   if (!upstream.body) return response.end();
 
-  const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(customNames);
+  const allCustomNames = new Set([...customNames, ...searchNames]);
+  const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames);
   const functions = extractFunctions(payload);
   let hasDsml = false;
   let fullAccumulatedText = "";
@@ -807,7 +882,7 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
   response.statusCode = upstream.status;
   for (const [key, val] of upstream.headers.entries()) {
     const lower = key.toLowerCase();
-    if (lower !== "content-length" && lower !== "transfer-encoding" && lower !== "connection") {
+    if (lower !== "content-length" && lower !== "content-encoding" && lower !== "transfer-encoding" && lower !== "connection") {
       response.setHeader(key, val);
     }
   }

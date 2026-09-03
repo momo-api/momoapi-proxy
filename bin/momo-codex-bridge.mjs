@@ -11,6 +11,7 @@ import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogs } from "../src/logger.mjs";
 import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
+import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
 
 function killWindowsProcessByPattern(pattern) {
   if (process.platform !== "win32") return;
@@ -188,6 +189,7 @@ async function main() {
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     console.log("Stopping MOMO Codex Bridge on port " + port + "...");
+    stopWindowsService();
     if (process.platform === "win32") {
       try {
         spawnSync("powershell.exe", [
@@ -196,18 +198,21 @@ async function main() {
           `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`,
         ], { stdio: "ignore" });
         killWindowsProcessByPattern("tray.ps1");
+        killWindowsProcessByPattern("momoapi-tray.exe");
       } catch {}
     } else {
       try {
         execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || fuser -k ${port}/tcp 2>/dev/null`, { stdio: "ignore" });
       } catch {}
     }
+    writeHeartbeat({ running: false, port });
     console.log("MOMO Codex Bridge stopped.");
   } else if (command === "restart") {
     let settings = null;
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     console.log("Restarting MOMO Codex Bridge...");
+    stopWindowsService();
     if (process.platform === "win32") {
       try {
         spawnSync("powershell.exe", [
@@ -216,6 +221,7 @@ async function main() {
           `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`,
         ], { stdio: "ignore" });
         killWindowsProcessByPattern("tray.ps1");
+        killWindowsProcessByPattern("momoapi-tray.exe");
       } catch {}
     } else {
       try {
@@ -231,17 +237,26 @@ async function main() {
     const settings = resolveSettings();
     const server = await listen(settings);
     console.log("MOMO Codex Bridge listening at http://" + settings.host + ":" + settings.port + "/v1");
-    
+    writeRuntimePort(settings.port, process.pid);
+    writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint });
+
     const autoSync = startAutoSync({
       settings,
       onSync: (err, res) => {
+        writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint, lastSyncTime: new Date().toISOString() });
         if (err) console.warn("[auto-sync] sync failed:", err.message);
         else if (res.changed) console.log("[auto-sync] catalog updated (" + res.count + " models).");
       },
     });
 
+    const heartbeatTimer = setInterval(() => {
+      writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint });
+    }, 5000);
+
     const stop = () => {
       console.log("\nStopping MOMO Codex Bridge...");
+      clearInterval(heartbeatTimer);
+      writeHeartbeat({ running: false, port: settings.port });
       autoSync.stop();
       server.close(() => process.exit(0));
     };

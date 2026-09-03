@@ -656,3 +656,119 @@ export function createRoutedCustomToolRestoreBlockRewrite(names) {
 
   return rewrite;
 }
+
+export const TOOL_SEARCH_FUNCTION_NAME = "tool_search";
+export const TOOL_SEARCH_DEFAULT_DESCRIPTION = "Search for additional tools to load for the next turn.";
+
+export function toolSearchDescription(tool) {
+  return isPlainObject(tool) && typeof tool.description === "string"
+    ? tool.description
+    : TOOL_SEARCH_DEFAULT_DESCRIPTION;
+}
+
+export function toolSearchParameters(tool) {
+  if (isPlainObject(tool) && isPlainObject(tool.parameters)) return tool.parameters;
+  return {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Search query for tools to load." },
+      limit: { type: "number", description: "Maximum number of tools to return." },
+    },
+    required: ["query"],
+  };
+}
+
+export function rewriteRoutedToolSearchForUpstream(body) {
+  const names = new Set();
+  if (!isPlainObject(body)) return { body, names };
+
+  const hasSearch = (tools) => Array.isArray(tools) && tools.some((t) => isPlainObject(t) && t.type === "tool_search");
+  const topLevelSearch = hasSearch(body.tools);
+  const inputItems = Array.isArray(body.input) ? body.input : [];
+  const additionalSearch = inputItems.some((item) => isPlainObject(item) && item.type === "additional_tools" && hasSearch(item.tools));
+  const historySearch = inputItems.some((item) => isPlainObject(item) && (item.type === "tool_search_call" || item.type === "tool_search_output"));
+
+  if (!topLevelSearch && !additionalSearch && !historySearch) return { body, names };
+
+  const wireName = TOOL_SEARCH_FUNCTION_NAME;
+  names.add(wireName);
+
+  const rewriteList = (tools) => {
+    if (!Array.isArray(tools)) return tools;
+    return tools.map((t) => {
+      if (!isPlainObject(t) || t.type !== "tool_search") return t;
+      const { execution, defer_loading, ...rest } = t;
+      return {
+        ...rest,
+        type: "function",
+        name: wireName,
+        description: toolSearchDescription(t),
+        parameters: toolSearchParameters(t),
+      };
+    });
+  };
+
+  let tools = rewriteList(body.tools);
+  let input = Array.isArray(body.input) ? body.input.map((item) => {
+    if (!isPlainObject(item)) return item;
+    if (item.type === "additional_tools" && Array.isArray(item.tools)) {
+      return { ...item, tools: rewriteList(item.tools) };
+    }
+    if (item.type === "tool_search_call") {
+      const { execution, arguments: args, id, ...rest } = item;
+      return {
+        ...rest,
+        type: "function_call",
+        name: wireName,
+        arguments: typeof args === "string" ? args : JSON.stringify(args || {}),
+      };
+    }
+    if (item.type === "tool_search_output") {
+      return {
+        type: "function_call_output",
+        call_id: item.call_id || "call_unknown",
+        output: typeof item.output === "string" ? item.output : JSON.stringify(item.tools || item.output || {}),
+      };
+    }
+    return item;
+  }) : body.input;
+
+  return {
+    body: {
+      ...body,
+      ...(tools !== body.tools ? { tools } : {}),
+      ...(input !== body.input ? { input } : {}),
+    },
+    names,
+  };
+}
+
+export function restoreRoutedToolSearchCalls(value, names) {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const restored = value.map((entry) => {
+      const res = restoreRoutedToolSearchCalls(entry, names);
+      changed ||= res.changed;
+      return res.value;
+    });
+    return changed ? { value: restored, changed: true } : { value, changed: false };
+  }
+  if (!isPlainObject(value)) return { value, changed: false };
+
+  let changed = false;
+  const restored = {};
+  for (const [k, v] of Object.entries(value)) {
+    const res = restoreRoutedToolSearchCalls(v, names);
+    restored[k] = res.value;
+    changed ||= res.changed;
+  }
+
+  if (value.type === "function_call" && typeof value.name === "string" && names.has(value.name)) {
+    restored.type = "tool_search_call";
+    restored.execution = "client";
+    try { restored.arguments = typeof value.arguments === "string" ? JSON.parse(value.arguments) : value.arguments; } catch { restored.arguments = {}; }
+    delete restored.name;
+    changed = true;
+  }
+  return changed ? { value: restored, changed: true } : { value, changed: false };
+}

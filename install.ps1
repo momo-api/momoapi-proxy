@@ -72,6 +72,9 @@ if (Test-Path $installDir) {
   Write-Step "Downloading latest release package..."
   $urls = @(
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.8.1.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.8.0.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.7.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.6.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.5.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.4.tgz",
@@ -79,12 +82,18 @@ if (Test-Path $installDir) {
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.2.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.1.tgz",
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.1/momo-api-codex-bridge-0.8.1.tgz",
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.0/momo-api-codex-bridge-0.8.0.tgz",
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.7/momo-api-codex-bridge-0.7.7.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.6/momo-api-codex-bridge-0.7.6.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.5/momo-api-codex-bridge-0.7.5.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.4/momo-api-codex-bridge-0.7.4.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.3/momo-api-codex-bridge-0.7.3.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.2/momo-api-codex-bridge-0.7.2.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.1/momo-api-codex-bridge-0.7.1.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.1/momo-api-codex-bridge-0.8.1.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.0/momo-api-codex-bridge-0.8.0.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.7/momo-api-codex-bridge-0.7.7.tgz",
     "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.6/momo-api-codex-bridge-0.7.6.tgz",
     "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.5/momo-api-codex-bridge-0.7.5.tgz",
     "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.4/momo-api-codex-bridge-0.7.4.tgz",
@@ -113,14 +122,29 @@ if (Test-Path $installDir) {
     git clone https://github.com/momo-api/momo-codex-bridge.git $installDir
   }
 
-# 4. Generate Windows CLI wrappers in bin
+# 4. Generate Windows CLI wrappers in bin & compile Native Tray EXE
 $binDir = [System.IO.Path]::Combine($installDir, "bin")
 $bridgeBin = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.mjs")
 $momoapiCmd = [System.IO.Path]::Combine($binDir, "momoapi.cmd")
 $momoCmd    = [System.IO.Path]::Combine($binDir, "momo.cmd")
 $bridgeCmd = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.cmd")
 $switchCmd = [System.IO.Path]::Combine($binDir, "momo-codex-switch.cmd")
-$trayPs1   = [System.IO.Path]::Combine($binDir, "tray.ps1")
+$trayExe   = [System.IO.Path]::Combine($binDir, "momoapi-tray.exe")
+$trayCs    = [System.IO.Path]::Combine($installDir, "src-tray", "TrayApp.cs")
+
+# If tray.exe is not present but C# source exists, compile it natively using Windows built-in csc.exe
+if ((-not (Test-Path $trayExe)) -and (Test-Path $trayCs)) {
+  $cscCandidates = @(
+    "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+    "C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+  )
+  foreach ($csc in $cscCandidates) {
+    if (Test-Path $csc) {
+      & $csc /target:winexe /optimize+ /nologo /out:$trayExe $trayCs /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.dll 2>$null
+      if (Test-Path $trayExe) { break }
+    }
+  }
+}
 
 # Clean up any legacy .ps1 CLI wrappers to prevent PowerShell ExecutionPolicy restrictions
 Remove-Item -Path (Join-Path $binDir "momo-codex-bridge.ps1") -Force -ErrorAction SilentlyContinue
@@ -144,9 +168,26 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-# 6. Launch Background Service & System Tray Companion
-Write-Step "Starting MOMO Codex Bridge daemon & Taskbar Tray..."
+# 6. Launch Background Service & System Tray EXE
+Write-Step "Starting MOMO Codex Bridge daemon & Native Taskbar Tray..."
 & node "$bridgeBin" restart
+if (Test-Path $trayExe) {
+  Start-Process -FilePath $trayExe -ArgumentList "-p $Port"
+  
+  # Also create Startup entry and Desktop shortcut
+  try {
+    $startupCmd = Join-Path ([Environment]::GetFolderPath("Startup")) "momoapi-tray.cmd"
+    "@start `"`" `"$trayExe`" -p $Port`r`n" | Set-Content -Path $startupCmd -Encoding Ascii
+    
+    $desktopDir = [Environment]::GetFolderPath("Desktop")
+    $wsh = New-Object -ComObject WScript.Shell
+    $shortcut = $wsh.CreateShortcut((Join-Path $desktopDir "MOMO API Proxy.lnk"))
+    $shortcut.TargetPath = $trayExe
+    $shortcut.Arguments = "-p $Port"
+    $shortcut.Description = "MOMO API Proxy Desktop Tray"
+    $shortcut.Save()
+  } catch {}
+}
 
 # 7. Register PATH, environment variables & current session function
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

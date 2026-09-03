@@ -23,11 +23,15 @@ if (Test-Path $PkgJsonPath) {
 }
 
 # Single-instance mutex
-$mutexName = "Global\MomoCodexBridgeTrayMutex"
+$mutexName = "Local\MomoCodexBridgeTrayMutex"
 $createdNew = $false
-$mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
-if (-not $createdNew) {
-  exit 0
+try {
+  $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+  if (-not $createdNew) {
+    exit 0
+  }
+} catch {
+  # If mutex creation fails due to namespace permissions, continue anyway
 }
 
 function Create-MomoIcon([bool]$active) {

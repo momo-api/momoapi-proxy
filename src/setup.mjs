@@ -1,8 +1,10 @@
 import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { codexHome, catalogPath, writeCatalog } from "./catalog.mjs";
 import { newLocalToken, writeSettings, settingsPath } from "./config.mjs";
 import { installAutostart, uninstallAutostart } from "./autostart.mjs";
+import { installWindowsService, uninstallWindowsService } from "./service.mjs";
 import { migrateHistory } from "./history.mjs";
 
 const MARKER = "# MOMO_CODEX_SWITCH_MANAGED";
@@ -128,7 +130,14 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
   let autostartResult = null;
   if (autostart) {
     try {
-      autostartResult = installAutostart(settings, { env });
+      if (process.platform === "win32") {
+        const binFile = fileURLToPath(import.meta.url);
+        const bridgeBin = join(dirname(binFile), "..", "bin", "momo-codex-bridge.mjs");
+        const serviceResult = installWindowsService(bridgeBin);
+        autostartResult = serviceResult.installed ? serviceResult : installAutostart(settings, { env });
+      } else {
+        autostartResult = installAutostart(settings, { env });
+      }
     } catch (err) {
       autostartResult = { installed: false, error: err.message };
     }
