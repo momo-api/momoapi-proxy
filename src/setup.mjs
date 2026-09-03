@@ -65,6 +65,7 @@ export function cleanConfigToml(content) {
 
 function managedConfig(catalog, port, defaultModel) {
   return MARKER + "\n" +
+    'openai_base_url = "http://127.0.0.1:' + port + '/v1"\n' +
     'model_provider = "momoapi-proxy"\n' +
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +

@@ -669,7 +669,7 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
   initSseResponse(response);
   if (!upstream.body) return response.end();
 
-  const allCustomNames = new Set([...customNames, ...searchNames]);
+  const allCustomNames = new Set(["exec", "apply_patch", ...customNames, ...searchNames]);
   const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames);
   const functions = extractFunctions(payload);
   let hasDsml = false;
