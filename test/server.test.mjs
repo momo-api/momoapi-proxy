@@ -318,3 +318,30 @@ test("intercepts leaked DSML tool calls from text stream and emits structured fu
     assert.ok(!body.includes("<｜｜DSML｜｜"));
   });
 });
+
+test("bridges streamed Claude text deltas into a single output message item", async () => {
+  const fakeFetch = async () => {
+    const sse = [
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello " } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "world!" } },
+      { type: "content_block_stop", index: 0 },
+    ].map((ev) => "data: " + JSON.stringify(ev) + "\n\n").join("");
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model: "claude-sonnet-4-6", input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }] })
+    });
+    const body = await response.text();
+    const itemAddedMatches = body.match(/^event: response\.output_item\.added/gm) || [];
+    assert.equal(itemAddedMatches.length, 1);
+    assert.match(body, /Hello /);
+    assert.match(body, /world!/);
+    assert.match(body, /response\.output_text\.done/);
+    assert.match(body, /response\.completed/);
+  });
+});

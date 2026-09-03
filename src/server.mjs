@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
-import { completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
+import { ResponseStreamEmitter, completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
@@ -577,28 +577,20 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
         if (json.type === "response.completed" && hasDsml) {
           const dsmlCalls = parseDsmlCalls(fullAccumulatedText);
           const cleanText = stripDsmlMarkup(fullAccumulatedText).trim();
-          const outputItems = [];
-
+          const emitter = new ResponseStreamEmitter(response, cleanPayload.model, currentResponseId);
           if (cleanText) {
-            for (const ev of textEvents(currentResponseId, outputIndex++, cleanText)) {
-              response.write(ev);
-            }
-            outputItems.push({ type: "message", role: "assistant", content: [{ type: "output_text", text: cleanText }] });
+            emitter.writeTextDelta(cleanText);
+            emitter.flushTextMessage();
           }
-
           for (const call of dsmlCalls) {
             const mapped = restoreToolName(call.name, functions);
-            const tool = mapped.kind === "custom"
-              ? customToolEvents(currentResponseId, outputIndex++, { name: mapped.originalName, input: customInput(call.arguments) })
-              : functionEvents(currentResponseId, outputIndex++, { name: mapped.originalName, arguments: call.arguments || {} });
-            for (const ev of tool.events) response.write(ev);
-            outputItems.push(mapped.kind === "custom"
-              ? { type: "custom_tool_call", call_id: tool.callId, name: mapped.originalName, input: customInput(call.arguments) }
-              : { type: "function_call", call_id: tool.callId, name: mapped.originalName, arguments: JSON.stringify(call.arguments || {}) });
+            if (mapped.kind === "custom") {
+              emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
+            } else {
+              emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
+            }
           }
-
-          response.write(completed(currentResponseId, cleanPayload.model, outputItems));
-          response.end();
+          emitter.complete();
           return;
         }
       }
@@ -636,20 +628,19 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
     return response.end();
   }
   initSseResponse(response);
-  const created = responseCreated(payload.model);
-  response.write(created.data);
-  const output = [];
-  let index = 0;
+  const emitter = new ResponseStreamEmitter(response, payload.model);
+  emitter.start();
+
   for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
     for (const part of data?.candidates?.[0]?.content?.parts || []) {
       if (part.text) {
-        for (const ev of textEvents(created.responseId, index++, part.text)) response.write(ev);
+        emitter.writeTextDelta(part.text);
       }
       if (part.functionCall) {
         const mapped = restoreToolName(part.functionCall.name, functions);
         const tool = mapped.kind === "custom"
-          ? customToolEvents(created.responseId, index++, { name: mapped.originalName, input: customInput(part.functionCall.args) })
-          : functionEvents(created.responseId, index++, { name: mapped.originalName, arguments: part.functionCall.args || {} });
+          ? emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(part.functionCall.args) })
+          : emitter.writeFunctionCall({ name: mapped.originalName, arguments: part.functionCall.args || {} });
         calls.set(tool.callId, {
           name: mapped.name,
           originalName: mapped.originalName,
@@ -658,15 +649,10 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
           geminiContents: body.contents,
           geminiFunctionCallPart: structuredClone(part),
         });
-        for (const ev of tool.events) response.write(ev);
-        output.push(mapped.kind === "custom"
-          ? { type: "custom_tool_call", call_id: tool.callId, name: mapped.originalName, input: customInput(part.functionCall.args) }
-          : { type: "function_call", call_id: tool.callId, name: mapped.originalName });
       }
     }
   }
-  response.write(completed(created.responseId, payload.model, output));
-  response.end();
+  emitter.complete();
 }
 
 async function bridgeClaude(response, settings, payload, calls, fetchImpl, signal) {
@@ -690,14 +676,13 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
     return response.end();
   }
   initSseResponse(response);
-  const created = responseCreated(payload.model);
-  response.write(created.data);
-  const output = [];
+  const emitter = new ResponseStreamEmitter(response, payload.model);
+  emitter.start();
+
   const toolBlocks = new Map();
-  let index = 0;
   for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
     if (data.type === "content_block_delta" && data.delta?.type === "text_delta") {
-      for (const ev of textEvents(created.responseId, index++, data.delta.text)) response.write(ev);
+      emitter.writeTextDelta(data.delta.text);
     }
     if (data.type === "content_block_start" && data.content_block?.type === "tool_use") {
       toolBlocks.set(data.index, { id: data.content_block.id, name: data.content_block.name, input: data.content_block.input || {}, partialJson: "" });
@@ -715,8 +700,8 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
       }
       const mapped = restoreToolName(block.name, functions);
       const tool = mapped.kind === "custom"
-        ? customToolEvents(created.responseId, index++, { callId: block.id, name: mapped.originalName, input: customInput(argumentsValue) })
-        : functionEvents(created.responseId, index++, { callId: block.id, name: mapped.originalName, arguments: argumentsValue });
+        ? emitter.writeCustomToolCall({ callId: block.id, name: mapped.originalName, input: customInput(argumentsValue) })
+        : emitter.writeFunctionCall({ callId: block.id, name: mapped.originalName, arguments: argumentsValue });
       calls.set(tool.callId, {
         name: mapped.name,
         originalName: mapped.originalName,
@@ -725,14 +710,9 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
         claudeMessages: body.messages,
         toolUseBlock: { type: "tool_use", id: block.id, name: block.name, input: argumentsValue },
       });
-      for (const ev of tool.events) response.write(ev);
-      output.push(mapped.kind === "custom"
-        ? { type: "custom_tool_call", call_id: tool.callId, name: mapped.originalName, input: customInput(argumentsValue) }
-        : { type: "function_call", call_id: tool.callId, name: mapped.originalName });
     }
   }
-  response.write(completed(created.responseId, payload.model, output));
-  response.end();
+  emitter.complete();
 }
 
 export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
