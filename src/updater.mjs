@@ -90,6 +90,14 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
 
   execFileSync("tar", ["-xz", "-f", tmpTgz, "-C", ROOT_DIR, "--strip-components=1"], { stdio: "ignore" });
 
+  try {
+    const { unlinkSync, existsSync } = await import("node:fs");
+    const p1 = join(ROOT_DIR, "bin", "momo-codex-bridge.ps1");
+    const p2 = join(ROOT_DIR, "bin", "momo-codex-switch.ps1");
+    if (existsSync(p1)) unlinkSync(p1);
+    if (existsSync(p2)) unlinkSync(p2);
+  } catch {}
+
   const newVersion = getCurrentVersion();
   return {
     updated: true,

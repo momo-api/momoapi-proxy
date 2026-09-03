@@ -72,10 +72,10 @@ if (Test-Path $installDir) {
   Write-Step "Downloading latest release package..."
   $urls = @(
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.6.3.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.6.6.tgz",
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.3/momo-api-codex-bridge-0.6.3.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.3/momo-api-codex-bridge-0.6.3.tgz"
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.6/momo-api-codex-bridge-0.6.6.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.6/momo-api-codex-bridge-0.6.6.tgz"
   )
   $tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
 
@@ -102,15 +102,15 @@ if (Test-Path $installDir) {
 $binDir = [System.IO.Path]::Combine($installDir, "bin")
 $bridgeBin = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.mjs")
 $bridgeCmd = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.cmd")
-$bridgePs1 = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.ps1")
 $switchCmd = [System.IO.Path]::Combine($binDir, "momo-codex-switch.cmd")
-$switchPs1 = [System.IO.Path]::Combine($binDir, "momo-codex-switch.ps1")
 $trayPs1   = [System.IO.Path]::Combine($binDir, "tray.ps1")
 
+# Clean up any legacy .ps1 CLI wrappers to prevent PowerShell ExecutionPolicy restrictions
+Remove-Item -Path (Join-Path $binDir "momo-codex-bridge.ps1") -Force -ErrorAction SilentlyContinue
+Remove-Item -Path (Join-Path $binDir "momo-codex-switch.ps1") -Force -ErrorAction SilentlyContinue
+
 "@echo off`r`nnode `"%~dp0momo-codex-bridge.mjs`" %*" | Set-Content -Path $bridgeCmd -Encoding Ascii
-"& node `"`$PSScriptRoot\\momo-codex-bridge.mjs`" @args" | Set-Content -Path $bridgePs1 -Encoding Utf8
 "@echo off`r`nnode `"%~dp0momo-codex-switch.mjs`" %*" | Set-Content -Path $switchCmd -Encoding Ascii
-"& node `"`$PSScriptRoot\\momo-codex-switch.mjs`" @args" | Set-Content -Path $switchPs1 -Encoding Utf8
 
 # 5. Run Setup
 Write-Step "Configuring Codex provider & syncing models..."
