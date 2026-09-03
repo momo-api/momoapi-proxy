@@ -59,14 +59,16 @@ async function bodyOf(request) {
 
 function authorized(request, settings) {
   const auth = request.headers.authorization;
-  if (auth && auth === "Bearer " + settings.localToken) return true;
-  if (auth && auth === "Bearer " + settings.apiKey) return true;
-  if (auth && auth === "Bearer momo-local-key") return true;
-  if (auth && auth !== "Bearer " + settings.localToken) return false;
-  
-  // When requires_openai_auth = false without env_key, Codex connects to loopback without Authorization header
+  if (auth) {
+    if (auth === "Bearer " + settings.localToken || auth === "Bearer " + settings.apiKey || auth === "Bearer momo-local-key") {
+      return true;
+    }
+    return false;
+  }
+
+  // When requires_openai_auth = false without Authorization header, allow loopback connections
   const remote = request.socket?.remoteAddress;
-  const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1";
+  const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1" || !remote;
   if (settings.host === "127.0.0.1" && isLoopback) return true;
   return false;
 }
@@ -794,6 +796,46 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
   emitter.complete();
 }
 
+async function forwardChatCompletions(request, response, settings, payload, fetchImpl, signal) {
+  const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
+    method: "POST",
+    headers: upstreamHeaders(settings),
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  response.statusCode = upstream.status;
+  for (const [key, val] of upstream.headers.entries()) {
+    const lower = key.toLowerCase();
+    if (lower !== "content-length" && lower !== "transfer-encoding" && lower !== "connection") {
+      response.setHeader(key, val);
+    }
+  }
+
+  if (upstream.body) {
+    if (typeof upstream.body.getReader === "function") {
+      const reader = upstream.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          response.write(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } else {
+      for await (const chunk of upstream.body) {
+        response.write(chunk);
+      }
+    }
+  } else {
+    const text = await upstream.text();
+    response.write(text);
+  }
+  response.end();
+}
+
 export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
   const calls = new Map();
   return createServer(async (request, response) => {
@@ -802,31 +844,52 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     const remoteIp = request.socket?.remoteAddress || "";
     let requestedModel = null;
     let finalStatus = 200;
+
+    // Standard CORS headers for desktop/web clients (ChatGPT Desktop, WebUI, Chatbox, etc.)
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+    response.setHeader("Access-Control-Allow-Headers", "*");
+
+    if (request.method === "OPTIONS") {
+      response.writeHead(204);
+      return response.end();
+    }
+
     response.on("close", () => {
       if (!response.writableEnded) abortController.abort();
     });
     try {
-      if (request.method === "GET" && request.url === "/healthz") {
-        logRequest({ method: "GET", url: "/healthz", status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
+      const rawUrl = request.url || "/";
+      const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+
+      if (request.method === "GET" && (pathname === "/healthz" || pathname === "/health")) {
+        logRequest({ method: "GET", url: pathname, status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
         return json(response, 200, { ok: true, service: "momo-codex-bridge", version: getCurrentVersion(), host: settings.host, port: settings.port });
       }
       if (!authorized(request, settings)) {
         finalStatus = 401;
-        logRequest({ method: request.method, url: request.url, status: 401, elapsedMs: Date.now() - t0, error: "Unauthorized", ip: remoteIp });
+        logRequest({ method: request.method, url: pathname, status: 401, elapsedMs: Date.now() - t0, error: "Unauthorized", ip: remoteIp });
         return json(response, 401, { error: { message: "Invalid local MOMO Switch token.", type: "authentication_error" } });
       }
-      if (request.method === "GET" && request.url === "/v1/models") {
+      if (request.method === "GET" && (pathname === "/v1/models" || pathname === "/models")) {
         const upstream = await fetchImpl(settings.endpoint + "/v1/models", { headers: upstreamHeaders(settings), signal: abortController.signal });
         finalStatus = upstream.status;
-        logRequest({ method: "GET", url: "/v1/models", status: finalStatus, elapsedMs: Date.now() - t0, ip: remoteIp });
+        logRequest({ method: "GET", url: pathname, status: finalStatus, elapsedMs: Date.now() - t0, ip: remoteIp });
         return json(response, upstream.status, await upstream.json());
       }
-      if (request.method === "POST" && request.url === "/v1/responses") {
+      if (request.method === "POST" && (pathname === "/v1/chat/completions" || pathname === "/chat/completions")) {
+        const payload = await bodyOf(request);
+        requestedModel = payload.model;
+        await forwardChatCompletions(request, response, settings, payload, fetchImpl, abortController.signal);
+        logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp });
+        return;
+      }
+      if (request.method === "POST" && (pathname === "/v1/responses" || pathname === "/responses")) {
         const payload = await bodyOf(request);
         requestedModel = payload.model;
         if (!payload.model) {
           finalStatus = 400;
-          logRequest({ method: "POST", url: "/v1/responses", status: 400, elapsedMs: Date.now() - t0, error: "model is required", ip: remoteIp });
+          logRequest({ method: "POST", url: pathname, status: 400, elapsedMs: Date.now() - t0, error: "model is required", ip: remoteIp });
           return json(response, 400, { error: { message: "model is required", type: "invalid_request_error" } });
         }
         const { targetModel, protocol } = resolveTargetModel(payload.model);
@@ -838,16 +901,18 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
 
         await handlerPromise;
-        logRequest({ method: "POST", url: "/v1/responses", model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp });
+        logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp });
         return;
       }
       finalStatus = 404;
-      logRequest({ method: request.method, url: request.url, status: 404, elapsedMs: Date.now() - t0, ip: remoteIp });
+      logRequest({ method: request.method, url: pathname, status: 404, elapsedMs: Date.now() - t0, ip: remoteIp });
       return json(response, 404, { error: { message: "Not found", type: "invalid_request_error" } });
     } catch (error) {
       if (abortController.signal.aborted) return;
-      logRequest({ method: request.method, url: request.url, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
-      if (request.url === "/v1/responses") {
+      const rawUrl = request.url || "/";
+      const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+      logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+      if (pathname === "/v1/responses" || pathname === "/responses") {
         if (!response.headersSent) initSseResponse(response);
         const respId = "resp_err_" + randomUUID();
         response.write(responseCreated(requestedModel || "unknown", respId).data);

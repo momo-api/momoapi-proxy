@@ -72,15 +72,21 @@ if (Test-Path $installDir) {
   Write-Step "Downloading latest release package..."
   $urls = @(
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.6.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.5.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.4.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.3.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.2.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-0.7.1.tgz",
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.6/momo-api-codex-bridge-0.7.6.tgz",
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.5/momo-api-codex-bridge-0.7.5.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.4/momo-api-codex-bridge-0.7.4.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.3/momo-api-codex-bridge-0.7.3.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.2/momo-api-codex-bridge-0.7.2.tgz",
     "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.1/momo-api-codex-bridge-0.7.1.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.6/momo-api-codex-bridge-0.7.6.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.5/momo-api-codex-bridge-0.7.5.tgz",
     "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.4/momo-api-codex-bridge-0.7.4.tgz",
     "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.3/momo-api-codex-bridge-0.7.3.tgz",
     "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.2/momo-api-codex-bridge-0.7.2.tgz",
@@ -139,20 +145,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 6. Launch Background Service & System Tray Companion
-Write-Step "Stopping any existing MOMO Codex Bridge instance on port $Port..."
-try {
-  $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-  foreach ($conn in $conns) {
-  Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-  }
-  Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%tray.ps1%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-} catch {}
-
 Write-Step "Starting MOMO Codex Bridge daemon & Taskbar Tray..."
-Start-Process -FilePath "node" -ArgumentList @($bridgeBin, "serve") -WindowStyle Hidden
-if (Test-Path $trayPs1) {
-  Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", $trayPs1) -WindowStyle Hidden
-}
+& node "$bridgeBin" restart
 
 # 7. Register PATH, environment variables & current session function
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

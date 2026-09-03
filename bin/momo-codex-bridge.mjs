@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync, spawn, execSync } from "node:child_process";
+import { openSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readSettings, resolveSettings } from "../src/config.mjs";
+import { readSettings, resolveSettings, appHome } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
 import { rollback, setup, uninstall } from "../src/setup.mjs";
 import { readCatalog } from "../src/catalog.mjs";
@@ -38,6 +39,63 @@ function isWindowsProcessRunning(pattern) {
   }
 }
 
+function daemonLogPath() {
+  const dir = appHome();
+  mkdirSync(dir, { recursive: true });
+  return join(dir, "daemon.log");
+}
+
+async function waitForHealth(port, maxWaitMs = 3500) {
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
+      if (res.ok) return true;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return false;
+}
+
+async function startDaemon(binFile, scriptDir, port) {
+  const logFile = daemonLogPath();
+  const out = openSync(logFile, "a");
+  const err = openSync(logFile, "a");
+
+  const daemon = spawn(process.execPath, [binFile, "serve"], {
+    detached: true,
+    stdio: ["ignore", out, err],
+    windowsHide: true,
+  });
+  daemon.unref();
+
+  if (process.platform === "win32") {
+    killWindowsProcessByPattern("tray.ps1");
+    const trayScript = join(scriptDir, "tray.ps1");
+    if (existsSync(trayScript)) {
+      const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      tray.unref();
+    }
+  }
+
+  const ok = await waitForHealth(port, 3500);
+  if (!ok) {
+    let recentError = "";
+    if (existsSync(logFile)) {
+      try {
+        const lines = readFileSync(logFile, "utf8").trim().split("\n").slice(-8);
+        recentError = lines.join("\n");
+      } catch {}
+    }
+    throw new Error("MOMO Codex Bridge daemon failed to start on port " + port + (recentError ? ":\n" + recentError : "."));
+  }
+  return true;
+}
+
 const rawArgv = process.argv.slice(2);
 const command = rawArgv.length === 0 ? "auto" : rawArgv[0];
 const args = rawArgv.slice(1);
@@ -63,23 +121,7 @@ async function main() {
 
     if (!isRunning) {
       console.log("Starting MOMO API Proxy in background...");
-      const daemon = spawn(process.execPath, [binFile, "serve"], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      daemon.unref();
-      if (process.platform === "win32") {
-        killWindowsProcessByPattern("tray.ps1");
-        const trayScript = join(scriptDir, "tray.ps1");
-        const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        tray.unref();
-      }
-      await new Promise((r) => setTimeout(r, 800));
+      await startDaemon(binFile, scriptDir, port);
       console.log("MOMO API Proxy started successfully! Listening on http://127.0.0.1:" + port + "/v1 (Taskbar Tray active)");
       console.log("Run 'momoapi models' to view models, or 'momoapi stop' to stop.");
     } else {
@@ -121,7 +163,7 @@ async function main() {
     console.log("  - Models synced: " + result.models + " (default: " + result.defaultModel + ")");
     console.log("  - Autostart: " + (result.autostart?.installed ? "Enabled (" + result.autostart.type + ")" : "Disabled"));
     console.log("\nRun 'momo-codex-bridge doctor' to verify health, or 'momo-codex-bridge serve' to start now.");
-  } else if (command === "start" || command === "up") {
+  } else if (command === "start" || command === "up" || command === "daemon") {
     let settings = null;
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
@@ -134,36 +176,13 @@ async function main() {
       console.log("MOMO Codex Bridge is already running on http://127.0.0.1:" + port + "/v1");
       return;
     }
-    console.log("Starting MOMO Codex Bridge in background...");
+    console.log("Starting MOMO Codex Bridge daemon in background...");
     const binFile = fileURLToPath(import.meta.url);
     const scriptDir = dirname(binFile);
-    const daemon = spawn(process.execPath, [binFile, "serve"], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    daemon.unref();
-    if (process.platform === "win32") {
-      killWindowsProcessByPattern("tray.ps1");
-      const trayScript = join(scriptDir, "tray.ps1");
-      const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      tray.unref();
-    }
-    await new Promise((r) => setTimeout(r, 800));
-    try {
-      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
-      if (res.ok) {
-        console.log("MOMO Codex Bridge started successfully!");
-        console.log("  - Local Bridge: http://127.0.0.1:" + port + "/v1");
-        console.log("  - Status: Running in background (Taskbar Tray active)");
-        return;
-      }
-    } catch {}
-    console.log("Daemon launched. Run 'momo-codex-bridge status' to verify.");
+    await startDaemon(binFile, scriptDir, port);
+    console.log("MOMO Codex Bridge started successfully!");
+    console.log("  - Local Bridge: http://127.0.0.1:" + port + "/v1");
+    console.log("  - Status: Running in background (Taskbar Tray active)");
   } else if (command === "stop" || command === "down") {
     let settings = null;
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
@@ -206,22 +225,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 400));
     const binFile = fileURLToPath(import.meta.url);
     const scriptDir = dirname(binFile);
-    const daemon = spawn(process.execPath, [binFile, "serve"], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    daemon.unref();
-    if (process.platform === "win32") {
-      const trayScript = join(scriptDir, "tray.ps1");
-      const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      tray.unref();
-    }
-    await new Promise((r) => setTimeout(r, 800));
+    await startDaemon(binFile, scriptDir, port);
     console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
   } else if (command === "serve") {
     const settings = resolveSettings();

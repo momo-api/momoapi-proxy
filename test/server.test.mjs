@@ -456,4 +456,63 @@ test("forwardResponses: lowers Codex-Canvas namespace tools upstream and restore
     assert.match(body, /"namespace":"personal:codex-canvas"/);
     assert.doesNotMatch(body, /"name":"personal:codex-canvas__read_file"/);
   });
+
+  test("handles OPTIONS CORS preflight and forwards /v1/chat/completions for ChatGPT Desktop", async () => {
+    let capturedUrl = null;
+    let capturedMethod = null;
+    let capturedHeaders = null;
+    let capturedPayload = null;
+
+    const mockFetch = async (url, init) => {
+      capturedUrl = url;
+      capturedMethod = init?.method;
+      capturedHeaders = init?.headers;
+      capturedPayload = JSON.parse(init?.body || "{}");
+      return new Response(JSON.stringify({
+        id: "chatcmpl-test-123",
+        object: "chat.completion",
+        created: 1725300000,
+        model: "gpt-5.6-sol",
+        choices: [{ index: 0, message: { role: "assistant", content: "Hello from MOMO API!" }, finish_reason: "stop" }],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const server = await createMomoSwitch({ ...settings, port: 0 }, { fetchImpl: mockFetch });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+    try {
+      // 1. Test OPTIONS preflight
+      const optRes = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: "OPTIONS" });
+      assert.equal(optRes.status, 204);
+      assert.equal(optRes.headers.get("access-control-allow-origin"), "*");
+
+      // 2. Test POST /v1/chat/completions (with dummy bearer token like ChatGPT desktop client)
+      const chatRes = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "authorization": "Bearer momo-local-key",
+        },
+        body: JSON.stringify({
+          model: "gpt-5.6-sol",
+          messages: [{ role: "user", content: "Hi" }],
+        }),
+      });
+
+      assert.equal(chatRes.status, 200);
+      assert.equal(capturedUrl, "https://gateway.example/v1/chat/completions");
+      assert.equal(capturedMethod, "POST");
+      assert.equal(capturedHeaders.authorization, "Bearer " + settings.apiKey);
+      assert.equal(capturedPayload.model, "gpt-5.6-sol");
+
+      const resJson = await chatRes.json();
+      assert.equal(resJson.id, "chatcmpl-test-123");
+      assert.equal(resJson.choices[0].message.content, "Hello from MOMO API!");
+    } finally {
+      server.close();
+    }
+  });
 });
