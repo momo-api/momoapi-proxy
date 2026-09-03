@@ -72,10 +72,10 @@ if (Test-Path $installDir) {
   Write-Step "Downloading latest release package..."
   $urls = @(
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.6.7.tgz",
+    "$Endpoint/install/packages/momo-api-codex-bridge-0.6.8.tgz",
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.7/momo-api-codex-bridge-0.6.7.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.7/momo-api-codex-bridge-0.6.7.tgz"
+    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.8/momo-api-codex-bridge-0.6.8.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.8/momo-api-codex-bridge-0.6.8.tgz"
   )
   $tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
 

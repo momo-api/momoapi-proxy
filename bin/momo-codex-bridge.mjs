@@ -35,7 +35,105 @@ async function main() {
     console.log("  - Models synced: " + result.models + " (default: " + result.defaultModel + ")");
     console.log("  - Autostart: " + (result.autostart?.installed ? "Enabled (" + result.autostart.type + ")" : "Disabled"));
     console.log("\nRun 'momo-codex-bridge doctor' to verify health, or 'momo-codex-bridge serve' to start now.");
-  } else if (command === "serve" || command === "start") {
+  } else if (command === "start" || command === "up") {
+    let settings = null;
+    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    const port = settings.port || 18789;
+    let isRunning = false;
+    try {
+      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
+      if (res.ok) isRunning = true;
+    } catch {}
+    if (isRunning) {
+      console.log("MOMO Codex Bridge is already running on http://127.0.0.1:" + port + "/v1");
+      return;
+    }
+    console.log("Starting MOMO Codex Bridge in background...");
+    const { spawn } = await import("node:child_process");
+    const { dirname, join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const binFile = fileURLToPath(import.meta.url);
+    const scriptDir = dirname(binFile);
+    const daemon = spawn(process.execPath, [binFile, "serve"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    daemon.unref();
+    if (process.platform === "win32") {
+      const trayScript = join(scriptDir, "tray.ps1");
+      const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      tray.unref();
+    }
+    await new Promise((r) => setTimeout(r, 800));
+    try {
+      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
+      if (res.ok) {
+        console.log("MOMO Codex Bridge started successfully!");
+        console.log("  - Local Bridge: http://127.0.0.1:" + port + "/v1");
+        console.log("  - Status: Running in background (Taskbar Tray active)");
+        return;
+      }
+    } catch {}
+    console.log("Daemon launched. Run 'momo-codex-bridge status' to verify.");
+  } else if (command === "stop" || command === "down") {
+    let settings = null;
+    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    const port = settings.port || 18789;
+    console.log("Stopping MOMO Codex Bridge on port " + port + "...");
+    const { execSync } = await import("node:child_process");
+    if (process.platform === "win32") {
+      try {
+        execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_ .OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+      } catch {}
+    } else {
+      try {
+        execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || fuser -k ${port}/tcp 2>/dev/null`, { stdio: "ignore" });
+      } catch {}
+    }
+    console.log("MOMO Codex Bridge stopped.");
+  } else if (command === "restart") {
+    let settings = null;
+    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    const port = settings.port || 18789;
+    console.log("Restarting MOMO Codex Bridge...");
+    const { execSync, spawn } = await import("node:child_process");
+    const { dirname, join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    if (process.platform === "win32") {
+      try {
+        execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_ .OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: "ignore" });
+      } catch {}
+    } else {
+      try {
+        execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || fuser -k ${port}/tcp 2>/dev/null`, { stdio: "ignore" });
+      } catch {}
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    const binFile = fileURLToPath(import.meta.url);
+    const scriptDir = dirname(binFile);
+    const daemon = spawn(process.execPath, [binFile, "serve"], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    daemon.unref();
+    if (process.platform === "win32") {
+      const trayScript = join(scriptDir, "tray.ps1");
+      const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      tray.unref();
+    }
+    await new Promise((r) => setTimeout(r, 800));
+    console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
+  } else if (command === "serve") {
     const settings = resolveSettings();
     const server = await listen(settings);
     console.log("MOMO Codex Bridge listening at http://" + settings.host + ":" + settings.port + "/v1");
@@ -202,7 +300,7 @@ async function main() {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO Codex Bridge - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momo-codex-bridge install --api-key <MOMO_KEY> [--endpoint URL] [--port PORT]\n  momo-codex-bridge serve\n  momo-codex-bridge status\n  momo-codex-bridge models\n  momo-codex-bridge sync\n  momo-codex-bridge update [--force]\n  momo-codex-bridge doctor\n  momo-codex-bridge migrate-history\n  momo-codex-bridge logs [-n 50]\n  momo-codex-bridge test <model>\n  momo-codex-bridge rollback\n  momo-codex-bridge uninstall [--remove-key]\n");
+    console.log("MOMO Codex Bridge - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momo-codex-bridge start                     - Start daemon & taskbar tray in background\n  momo-codex-bridge stop                      - Stop running bridge service\n  momo-codex-bridge restart                   - Restart bridge daemon & taskbar tray\n  momo-codex-bridge serve                     - Run in foreground (live debug logs)\n  momo-codex-bridge status                    - Check running status\n  momo-codex-bridge models                    - List available synced models\n  momo-codex-bridge sync                      - Sync model catalog from MOMO API\n  momo-codex-bridge update [--force]          - Update to latest version\n  momo-codex-bridge doctor                    - Run health diagnostics\n  momo-codex-bridge migrate-history           - Unify previous conversation histories\n  momo-codex-bridge logs [-n 50]              - View recent request logs\n  momo-codex-bridge tray                      - Launch taskbar tray companion\n  momo-codex-bridge test <model>              - Run quick response test\n  momo-codex-bridge rollback                  - Restore previous Codex config\n  momo-codex-bridge uninstall [--remove-key]  - Uninstall bridge\n");
   }
 }
 
