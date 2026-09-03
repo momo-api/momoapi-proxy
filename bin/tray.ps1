@@ -13,6 +13,14 @@ Add-Type -AssemblyName System.Drawing
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InstallDir = Split-Path -Parent $ScriptDir
 $BridgeBin = [System.IO.Path]::Combine($ScriptDir, "momo-codex-bridge.mjs")
+$PkgJsonPath = [System.IO.Path]::Combine($InstallDir, "package.json")
+$Version = "v0.7.0"
+if (Test-Path $PkgJsonPath) {
+  try {
+    $pkg = Get-Content $PkgJsonPath -Raw | ConvertFrom-Json
+    if ($pkg.version) { $Version = "v" + $pkg.version }
+  } catch {}
+}
 
 # Single-instance mutex
 $mutexName = "Global\MomoCodexBridgeTrayMutex"
@@ -78,17 +86,23 @@ $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $activeIcon = Create-MomoIcon $true
 $inactiveIcon = Create-MomoIcon $false
 $notifyIcon.Icon = $activeIcon
-$notifyIcon.Text = "MOMO Codex Bridge (:18789)"
+$notifyIcon.Text = "MOMO API Proxy $Version (:18789)"
 $notifyIcon.Visible = $true
 
 # Context Menu
 $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
 
-$titleItem = $contextMenu.Items.Add("MOMO Codex Bridge (Running)")
+$titleItem = $contextMenu.Items.Add("MOMO API Proxy $Version (Running)")
 $titleItem.Enabled = $false
 $titleItem.Font = New-Object System.Drawing.Font($contextMenu.Font, [System.Drawing.FontStyle]::Bold)
 
 [void]$contextMenu.Items.Add("-")
+
+$updateItem = $contextMenu.Items.Add("Check for Updates (Version: $Version)")
+$updateItem.add_Click({
+  $output = & node "$BridgeBin" update 2>&1 | Out-String
+  $notifyIcon.ShowBalloonTip(4000, "MOMO API Proxy Update", $output.Trim(), [System.Windows.Forms.ToolTipIcon]::Info)
+})
 
 $doctorItem = $contextMenu.Items.Add("Run Doctor Diagnostics")
 $doctorItem.add_Click({
@@ -162,18 +176,18 @@ $timer.add_Tick({
   $running = Check-BridgeRunning
   if ($running) {
     $notifyIcon.Icon = $activeIcon
-    $notifyIcon.Text = "MOMO Codex Bridge: Running (:18789)"
-    $titleItem.Text = "MOMO Codex Bridge (Running)"
+    $notifyIcon.Text = "MOMO API Proxy $Version: Running (:18789)"
+    $titleItem.Text = "MOMO API Proxy $Version (Running)"
   } else {
     $notifyIcon.Icon = $inactiveIcon
-    $notifyIcon.Text = "MOMO Codex Bridge: Stopped"
-    $titleItem.Text = "MOMO Codex Bridge (Stopped)"
+    $notifyIcon.Text = "MOMO API Proxy $Version: Stopped"
+    $titleItem.Text = "MOMO API Proxy $Version (Stopped)"
   }
 })
 $timer.Start()
 
 # Welcome Notification
-$notifyIcon.ShowBalloonTip(3000, "MOMO Codex Bridge", "Listening on http://127.0.0.1:18789/v1 (ChatGPT Desktop & Codex ready)", [System.Windows.Forms.ToolTipIcon]::Info)
+$notifyIcon.ShowBalloonTip(3000, "MOMO API Proxy $Version", "Listening on http://127.0.0.1:18789/v1 (ChatGPT Desktop & Codex ready)", [System.Windows.Forms.ToolTipIcon]::Info)
 
 # Run Form Loop
 [System.Windows.Forms.Application]::Run()
