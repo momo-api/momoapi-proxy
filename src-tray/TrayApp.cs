@@ -53,8 +53,6 @@ namespace MomoApi.Tray
         private readonly int port;
         private readonly string userHome;
         private readonly string proxyHome;
-        private readonly string proxyExe;
-        private readonly string proxyMjs;
         private readonly NotifyIcon notifyIcon;
         private readonly System.Windows.Forms.Timer healthTimer;
         private readonly Icon activeIcon;
@@ -68,8 +66,6 @@ namespace MomoApi.Tray
             this.port = port;
             this.userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             this.proxyHome = Path.Combine(userHome, ".momoapi-proxy");
-            this.proxyExe = Path.Combine(proxyHome, "bin", "momoapi-proxy.exe");
-            this.proxyMjs = Path.Combine(proxyHome, "app", "bin", "momoapi-proxy.mjs");
 
             this.activeIcon = CreateBadgeIcon(true);
             this.inactiveIcon = CreateBadgeIcon(false);
@@ -198,30 +194,66 @@ namespace MomoApi.Tray
             catch { return false; }
         }
 
+        private ProcessStartInfo ResolveCliProcessInfo(string subCommand)
+        {
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string[] possibleExes = new string[]
+            {
+                Path.Combine(home, ".momoapi-proxy", "bin", "momoapi-proxy.exe"),
+                Path.Combine(home, ".momo-codex-bridge", "bin", "momoapi-proxy.exe"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "momoapi-proxy.exe")
+            };
+
+            foreach (string exe in possibleExes)
+            {
+                if (File.Exists(exe))
+                {
+                    return new ProcessStartInfo(exe, subCommand);
+                }
+            }
+
+            string[] possibleMjs = new string[]
+            {
+                Path.Combine(home, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs"),
+                Path.Combine(home, ".momoapi-proxy", "app", "bin", "momo-codex-bridge.mjs"),
+                Path.Combine(home, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs"),
+                Path.Combine(home, ".momo-codex-bridge", "app", "bin", "momo-codex-bridge.mjs")
+            };
+
+            foreach (string mjs in possibleMjs)
+            {
+                if (File.Exists(mjs))
+                {
+                    return new ProcessStartInfo("node", "\"" + mjs + "\" " + subCommand);
+                }
+            }
+
+            string[] possibleCmds = new string[]
+            {
+                Path.Combine(home, ".momoapi-proxy", "bin", "momoapi.cmd"),
+                Path.Combine(home, ".momo-codex-bridge", "bin", "momoapi.cmd")
+            };
+
+            foreach (string cmd in possibleCmds)
+            {
+                if (File.Exists(cmd))
+                {
+                    return new ProcessStartInfo("cmd.exe", "/c \"" + cmd + "\" " + subCommand);
+                }
+            }
+
+            return new ProcessStartInfo("cmd.exe", "/c momoapi " + subCommand);
+        }
+
         private void StartBridge()
         {
             try
             {
-                if (File.Exists(proxyExe))
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo(proxyExe, "serve")
-                    {
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    Process.Start(psi);
-                }
-                else if (File.Exists(proxyMjs))
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo("node", "\"" + proxyMjs + "\" serve")
-                    {
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    Process.Start(psi);
-                }
+                ProcessStartInfo psi = ResolveCliProcessInfo("serve");
+                psi.CreateNoWindow = true;
+                psi.UseShellExecute = false;
+                psi.WindowStyle = ProcessWindowStyle.Hidden;
+                Process.Start(psi);
             }
             catch { }
         }
@@ -230,25 +262,14 @@ namespace MomoApi.Tray
         {
             try
             {
-                if (File.Exists(proxyExe))
+                ProcessStartInfo psi = ResolveCliProcessInfo("stop");
+                psi.CreateNoWindow = true;
+                psi.UseShellExecute = false;
+                psi.WindowStyle = ProcessWindowStyle.Hidden;
+                Process p = Process.Start(psi);
+                if (p != null)
                 {
-                    ProcessStartInfo psi = new ProcessStartInfo(proxyExe, "stop")
-                    {
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    Process.Start(psi);
-                }
-                else if (File.Exists(proxyMjs))
-                {
-                    ProcessStartInfo psi = new ProcessStartInfo("node", "\"" + proxyMjs + "\" stop")
-                    {
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-                    Process.Start(psi);
+                    p.WaitForExit(2000);
                 }
             }
             catch { }
@@ -265,21 +286,7 @@ namespace MomoApi.Tray
         {
             try
             {
-                ProcessStartInfo psi = null;
-                if (File.Exists(proxyExe))
-                {
-                    psi = new ProcessStartInfo(proxyExe, subCommand);
-                }
-                else if (File.Exists(proxyMjs))
-                {
-                    psi = new ProcessStartInfo("node", "\"" + proxyMjs + "\" " + subCommand);
-                }
-                else
-                {
-                    MessageBox.Show("未找到代理主程序", "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return;
-                }
-
+                ProcessStartInfo psi = ResolveCliProcessInfo(subCommand);
                 psi.CreateNoWindow = true;
                 psi.UseShellExecute = false;
                 psi.RedirectStandardOutput = true;
@@ -291,7 +298,7 @@ namespace MomoApi.Tray
                 {
                     string output = p.StandardOutput.ReadToEnd();
                     string error = p.StandardError.ReadToEnd();
-                    p.WaitForExit(8000);
+                    p.WaitForExit(10000);
                     if (showResult)
                     {
                         string msg = string.IsNullOrWhiteSpace(output) ? error : output;
