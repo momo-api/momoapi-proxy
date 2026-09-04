@@ -348,14 +348,35 @@ namespace MomoApi.Tray
             catch { }
         }
 
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        private static extern bool DestroyIcon(IntPtr handle);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr CreateIconIndirect(ref ICONINFO icon);
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct ICONINFO
+        {
+            public bool fIcon;
+            public int xHotspot;
+            public int yHotspot;
+            public IntPtr hbmMask;
+            public IntPtr hbmColor;
+        }
+
+        [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
+
         private static Icon CreateBadgeIcon(bool active)
         {
             int size = 32;
-            using (Bitmap bmp = new Bitmap(size, size))
+            using (Bitmap bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
             using (Graphics g = Graphics.FromImage(bmp))
             {
+                g.Clear(Color.Transparent);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
 
                 Color bgColor = active ? Color.FromArgb(255, 99, 102, 241) : Color.FromArgb(255, 100, 116, 139);
                 using (SolidBrush bgBrush = new SolidBrush(bgColor))
@@ -378,8 +399,30 @@ namespace MomoApi.Tray
                     g.DrawEllipse(whitePen, 20, 20, 10, 10);
                 }
 
-                IntPtr hIcon = bmp.GetHicon();
-                return Icon.FromHandle(hIcon);
+                IntPtr hbmColor = bmp.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
+                using (Bitmap maskBmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+                {
+                    IntPtr hbmMask = maskBmp.GetHbitmap();
+                    try
+                    {
+                        ICONINFO iconInfo = new ICONINFO
+                        {
+                            fIcon = true,
+                            xHotspot = 0,
+                            yHotspot = 0,
+                            hbmColor = hbmColor,
+                            hbmMask = hbmMask
+                        };
+                        IntPtr hIcon = CreateIconIndirect(ref iconInfo);
+                        Icon icon = Icon.FromHandle(hIcon);
+                        return (Icon)icon.Clone();
+                    }
+                    finally
+                    {
+                        if (hbmColor != IntPtr.Zero) DeleteObject(hbmColor);
+                        if (hbmMask != IntPtr.Zero) DeleteObject(hbmMask);
+                    }
+                }
             }
         }
 
