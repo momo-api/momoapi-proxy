@@ -88,10 +88,24 @@ export function resolveTargetModel(model) {
 }
 
 function customInput(value) {
-  if (typeof value === "string") return value;
-  if (typeof value?.input === "string") return value.input;
-  if (typeof value?.patch === "string") return value.patch;
-  return JSON.stringify(value ?? "");
+  let raw = "";
+  if (typeof value === "string") raw = value;
+  else if (typeof value?.input === "string") raw = value.input;
+  else if (typeof value?.command === "string") raw = value.command;
+  else if (typeof value?.cmd === "string") raw = value.cmd;
+  else if (typeof value?.patch === "string") return value.patch;
+  else raw = typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "");
+
+  raw = raw.trim();
+  if (raw.startsWith("*** Begin Patch")) return raw;
+  if (!raw) return "";
+
+  // Auto-wrap bare shell commands / scripts into valid Codex V8 isolate JavaScript
+  const isJs = raw.startsWith("await ") || raw.startsWith("tools.") || raw.startsWith("const ") || raw.startsWith("let ") || raw.startsWith("var ") || raw.startsWith("function ") || raw.startsWith("return ") || raw.startsWith("/*") || raw.startsWith("//") || raw.startsWith("try {");
+  if (!isJs) {
+    return `await tools.exec_command({ command: ${JSON.stringify(raw)} });`;
+  }
+  return raw;
 }
 
 function parseJsonSafe(value, fallback = {}) {
