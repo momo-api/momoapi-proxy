@@ -1,4 +1,4 @@
-# MOMO Codex Bridge - Native Windows System Tray Companion
+# MOMO API Proxy - Native Windows System Tray Companion
 [CmdletBinding()]
 param(
   [int]$Port = 18789,
@@ -10,35 +10,38 @@ $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$InstallDir = Split-Path -Parent $ScriptDir
-$BridgeBin = [System.IO.Path]::Combine($ScriptDir, "momo-codex-bridge.mjs")
-$PkgJsonPath = [System.IO.Path]::Combine($InstallDir, "package.json")
-$Version = "v0.7.4"
-if (Test-Path $PkgJsonPath) {
-  try {
-    $pkg = Get-Content $PkgJsonPath -Raw | ConvertFrom-Json
-    if ($pkg.version) { $Version = "v" + $pkg.version }
-  } catch {}
+# Resolve exact absolute path for momoapi-proxy.mjs
+$userHome = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile)
+$global:MomoBin = [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs")
+if (-not (Test-Path $global:MomoBin)) {
+  $global:MomoBin = [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "app", "bin", "momo-codex-bridge.mjs")
+}
+if (-not (Test-Path $global:MomoBin)) {
+  $global:MomoBin = [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs")
+}
+if (-not (Test-Path $global:MomoBin)) {
+  $global:MomoBin = [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "app", "bin", "momo-codex-bridge.mjs")
 }
 
+$Version = "v0.9.0"
+
 # Single-instance mutex
-$mutexName = "Local\MomoCodexBridgeTrayMutex"
+$mutexName = "Local\MomoApiProxyTrayMutex_" + [System.Environment]::UserName
 $createdNew = $false
 try {
   $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
   if (-not $createdNew) {
     exit 0
   }
-} catch {
-  # If mutex creation fails due to namespace permissions, continue anyway
-}
+} catch {}
 
 function Create-MomoIcon([bool]$active) {
   $size = 32
   $bmp = New-Object System.Drawing.Bitmap $size, $size
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $g.Clear([System.Drawing.Color]::Transparent)
 
   $bgColor = if ($active) { [System.Drawing.Color]::FromArgb(255, 99, 102, 241) } else { [System.Drawing.Color]::FromArgb(255, 100, 116, 139) }
   $brush = New-Object System.Drawing.SolidBrush($bgColor)
@@ -66,7 +69,7 @@ function Create-MomoIcon([bool]$active) {
 function Check-BridgeRunning {
   try {
     $req = [System.Net.WebRequest]::Create("http://127.0.0.1:" + $Port + "/healthz")
-    $req.Timeout = 1500
+    $req.Timeout = 1200
     $resp = $req.GetResponse()
     $resp.Close()
     return $true
@@ -77,8 +80,10 @@ function Check-BridgeRunning {
 
 function Start-DaemonProcess {
   if (-not (Check-BridgeRunning)) {
-    Start-Process -FilePath "node" -ArgumentList @($BridgeBin, "serve") -WindowStyle Hidden
-    Start-Sleep -Milliseconds 600
+    if (Test-Path $global:MomoBin) {
+      Start-Process -FilePath "node" -ArgumentList @($global:MomoBin, "serve") -WindowStyle Hidden
+      Start-Sleep -Milliseconds 600
+    }
   }
 }
 
@@ -102,96 +107,103 @@ $titleItem.Font = New-Object System.Drawing.Font($contextMenu.Font, [System.Draw
 
 [void]$contextMenu.Items.Add("-")
 
-$updateItem = $contextMenu.Items.Add("Check for Updates (Version: $Version)")
-$updateItem.add_Click({
-  $output = & node "$BridgeBin" update 2>&1 | Out-String
-  $notifyIcon.ShowBalloonTip(4000, "MOMO API Proxy Update", $output.Trim(), [System.Windows.Forms.ToolTipIcon]::Info)
-})
-
-$doctorItem = $contextMenu.Items.Add("Run Doctor Diagnostics")
-$doctorItem.add_Click({
-  $output = & node "$BridgeBin" doctor 2>&1 | Out-String
-  [System.Windows.Forms.MessageBox]::Show($output, "MOMO Codex Bridge - Doctor", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-})
-
-$syncItem = $contextMenu.Items.Add("Sync Models Now")
-$syncItem.add_Click({
-  $output = & node "$BridgeBin" sync 2>&1 | Out-String
-  $notifyIcon.ShowBalloonTip(3000, "MOMO Model Sync", $output.Trim(), [System.Windows.Forms.ToolTipIcon]::Info)
-})
-
-$modelsItem = $contextMenu.Items.Add("View Available Models")
-$modelsItem.add_Click({
-  $output = & node "$BridgeBin" models 2>&1 | Out-String
-  [System.Windows.Forms.MessageBox]::Show($output, "MOMO Codex Bridge - Models", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-})
-
-$logsItem = $contextMenu.Items.Add("View Bridge Logs (bridge.log)")
-$logsItem.add_Click({
-  $logFile = [System.IO.Path]::Combine($env:USERPROFILE, ".momo-codex-bridge", "bridge.log")
-  if (Test-Path $logFile) {
-    Start-Process "notepad.exe" -ArgumentList $logFile
-  } else {
-    [System.Windows.Forms.MessageBox]::Show("Log file is empty or not yet created: " + $logFile, "Notice", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-  }
-})
-
-$configItem = $contextMenu.Items.Add("Open config.toml")
-$configItem.add_Click({
-  $cfgPath = [System.IO.Path]::Combine($env:USERPROFILE, ".codex", "config.toml")
-  if (Test-Path $cfgPath) {
-    Start-Process "notepad.exe" -ArgumentList $cfgPath
-  } else {
-    [System.Windows.Forms.MessageBox]::Show("Config not found: " + $cfgPath, "Notice", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
-  }
-})
-
-[void]$contextMenu.Items.Add("-")
-
-$portalItem = $contextMenu.Items.Add("Open MOMO API Portal")
+$portalItem = $contextMenu.Items.Add("打开 MOMO 控制台 (momoapi.us)")
 $portalItem.add_Click({
   Start-Process "https://momoapi.us"
 })
 
-[void]$contextMenu.Items.Add("-")
-
-$restartItem = $contextMenu.Items.Add("Restart Bridge Daemon")
-$restartItem.add_Click({
-  try {
-    Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%momo-codex-bridge.mjs serve%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  } catch {}
-  Start-DaemonProcess
-  $notifyIcon.ShowBalloonTip(2000, "MOMO Codex Bridge", "Service restarted", [System.Windows.Forms.ToolTipIcon]::Info)
+$modelsItem = $contextMenu.Items.Add("查看可用模型列表 (Models)")
+$modelsItem.add_Click({
+  if (Test-Path $global:MomoBin) {
+    $output = & node "$global:MomoBin" models 2>&1 | Out-String
+    [System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Models", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+  }
 })
 
-$exitItem = $contextMenu.Items.Add("Exit Tray")
+$doctorItem = $contextMenu.Items.Add("运行健康诊断 (Doctor)")
+$doctorItem.add_Click({
+  if (Test-Path $global:MomoBin) {
+    $output = & node "$global:MomoBin" doctor 2>&1 | Out-String
+    [System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Doctor", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+  }
+})
+
+$logsItem = $contextMenu.Items.Add("查看代理日志 (Logs)")
+$logsItem.add_Click({
+  $logFiles = @(
+    [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "daemon.log"),
+    [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "proxy.log"),
+    [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "daemon.log"),
+    [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "bridge.log")
+  )
+  $opened = $false
+  foreach ($lf in $logFiles) {
+    if (Test-Path $lf) {
+      Start-Process "notepad.exe" -ArgumentList $lf
+      $opened = $true
+      break
+    }
+  }
+  if (-not $opened) {
+    [System.Windows.Forms.MessageBox]::Show("暂无日志记录", "MOMO API Proxy", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+  }
+})
+
+[void]$contextMenu.Items.Add("-")
+
+$updateItem = $contextMenu.Items.Add("检查并更新版本 (Update)")
+$updateItem.add_Click({
+  if (Test-Path $global:MomoBin) {
+    $output = & node "$global:MomoBin" update 2>&1 | Out-String
+    $notifyIcon.ShowBalloonTip(4000, "MOMO API Proxy", $output.Trim(), [System.Windows.Forms.ToolTipIcon]::Info)
+  }
+})
+
+$restartItem = $contextMenu.Items.Add("重启代理服务 (Restart)")
+$restartItem.add_Click({
+  try {
+    Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%momoapi-proxy.mjs%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%momo-codex-bridge.mjs%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  } catch {}
+  Start-Sleep -Milliseconds 400
+  Start-DaemonProcess
+  $notifyIcon.ShowBalloonTip(2000, "MOMO API Proxy", "服务正在重启...", [System.Windows.Forms.ToolTipIcon]::Info)
+})
+
+[void]$contextMenu.Items.Add("-")
+
+$exitItem = $contextMenu.Items.Add("退出托盘与服务 (Exit)")
 $exitItem.add_Click({
   $notifyIcon.Visible = $false
   $notifyIcon.Dispose()
+  try {
+    Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%momoapi-proxy.mjs%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%momo-codex-bridge.mjs%'" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  } catch {}
   [System.Windows.Forms.Application]::Exit()
 })
 
 $notifyIcon.ContextMenuStrip = $contextMenu
 
-# Periodic Polling Timer (Every 4s)
+# Periodic Polling Timer (Every 3s)
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 4000
+$timer.Interval = 3000
 $timer.add_Tick({
   $running = Check-BridgeRunning
   if ($running) {
     $notifyIcon.Icon = $activeIcon
-    $notifyIcon.Text = "MOMO API Proxy $Version: Running (:18789)"
-    $titleItem.Text = "MOMO API Proxy $Version (Running)"
+    $notifyIcon.Text = "MOMO API Proxy $Version (运行中 :18789)"
+    $titleItem.Text = "MOMO API Proxy $Version (运行中 :18789)"
   } else {
     $notifyIcon.Icon = $inactiveIcon
-    $notifyIcon.Text = "MOMO API Proxy $Version: Stopped"
-    $titleItem.Text = "MOMO API Proxy $Version (Stopped)"
+    $notifyIcon.Text = "MOMO API Proxy $Version (已停止)"
+    $titleItem.Text = "MOMO API Proxy $Version (已停止)"
   }
 })
 $timer.Start()
 
 # Welcome Notification
-$notifyIcon.ShowBalloonTip(3000, "MOMO API Proxy $Version", "Listening on http://127.0.0.1:18789/v1 (ChatGPT Desktop & Codex ready)", [System.Windows.Forms.ToolTipIcon]::Info)
+$notifyIcon.ShowBalloonTip(3000, "MOMO API Proxy $Version", "代理服务已就绪: http://127.0.0.1:18789/v1", [System.Windows.Forms.ToolTipIcon]::Info)
 
 # Run Form Loop
 [System.Windows.Forms.Application]::Run()
