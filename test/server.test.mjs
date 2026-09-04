@@ -515,4 +515,90 @@ test("forwardResponses: lowers Codex-Canvas namespace tools upstream and restore
       server.close();
     }
   });
+
+  test("bridges OpenAI /v1/chat/completions tool calls and custom tools when /v1/responses is not available", async () => {
+    let capturedBody = null;
+    const fakeFetch = async (url, init) => {
+      if (url.endsWith("/v1/responses")) {
+        return new Response(JSON.stringify({ error: { message: "Not found", code: 404 } }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      if (url.endsWith("/v1/chat/completions")) {
+        capturedBody = JSON.parse(init.body);
+        const sse = [
+          { choices: [{ delta: { content: "I will run the command." } }] },
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_exec_99", function: { name: "exec", arguments: "{\"input\":\"await tools.exec_command({ command: 'ls' })\"}" } }] } }] },
+        ].map((ev) => "data: " + JSON.stringify(ev) + "\n\n").join("") + "data: [DONE]\n\n";
+        return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+      }
+      return new Response("{}", { status: 200 });
+    };
+
+    await withServer(fakeFetch, async (base) => {
+      const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+      const response = await fetch(base + "/v1/responses", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: "gpt-4o",
+          instructions: "You are a helpful assistant.",
+          input: [{ role: "user", content: [{ type: "input_text", text: "Run ls" }] }],
+          tools: [{ type: "custom", name: "exec", description: "Run unified commands." }],
+        }),
+      });
+      const body = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(body, /response\.custom_tool_call_input\.done/);
+      assert.match(body, /call_exec_99/);
+      assert.match(body, /await tools\.exec_command/);
+      assert.match(body, /response\.completed/);
+    });
+
+    assert.equal(capturedBody.messages[0].role, "system");
+    assert.equal(capturedBody.messages[0].content, "You are a helpful assistant.");
+    assert.equal(capturedBody.messages[1].role, "user");
+    assert.equal(capturedBody.messages[1].content, "Run ls");
+    assert.equal(capturedBody.tools[0].function.name, "exec");
+    assert.equal(capturedBody.tools[0].function.parameters.required[0], "input");
+  });
+
+  test("buildOpenAIChatMessages pairs multi-turn function outputs with valid assistant tool_calls", async () => {
+    let capturedBody = null;
+    const fakeFetch = async (url, init) => {
+      if (url.endsWith("/v1/responses")) {
+        return new Response("Not found", { status: 404 });
+      }
+      capturedBody = JSON.parse(init.body);
+      const sse = "data: " + JSON.stringify({ choices: [{ delta: { content: "Files: file1.txt, file2.txt" } }] }) + "\n\n";
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    };
+
+    await withServer(fakeFetch, async (base) => {
+      const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+      const response = await fetch(base + "/v1/responses", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: "gpt-4o",
+          input: [
+            { type: "message", role: "user", content: [{ type: "input_text", text: "List directory" }] },
+            { type: "function_call", call_id: "call_ls_1", name: "exec", arguments: { cmd: "dir" } },
+            { type: "function_call_output", call_id: "call_ls_1", output: "file1.txt\nfile2.txt" },
+          ],
+        }),
+      });
+      const body = await response.text();
+      assert.equal(response.status, 200);
+      assert.match(body, /Files: file1\.txt/);
+    });
+
+    assert.equal(capturedBody.messages[0].role, "user");
+    assert.equal(capturedBody.messages[1].role, "assistant");
+    assert.equal(capturedBody.messages[1].tool_calls[0].id, "call_ls_1");
+    assert.equal(capturedBody.messages[2].role, "tool");
+    assert.equal(capturedBody.messages[2].tool_call_id, "call_ls_1");
+    assert.equal(capturedBody.messages[2].content, "file1.txt\nfile2.txt");
+  });
 });

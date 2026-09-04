@@ -607,13 +607,170 @@ export function normalizeResponsesPayload(payload) {
   return normalized;
 }
 
-async function bridgeChatCompletionsToResponses(response, settings, payload, fetchImpl, signal) {
-  const messages = buildClaudeMessages(payload.input || []);
+export function buildOpenAIChatMessages(input, instructions) {
+  const messages = [];
+  if (instructions && String(instructions).trim().length > 0) {
+    messages.push({ role: "system", content: String(instructions).trim() });
+  }
+
+  const items = asArray(input);
+  let pendingToolCalls = [];
+  let seenCallIds = new Set();
+  let mintedIdSeq = 0;
+
+  const mintId = () => {
+    let id = "";
+    do {
+      id = `call_minted_${++mintedIdSeq}`;
+    } while (seenCallIds.has(id));
+    seenCallIds.add(id);
+    return id;
+  };
+
+  const flushPendingToolCalls = () => {
+    if (pendingToolCalls.length === 0) return;
+    for (const call of pendingToolCalls) {
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: `[codex-bridge] tool execution recorded for "${call.name}".`,
+      });
+    }
+    pendingToolCalls = [];
+  };
+
+  for (const item of items) {
+    if (!item) continue;
+    if (typeof item === "string") {
+      flushPendingToolCalls();
+      messages.push({ role: "user", content: item });
+      continue;
+    }
+    if (typeof item !== "object") continue;
+
+    if (item.type === "agent_message" && Array.isArray(item.content)) {
+      const textParts = item.content
+        .filter((c) => c && (c.type === "input_text" || c.type === "text") && typeof c.text === "string")
+        .map((c) => c.text);
+      if (textParts.length > 0) {
+        flushPendingToolCalls();
+        messages.push({ role: "user", content: textParts.join("\n\n") });
+      }
+      continue;
+    }
+
+    if (item.type && KNOWN_METADATA_TYPES.has(item.type)) continue;
+
+    if (item.type === "message" || item.role) {
+      const role = item.role === "assistant" ? "assistant" : (item.role === "developer" || item.role === "system" ? "system" : "user");
+      let textContent = "";
+      if (typeof item.content === "string") {
+        textContent = item.content;
+      } else if (Array.isArray(item.content)) {
+        textContent = item.content
+          .filter((p) => p && typeof p === "object" && (p.type === "input_text" || p.type === "output_text" || p.type === "text"))
+          .map((p) => p.text || "")
+          .join("");
+      }
+      if (role === "assistant") {
+        flushPendingToolCalls();
+        messages.push({ role: "assistant", content: textContent });
+      } else if (role === "system") {
+        messages.push({ role: "system", content: textContent });
+      } else {
+        flushPendingToolCalls();
+        messages.push({ role: "user", content: textContent || "Continue." });
+      }
+      continue;
+    }
+
+    if (item.type === "function_call" || item.type === "custom_tool_call") {
+      const callId = item.call_id || mintId();
+      seenCallIds.add(callId);
+      const name = item.name || "tool";
+      let argsStr = "{}";
+      if (item.type === "custom_tool_call") {
+        argsStr = JSON.stringify({ input: typeof item.input === "string" ? item.input : JSON.stringify(item.input || "") });
+      } else {
+        argsStr = typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments || {});
+      }
+
+      const toolCallObj = {
+        id: callId,
+        type: "function",
+        function: { name, arguments: argsStr },
+      };
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg && lastMsg.role === "assistant") {
+        lastMsg.tool_calls = lastMsg.tool_calls || [];
+        lastMsg.tool_calls.push(toolCallObj);
+      } else {
+        messages.push({
+          role: "assistant",
+          content: "",
+          tool_calls: [toolCallObj],
+        });
+      }
+      pendingToolCalls.push({ id: callId, name });
+      continue;
+    }
+
+    if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
+      const callId = item.call_id || "call_unknown";
+      const textOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+      const matchIdx = pendingToolCalls.findIndex((c) => c.id === callId);
+      if (matchIdx >= 0) {
+        pendingToolCalls.splice(matchIdx, 1);
+      } else {
+        const hasMatchingToolCall = messages.some((m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.some((tc) => tc.id === callId));
+        if (!hasMatchingToolCall) {
+          messages.push({
+            role: "assistant",
+            content: "",
+            tool_calls: [{ id: callId, type: "function", function: { name: "tool", arguments: "{}" } }],
+          });
+        }
+      }
+      messages.push({
+        role: "tool",
+        tool_call_id: callId,
+        content: textOutput,
+      });
+      continue;
+    }
+  }
+
+  flushPendingToolCalls();
+  return messages.length > 0 ? messages : [{ role: "user", content: "Continue." }];
+}
+
+export async function bridgeChatCompletionsToResponses(response, settings, payload, fetchImpl, signal) {
+  const functions = extractFunctions(payload);
+  const messages = buildOpenAIChatMessages(payload.input || [], payload.instructions);
+  
   const chatBody = {
     model: payload.model,
     messages,
     stream: true,
   };
+
+  if (functions.length > 0) {
+    chatBody.tools = functions.map((f) => ({
+      type: "function",
+      function: {
+        name: f.name,
+        description: f.description,
+        parameters: f.parameters,
+      },
+    }));
+    chatBody.tool_choice = payload.tool_choice || "auto";
+  }
+
+  const rawEffort = payload.reasoning_effort || payload.model_reasoning_effort || payload.reasoning?.effort;
+  if (rawEffort) {
+    chatBody.reasoning_effort = String(rawEffort).toLowerCase();
+  }
+
   const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
     method: "POST",
     headers: upstreamHeaders(settings),
@@ -643,12 +800,74 @@ async function bridgeChatCompletionsToResponses(response, settings, payload, fet
   const emitter = new ResponseStreamEmitter(response, payload.model);
   emitter.start();
 
+  let fullAccumulatedText = "";
+  const toolCallsByIndex = new Map();
+
   for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
-    const delta = data.choices?.[0]?.delta?.content;
-    if (delta) {
-      emitter.writeTextDelta(delta);
+    const choice = data.choices?.[0];
+    if (!choice) continue;
+
+    const deltaContent = choice.delta?.content;
+    if (deltaContent) {
+      fullAccumulatedText += deltaContent;
+      if (!fullAccumulatedText.includes("<｜｜DSML｜｜") && !fullAccumulatedText.includes("<||DSML||") && !fullAccumulatedText.includes("<tool_calls>") && !fullAccumulatedText.includes("<invoke ")) {
+        emitter.writeTextDelta(deltaContent);
+      }
+    }
+
+    if (Array.isArray(choice.delta?.tool_calls)) {
+      for (const tc of choice.delta.tool_calls) {
+        const idx = tc.index ?? 0;
+        let existing = toolCallsByIndex.get(idx);
+        if (!existing) {
+          existing = { id: tc.id || ("call_" + randomUUID()), name: "", arguments: "" };
+          toolCallsByIndex.set(idx, existing);
+        }
+        if (tc.id) existing.id = tc.id;
+        if (tc.function?.name) existing.name += tc.function.name;
+        if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+      }
     }
   }
+
+  const hasDsml = fullAccumulatedText.includes("<｜｜DSML｜｜") || fullAccumulatedText.includes("<||DSML||") || fullAccumulatedText.includes("<tool_calls>") || fullAccumulatedText.includes("<invoke ");
+  if (hasDsml) {
+    const dsmlCalls = parseDsmlCalls(fullAccumulatedText);
+    const cleanText = stripDsmlMarkup(fullAccumulatedText).trim();
+    if (cleanText) {
+      emitter.writeTextDelta(cleanText);
+    }
+    for (const call of dsmlCalls) {
+      const mapped = restoreToolName(call.name, functions);
+      if (mapped.kind === "custom") {
+        emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
+      } else {
+        emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
+      }
+    }
+  }
+
+  if (toolCallsByIndex.size > 0) {
+    for (const [, call] of toolCallsByIndex.entries()) {
+      const mapped = restoreToolName(call.name, functions);
+      let parsedArgs = {};
+      try {
+        parsedArgs = JSON.parse(call.arguments);
+      } catch {
+        parsedArgs = call.arguments;
+      }
+
+      if (mapped.kind === "custom") {
+        const inputVal = typeof parsedArgs === "object" && parsedArgs !== null && typeof parsedArgs.input === "string"
+          ? parsedArgs.input
+          : customInput(parsedArgs);
+        emitter.writeCustomToolCall({ callId: call.id, name: mapped.originalName, input: inputVal });
+      } else {
+        emitter.writeFunctionCall({ callId: call.id, name: mapped.originalName, arguments: parsedArgs });
+      }
+    }
+  }
+
   emitter.complete();
 }
 

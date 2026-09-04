@@ -1,6 +1,6 @@
 {
   "name": "@momo-api/codex-bridge",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "private": true,
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",

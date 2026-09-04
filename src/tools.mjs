@@ -11,12 +11,17 @@ function toFunction(tool, namespace) {
   const rawName = tool.name || tool.function?.name;
   if (!rawName) return null;
   const name = namespace ? `${safeName(namespace)}__${safeName(rawName)}` : safeName(rawName);
-  const custom = tool.type === "custom";
+  const custom = tool.type === "custom" || rawName === "exec" || rawName === "apply_patch";
+  const inputDescription = rawName === "exec"
+    ? "JavaScript source for unified exec. Use await tools.exec_command(...) for shell commands and text(...) to return textual output; do not provide a bare shell command."
+    : (rawName === "apply_patch"
+      ? "Raw tool input. For apply_patch, begin exactly with `*** Begin Patch` (no trailing `***`), then use its standard patch envelope."
+      : "Raw freeform input for this tool.");
   const parameters = custom
     ? {
       type: "object",
       properties: {
-        input: { type: "string", description: "The complete raw input for this custom tool. Do not wrap it in JSON." },
+        input: { type: "string", description: inputDescription },
       },
       required: ["input"],
       additionalProperties: false,
@@ -28,7 +33,7 @@ function toFunction(tool, namespace) {
     namespace: namespace || null,
     kind: custom ? "custom" : "function",
     description: custom
-      ? `${tool.description || "Codex custom tool"}\nReturn the complete freeform payload in the required input string exactly as the tool expects.`
+      ? `${tool.description || "Codex custom tool"}\n${inputDescription}`
       : tool.description || tool.function?.description || "Codex tool",
     parameters,
   };
@@ -46,7 +51,7 @@ export function extractFunctions(request) {
       for (const child of asArray(tool.tools)) visit(child, namespace);
       return;
     }
-    if (tool.type === "function" || tool.function?.name || tool.name) {
+    if (tool.type === "custom" || tool.type === "function" || tool.function?.name || tool.name) {
       const converted = toFunction(tool, namespace);
       if (converted) result.push(converted);
     }
