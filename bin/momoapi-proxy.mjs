@@ -68,31 +68,32 @@ async function waitForHealth(port, maxWaitMs = 3500) {
 }
 
 async function startDaemon(binFile, scriptDir, port) {
+  if (await waitForHealth(port, 400)) {
+    if (process.platform === "win32") {
+      installWindowsDesktop({ port });
+    }
+    return true;
+  }
+
   const logFile = daemonLogPath();
-  const out = openSync(logFile, "a");
-  const err = openSync(logFile, "a");
+  let outStream = "ignore";
+  try {
+    const fd = openSync(logFile, "a");
+    outStream = fd;
+  } catch {}
 
   const daemon = spawn(process.execPath, [binFile, "serve"], {
     detached: true,
-    stdio: ["ignore", out, err],
+    stdio: ["ignore", outStream, outStream],
     windowsHide: true,
   });
   daemon.unref();
 
   if (process.platform === "win32") {
-    killWindowsProcessByPattern("tray.ps1");
-    const trayScript = join(scriptDir, "tray.ps1");
-    if (existsSync(trayScript)) {
-      const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      tray.unref();
-    }
+    installWindowsDesktop({ port });
   }
 
-  const ok = await waitForHealth(port, 3500);
+  const ok = await waitForHealth(port, 4000);
   if (!ok) {
     let recentError = "";
     if (existsSync(logFile)) {
@@ -101,7 +102,7 @@ async function startDaemon(binFile, scriptDir, port) {
         recentError = lines.join("\n");
       } catch {}
     }
-    throw new Error("MOMO Codex Bridge daemon failed to start on port " + port + (recentError ? ":\n" + recentError : "."));
+    throw new Error("MOMO API Proxy daemon failed to start on port " + port + (recentError ? ":\n" + recentError : "."));
   }
   return true;
 }

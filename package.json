@@ -1,6 +1,6 @@
 {
   "name": "@momo-api/momoapi-proxy",
-  "version": "0.8.9",
+  "version": "0.9.0",
   "private": true,
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",
