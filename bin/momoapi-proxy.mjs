@@ -3,6 +3,7 @@ import { spawnSync, spawn, execSync } from "node:child_process";
 import { openSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import readline from "node:readline/promises";
 import { readSettings, resolveSettings, appHome } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
 import { rollback, setup, uninstall } from "../src/setup.mjs";
@@ -113,25 +114,62 @@ const value = (name) => {
 };
 const hasFlag = (name) => args.includes(name);
 
+async function promptApiKey() {
+  console.log("\n==================================================================");
+  console.log("             MOMO API Proxy — Windows 一键向导");
+  console.log("==================================================================");
+  console.log("欢迎使用 MOMO API Proxy 本地加速与协议网关！");
+  console.log("检测到您是首次使用或尚未配置 API Key。");
+  console.log("👉 如果您还没有 API Key，请在控制台获取: https://momoapi.us/console/token\n");
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const answer = await rl.question("请输入您的 MOMO API Key (例如 sk-...): ");
+    return answer.trim();
+  } finally {
+    rl.close();
+  }
+}
+
 async function main() {
   if (command === "auto") {
     let settings = null;
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
-    const port = settings.port || 18789;
+    const port = settings?.port || 18789;
+
+    const binFile = fileURLToPath(import.meta.url);
+    const scriptDir = dirname(binFile);
+
+    if (!settings?.apiKey) {
+      const enteredKey = await promptApiKey();
+      if (!enteredKey) {
+        console.error("❌ 错误: 未输入有效的 API Key，配置已中止。");
+        process.exit(1);
+      }
+      console.log("\n正在为您自动配置 Codex 与模型目录...");
+      const result = await setup({ apiKey: enteredKey, endpoint: "https://momoapi.us", port, autostart: true, desktopAliases: true });
+      console.log("✅ [1/4] 已写入 Codex 配置: ~/.codex/config.toml (Provider: momoapi-proxy)");
+      console.log("✅ [2/4] 已同步模型目录: " + result.models + " 个模型 (默认: " + result.defaultModel + ")");
+      settings = { apiKey: enteredKey, endpoint: "https://momoapi.us", port };
+    }
+
     let isRunning = false;
     try {
       const res = await fetch("http://127.0.0.1:" + port + "/healthz");
       if (res.ok) isRunning = true;
     } catch {}
 
-    const binFile = fileURLToPath(import.meta.url);
-    const scriptDir = dirname(binFile);
-
     if (!isRunning) {
-      console.log("Starting MOMO API Proxy in background...");
+      console.log("✅ [3/4] 启动本地代理服务: http://127.0.0.1:" + port + "/v1");
       await startDaemon(binFile, scriptDir, port);
-      console.log("MOMO API Proxy started successfully! Listening on http://127.0.0.1:" + port + "/v1 (Taskbar Tray active)");
-      console.log("Run 'momoapi models' to view models, or 'momoapi stop' to stop.");
+      console.log("✅ [4/4] 系统托盘常驻就绪");
+      console.log("\n🎉 MOMO API Proxy 启动就绪！");
+      console.log("在 Codex 中选择 'momoapi-proxy' 即可开始享受极速编程与工具调用体验。");
+      console.log("\n常用命令:\n  momoapi status   - 查看服务状态\n  momoapi models   - 查看可用模型\n  momoapi restart  - 重启代理服务\n  momoapi stop     - 停止代理服务");
     } else {
       if (process.platform === "win32") {
         const isTrayRunning = isWindowsProcessRunning("tray.ps1");
@@ -145,32 +183,35 @@ async function main() {
           tray.unref();
         }
       }
-      console.log("MOMO API Proxy is currently running at http://127.0.0.1:" + port + "/v1");
+      console.log("MOMO API Proxy 当前正在运行: http://127.0.0.1:" + port + "/v1");
       const catalog = readCatalog();
-      console.log("Models synced: " + (catalog?.models?.length || 0) + " (Endpoint: " + (settings.endpoint || "https://momoapi.us") + ")");
-      console.log("\nCommands:\n  momoapi          - Start service in background (or check status)\n  momoapi status   - Check detailed status\n  momoapi models   - List available models\n  momoapi restart  - Restart daemon & tray\n  momoapi stop     - Stop service\n  momoapi update   - Update to latest version");
+      console.log("已同步模型数: " + (catalog?.models?.length || 0) + " (上游: " + (settings.endpoint || "https://momoapi.us") + ")");
+      console.log("\n常用命令:\n  momoapi status   - 查看详细状态\n  momoapi models   - 查看可用模型\n  momoapi restart  - 重启服务与托盘\n  momoapi stop     - 停止服务\n  momoapi update   - 更新到最新版本");
     }
     return;
   }
   if (command === "setup" || command === "install") {
-    const apiKey = value("--api-key") || process.env.MOMO_API_KEY;
+    let apiKey = value("--api-key") || process.env.MOMO_API_KEY;
     if (!apiKey) {
-      console.error("Error: --api-key <MOMO_KEY> is required (or set MOMO_API_KEY environment variable).");
-      process.exit(1);
+      apiKey = await promptApiKey();
+      if (!apiKey) {
+        console.error("Error: --api-key <MOMO_KEY> is required.");
+        process.exit(1);
+      }
     }
     const endpoint = value("--endpoint");
     const port = Number(value("--port") || 18789);
     const autostart = !hasFlag("--no-autostart");
     const desktopAliases = !hasFlag("--no-desktop-aliases");
 
-    console.log("Configuring MOMO Codex Bridge...");
+    console.log("正在配置 MOMO API Proxy...");
     const result = await setup({ apiKey, endpoint, port, autostart, desktopAliases });
-    console.log("MOMO Codex Bridge configured successfully!");
-    console.log("  - Endpoint: " + (endpoint || "https://momoapi.us"));
-    console.log("  - Local Bridge: http://127.0.0.1:" + port + "/v1");
-    console.log("  - Models synced: " + result.models + " (default: " + result.defaultModel + ")");
-    console.log("  - Autostart: " + (result.autostart?.installed ? "Enabled (" + result.autostart.type + ")" : "Disabled"));
-    console.log("\nRun 'momo-codex-bridge doctor' to verify health, or 'momo-codex-bridge serve' to start now.");
+    console.log("MOMO API Proxy 配置成功！");
+    console.log("  - 上游端点: " + (endpoint || "https://momoapi.us"));
+    console.log("  - 本地代理: http://127.0.0.1:" + port + "/v1");
+    console.log("  - 模型已同步: " + result.models + " (默认: " + result.defaultModel + ")");
+    console.log("  - 开机自启: " + (result.autostart?.installed ? "已启用 (" + result.autostart.type + ")" : "未启用"));
+    console.log("\n运行 'momoapi start' 启动后台服务，或 'momoapi doctor' 运行健康检查。");
   } else if (command === "start" || command === "up" || command === "daemon") {
     let settings = null;
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
@@ -410,12 +451,12 @@ async function main() {
       console.log(res.message);
     }
   } else if (command === "version" || command === "-v" || command === "--version") {
-    console.log("momo-codex-bridge v" + getCurrentVersion());
+    console.log("momoapi-proxy v" + getCurrentVersion());
   } else if (command === "uninstall") {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO Codex Bridge - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momo-codex-bridge start                     - Start daemon & taskbar tray in background\n  momo-codex-bridge stop                      - Stop running bridge service\n  momo-codex-bridge restart                   - Restart bridge daemon & taskbar tray\n  momo-codex-bridge serve                     - Run in foreground (live debug logs)\n  momo-codex-bridge status                    - Check running status\n  momo-codex-bridge models                    - List available synced models\n  momo-codex-bridge sync                      - Sync model catalog from MOMO API\n  momo-codex-bridge update [--force]          - Update to latest version\n  momo-codex-bridge doctor                    - Run health diagnostics\n  momo-codex-bridge migrate-history           - Unify previous conversation histories\n  momo-codex-bridge logs [-n 50]              - View recent request logs\n  momo-codex-bridge tray                      - Launch taskbar tray companion\n  momo-codex-bridge test <model>              - Run quick response test\n  momo-codex-bridge rollback                  - Restore previous Codex config\n  momo-codex-bridge uninstall [--remove-key]  - Uninstall bridge\n");
+    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
   }
 }
 
