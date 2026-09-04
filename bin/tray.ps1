@@ -10,17 +10,18 @@ $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# Resolve exact absolute path for momoapi-proxy.mjs
-$userHome = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile)
-$global:MomoBin = [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs")
-if (-not (Test-Path $global:MomoBin)) {
-  $global:MomoBin = [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "app", "bin", "momo-codex-bridge.mjs")
-}
-if (-not (Test-Path $global:MomoBin)) {
-  $global:MomoBin = [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs")
-}
-if (-not (Test-Path $global:MomoBin)) {
-  $global:MomoBin = [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "app", "bin", "momo-codex-bridge.mjs")
+function Get-MomoBinPath {
+  $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile) }
+  $paths = @(
+    [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs"),
+    [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "app", "bin", "momo-codex-bridge.mjs"),
+    [System.IO.Path]::Combine($homeDir, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs"),
+    [System.IO.Path]::Combine($homeDir, ".momo-codex-bridge", "app", "bin", "momo-codex-bridge.mjs")
+  )
+  foreach ($p in $paths) {
+    if (Test-Path $p) { return $p }
+  }
+  return [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs")
 }
 
 $Version = "v0.9.0"
@@ -80,8 +81,9 @@ function Check-BridgeRunning {
 
 function Start-DaemonProcess {
   if (-not (Check-BridgeRunning)) {
-    if (Test-Path $global:MomoBin) {
-      Start-Process -FilePath "node" -ArgumentList @($global:MomoBin, "serve") -WindowStyle Hidden
+    $bin = Get-MomoBinPath
+    if (Test-Path $bin) {
+      Start-Process -FilePath "node" -ArgumentList @($bin, "serve") -WindowStyle Hidden
       Start-Sleep -Milliseconds 600
     }
   }
@@ -114,27 +116,30 @@ $portalItem.add_Click({
 
 $modelsItem = $contextMenu.Items.Add("查看可用模型列表 (Models)")
 $modelsItem.add_Click({
-  if (Test-Path $global:MomoBin) {
-    $output = & node "$global:MomoBin" models 2>&1 | Out-String
+  $bin = Get-MomoBinPath
+  if (Test-Path $bin) {
+    $output = & node "$bin" models 2>&1 | Out-String
     [System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Models", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
   }
 })
 
 $doctorItem = $contextMenu.Items.Add("运行健康诊断 (Doctor)")
 $doctorItem.add_Click({
-  if (Test-Path $global:MomoBin) {
-    $output = & node "$global:MomoBin" doctor 2>&1 | Out-String
+  $bin = Get-MomoBinPath
+  if (Test-Path $bin) {
+    $output = & node "$bin" doctor 2>&1 | Out-String
     [System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Doctor", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
   }
 })
 
 $logsItem = $contextMenu.Items.Add("查看代理日志 (Logs)")
 $logsItem.add_Click({
+  $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile) }
   $logFiles = @(
-    [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "daemon.log"),
-    [System.IO.Path]::Combine($userHome, ".momoapi-proxy", "proxy.log"),
-    [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "daemon.log"),
-    [System.IO.Path]::Combine($userHome, ".momo-codex-bridge", "bridge.log")
+    [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "daemon.log"),
+    [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "proxy.log"),
+    [System.IO.Path]::Combine($homeDir, ".momo-codex-bridge", "daemon.log"),
+    [System.IO.Path]::Combine($homeDir, ".momo-codex-bridge", "bridge.log")
   )
   $opened = $false
   foreach ($lf in $logFiles) {
@@ -153,8 +158,9 @@ $logsItem.add_Click({
 
 $updateItem = $contextMenu.Items.Add("检查并更新版本 (Update)")
 $updateItem.add_Click({
-  if (Test-Path $global:MomoBin) {
-    $output = & node "$global:MomoBin" update 2>&1 | Out-String
+  $bin = Get-MomoBinPath
+  if (Test-Path $bin) {
+    $output = & node "$bin" update 2>&1 | Out-String
     $notifyIcon.ShowBalloonTip(4000, "MOMO API Proxy", $output.Trim(), [System.Windows.Forms.ToolTipIcon]::Info)
   }
 })

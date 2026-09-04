@@ -92,22 +92,24 @@ if (Test-Path '${startupDir.replace(/'/g, "''")}') {
     spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript], { stdio: "ignore" });
   } catch {}
 
-  // 4. Launch Native Tray Companion
+  // 4. Force restart Native Tray Companion with fresh binary
   let trayLaunched = false;
   if (existsSync(targetTray)) {
     try {
-      const isRunning = isWindowsProcessRunning("MomoApiProxyTray.exe");
-      if (!isRunning) {
-        const p = spawn(targetTray, ["-p", String(port)], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: false,
-        });
-        p.unref();
-        trayLaunched = true;
-      } else {
-        trayLaunched = true;
-      }
+      const wql = "CommandLine LIKE '%tray.ps1%' OR Name LIKE '%MomoApiProxyTray%' OR Name LIKE '%momoapi-tray%'";
+      spawnSync("powershell.exe", [
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_Process -Filter \"" + wql + "\" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+      ], { stdio: "ignore" });
+
+      const p = spawn(targetTray, ["-p", String(port)], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+      });
+      p.unref();
+      trayLaunched = true;
     } catch {}
   }
 

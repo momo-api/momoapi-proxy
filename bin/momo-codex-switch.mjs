@@ -1,2 +1,3 @@
 #!/usr/bin/env node
-import "./momo-codex-bridge.mjs";
+// MOMO API Proxy (Compatibility alias for momo-codex-switch)
+import "./momoapi-proxy.mjs";
