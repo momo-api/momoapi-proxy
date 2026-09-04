@@ -1,23 +1,24 @@
 {
-  "name": "@momo-api/codex-bridge",
-  "version": "0.8.8",
+  "name": "@momo-api/momoapi-proxy",
+  "version": "0.8.9",
   "private": true,
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",
   "bin": {
-    "momoapi": "bin/momo-codex-bridge.mjs",
-    "momo": "bin/momo-codex-bridge.mjs",
-    "momo-codex-bridge": "bin/momo-codex-bridge.mjs",
-    "momo-codex-switch": "bin/momo-codex-switch.mjs"
+    "momoapi-proxy": "bin/momoapi-proxy.mjs",
+    "momoapi": "bin/momoapi-proxy.mjs",
+    "momo": "bin/momoapi-proxy.mjs",
+    "momo-codex-bridge": "bin/momoapi-proxy.mjs",
+    "momo-codex-switch": "bin/momoapi-proxy.mjs"
   },
   "scripts": {
-    "start": "node bin/momo-codex-bridge.mjs serve",
+    "start": "node bin/momoapi-proxy.mjs serve",
     "test": "node --test test/server.test.mjs test/setup.test.mjs test/updater.test.mjs test/compat.test.mjs",
-    "doctor": "node bin/momo-codex-bridge.mjs doctor",
-    "models": "node bin/momo-codex-bridge.mjs models",
-    "status": "node bin/momo-codex-bridge.mjs status",
-    "test:container": "podman build -t momo-codex-switch:test . && podman run --rm momo-codex-switch:test",
-    "test:codex-container": "podman build -f Dockerfile.codex-smoke -t momo-codex-switch:codex-smoke . && podman run --rm momo-codex-switch:codex-smoke"
+    "doctor": "node bin/momoapi-proxy.mjs doctor",
+    "models": "node bin/momoapi-proxy.mjs models",
+    "status": "node bin/momoapi-proxy.mjs status",
+    "test:container": "podman build -t momoapi-proxy:test . && podman run --rm momoapi-proxy:test",
+    "test:codex-container": "podman build -f Dockerfile.codex-smoke -t momoapi-proxy:codex-smoke . && podman run --rm momoapi-proxy:codex-smoke"
   },
   "engines": {
     "node": ">=22"

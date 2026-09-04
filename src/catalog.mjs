@@ -54,7 +54,7 @@ export function codexHome(env = process.env) {
 }
 
 export function catalogPath(env = process.env) {
-  return join(codexHome(env), "model-catalogs", "momo-codex-bridge.json");
+  return join(codexHome(env), "model-catalogs", "momoapi-proxy.json");
 }
 
 let cachedTemplate = null;

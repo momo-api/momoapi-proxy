@@ -6,14 +6,16 @@ import { randomBytes } from "node:crypto";
 export const DEFAULT_ENDPOINT = "https://momoapi.us";
 
 export function appHome(env = process.env) {
-  return env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME || join(homedir(), ".momo-codex-bridge");
+  return env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME || join(homedir(), ".momoapi-proxy");
 }
 
 export function settingsPath(env = process.env) {
   const primary = join(appHome(env), "settings.json");
   if (existsSync(primary)) return primary;
-  const legacy = join(homedir(), ".momo-codex-switch", "settings.json");
-  if (existsSync(legacy)) return legacy;
+  const legacy1 = join(homedir(), ".momo-codex-bridge", "settings.json");
+  if (existsSync(legacy1)) return legacy1;
+  const legacy2 = join(homedir(), ".momo-codex-switch", "settings.json");
+  if (existsSync(legacy2)) return legacy2;
   return primary;
 }
 

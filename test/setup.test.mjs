@@ -19,12 +19,12 @@ test("setup writes a local provider configuration and rollback restores it", asy
     const written = readFileSync(result.config, "utf8");
     assert.equal(result.defaultModel, "gemini-3.7-flash");
     assert.match(written, /model = "gemini-3\.7-flash"/);
-    assert.match(written, /model_provider = "momo-codex-bridge"/);
-    assert.match(written, /\[model_providers\.momo-codex-bridge\]/);
-    assert.match(written, /name = "MOMO Codex Bridge"/);
+    assert.match(written, /model_provider = "momoapi-proxy"/);
+    assert.match(written, /\[model_providers\.momoapi-proxy\]/);
+    assert.match(written, /name = "MOMO API Proxy"/);
     assert.match(written, /base_url = "http:\/\/127\.0\.0\.1:19999\/v1"/);
     assert.match(written, /requires_openai_auth = false/);
-    assert.match(written, /MOMO_CODEX_BRIDGE_MANAGED/);
+    assert.match(written, /MOMOAPI_PROXY_MANAGED/);
     assert.match(readFileSync(result.catalog, "utf8"), /gemini-3\.7-flash/);
     assert.equal(isAutostartInstalled(process.platform, env), true);
     assert.deepEqual(rollback(env), [result.config]);

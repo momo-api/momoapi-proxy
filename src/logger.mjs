@@ -3,8 +3,8 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 export function logPath(env = process.env) {
-  const root = env.MOMO_BRIDGE_HOME || join(homedir(), ".momo-codex-bridge");
-  return join(root, "bridge.log");
+  const root = env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || join(homedir(), ".momoapi-proxy");
+  return join(root, "proxy.log");
 }
 
 function writeLog(line, env = process.env) {
