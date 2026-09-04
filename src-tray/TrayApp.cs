@@ -32,7 +32,6 @@ namespace MomoApi.Tray
 
             if (!createdNew)
             {
-                MessageBox.Show("MOMO API Proxy 托盘程序已在运行中，请在右下角任务栏查看。", "MOMO API", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -52,8 +51,10 @@ namespace MomoApi.Tray
     public class TrayApplicationContext : ApplicationContext
     {
         private readonly int port;
-        private readonly string installDir;
-        private readonly string bridgeBin;
+        private readonly string userHome;
+        private readonly string proxyHome;
+        private readonly string proxyExe;
+        private readonly string proxyMjs;
         private readonly NotifyIcon notifyIcon;
         private readonly System.Windows.Forms.Timer healthTimer;
         private readonly Icon activeIcon;
@@ -65,9 +66,10 @@ namespace MomoApi.Tray
         public TrayApplicationContext(int port)
         {
             this.port = port;
-            string userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            this.installDir = Path.Combine(userHome, ".momo-codex-bridge", "app");
-            this.bridgeBin = Path.Combine(this.installDir, "bin", "momo-codex-bridge.mjs");
+            this.userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            this.proxyHome = Path.Combine(userHome, ".momoapi-proxy");
+            this.proxyExe = Path.Combine(proxyHome, "bin", "momoapi-proxy.exe");
+            this.proxyMjs = Path.Combine(proxyHome, "app", "bin", "momoapi-proxy.mjs");
 
             this.activeIcon = CreateBadgeIcon(true);
             this.inactiveIcon = CreateBadgeIcon(false);
@@ -85,18 +87,22 @@ namespace MomoApi.Tray
             openPortal.Click += (s, e) => Process.Start(new ProcessStartInfo("https://momoapi.us") { UseShellExecute = true });
 
             var viewModels = menu.Items.Add("查看可用模型列表 (Models)");
-            viewModels.Click += (s, e) => RunNodeCli("models", true);
+            viewModels.Click += (s, e) => RunCli("models", true);
 
             var runDoctor = menu.Items.Add("运行健康诊断 (Doctor)");
-            runDoctor.Click += (s, e) => RunNodeCli("doctor", true);
+            runDoctor.Click += (s, e) => RunCli("doctor", true);
 
             var viewLogs = menu.Items.Add("查看代理日志 (Logs)");
             viewLogs.Click += (s, e) =>
             {
-                string logFile = Path.Combine(userHome, ".momo-codex-bridge", "daemon.log");
+                string logFile = Path.Combine(proxyHome, "daemon.log");
                 if (!File.Exists(logFile))
                 {
-                    logFile = Path.Combine(userHome, ".momo-codex-bridge", "bridge.log");
+                    logFile = Path.Combine(proxyHome, "proxy.log");
+                }
+                if (!File.Exists(logFile))
+                {
+                    logFile = Path.Combine(userHome, ".momo-codex-bridge", "daemon.log");
                 }
                 if (File.Exists(logFile))
                 {
@@ -104,7 +110,7 @@ namespace MomoApi.Tray
                 }
                 else
                 {
-                    MessageBox.Show("暂无日志记录", "MOMO API", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("暂无日志记录", "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             };
 
@@ -118,7 +124,7 @@ namespace MomoApi.Tray
             };
 
             var updateItem = menu.Items.Add("检查并更新版本 (Update)");
-            updateItem.Click += (s, e) => RunNodeCli("update", true);
+            updateItem.Click += (s, e) => RunCli("update", true);
 
             autostartItem = new ToolStripMenuItem("开机自动启动");
             autostartItem.CheckOnClick = true;
@@ -146,48 +152,26 @@ namespace MomoApi.Tray
 
             notifyIcon.DoubleClick += (s, e) => Process.Start(new ProcessStartInfo("https://momoapi.us") { UseShellExecute = true });
 
-            // Ensure bridge is running
             EnsureBridgeRunning();
 
             healthTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-            healthTimer.Tick += (s, e) => CheckHealthAndUpdateUi();
+            healthTimer.Tick += (s, e) => UpdateHealthStatus();
             healthTimer.Start();
-
-            notifyIcon.ShowBalloonTip(3000, "MOMO API Proxy", "服务已就绪！监听地址：http://127.0.0.1:" + port + "/v1\n已完美支持 ChatGPT 桌面端与 Codex。", ToolTipIcon.Info);
         }
 
-        private void CheckHealthAndUpdateUi()
+        private void UpdateHealthStatus()
         {
-            try
+            bool healthy = CheckHealthOnce();
+            if (healthy != isRunning)
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/healthz");
-                req.Timeout = 1200;
-                using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
-                {
-                    if (resp.StatusCode == HttpStatusCode.OK)
-                    {
-                        if (!isRunning)
-                        {
-                            isRunning = true;
-                            notifyIcon.Icon = activeIcon;
-                            notifyIcon.Text = "MOMO API Proxy: 运行中 (: " + port + ")";
-                            titleItem.Text = "MOMO API Proxy: 运行中 (:" + port + ")";
-                        }
-                        return;
-                    }
-                }
-            }
-            catch
-            {
-                // Fall through to inactive
-            }
-
-            if (isRunning)
-            {
-                isRunning = false;
-                notifyIcon.Icon = inactiveIcon;
-                notifyIcon.Text = "MOMO API Proxy: 已停止";
-                titleItem.Text = "MOMO API Proxy: 已停止 (:" + port + ")";
+                isRunning = healthy;
+                notifyIcon.Icon = isRunning ? activeIcon : inactiveIcon;
+                titleItem.Text = isRunning
+                    ? "MOMO API Proxy (运行中 :" + port + ")"
+                    : "MOMO API Proxy (已停止)";
+                notifyIcon.Text = isRunning
+                    ? "MOMO API Proxy 运行中 (127.0.0.1:" + port + ")"
+                    : "MOMO API Proxy 服务已停止";
             }
         }
 
@@ -197,6 +181,7 @@ namespace MomoApi.Tray
             {
                 StartBridge();
             }
+            UpdateHealthStatus();
         }
 
         private bool CheckHealthOnce()
@@ -215,11 +200,11 @@ namespace MomoApi.Tray
 
         private void StartBridge()
         {
-            if (File.Exists(bridgeBin))
+            try
             {
-                try
+                if (File.Exists(proxyExe))
                 {
-                    ProcessStartInfo psi = new ProcessStartInfo("node", "\"" + bridgeBin + "\" serve")
+                    ProcessStartInfo psi = new ProcessStartInfo(proxyExe, "serve")
                     {
                         CreateNoWindow = true,
                         UseShellExecute = false,
@@ -227,24 +212,43 @@ namespace MomoApi.Tray
                     };
                     Process.Start(psi);
                 }
-                catch { }
+                else if (File.Exists(proxyMjs))
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo("node", "\"" + proxyMjs + "\" serve")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psi);
+                }
             }
+            catch { }
         }
 
         private void StopBridge()
         {
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("node", "\"" + bridgeBin + "\" stop")
+                if (File.Exists(proxyExe))
                 {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
-                Process p = Process.Start(psi);
-                if (p != null)
+                    ProcessStartInfo psi = new ProcessStartInfo(proxyExe, "stop")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psi);
+                }
+                else if (File.Exists(proxyMjs))
                 {
-                    p.WaitForExit(2000);
+                    ProcessStartInfo psi = new ProcessStartInfo("node", "\"" + proxyMjs + "\" stop")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+                    Process.Start(psi);
                 }
             }
             catch { }
@@ -257,19 +261,32 @@ namespace MomoApi.Tray
             StartBridge();
         }
 
-        private void RunNodeCli(string subCommand, bool showResult)
+        private void RunCli(string subCommand, bool showResult)
         {
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("node", "\"" + bridgeBin + "\" " + subCommand)
+                ProcessStartInfo psi = null;
+                if (File.Exists(proxyExe))
                 {
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    StandardOutputEncoding = System.Text.Encoding.UTF8,
-                    StandardErrorEncoding = System.Text.Encoding.UTF8
-                };
+                    psi = new ProcessStartInfo(proxyExe, subCommand);
+                }
+                else if (File.Exists(proxyMjs))
+                {
+                    psi = new ProcessStartInfo("node", "\"" + proxyMjs + "\" " + subCommand);
+                }
+                else
+                {
+                    MessageBox.Show("未找到代理主程序", "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                psi.CreateNoWindow = true;
+                psi.UseShellExecute = false;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                psi.StandardOutputEncoding = System.Text.Encoding.UTF8;
+                psi.StandardErrorEncoding = System.Text.Encoding.UTF8;
+
                 using (Process p = Process.Start(psi))
                 {
                     string output = p.StandardOutput.ReadToEnd();
@@ -278,7 +295,7 @@ namespace MomoApi.Tray
                     if (showResult)
                     {
                         string msg = string.IsNullOrWhiteSpace(output) ? error : output;
-                        MessageBox.Show(msg.Trim(), "MOMO API - " + subCommand, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        MessageBox.Show(msg.Trim(), "MOMO API Proxy - " + subCommand, MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                 }
             }
@@ -286,7 +303,7 @@ namespace MomoApi.Tray
             {
                 if (showResult)
                 {
-                    MessageBox.Show("执行出错: " + ex.Message, "MOMO API", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("执行出错: " + ex.Message, "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
@@ -294,25 +311,39 @@ namespace MomoApi.Tray
         private bool CheckAutostart()
         {
             string startupDir = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            return File.Exists(Path.Combine(startupDir, "momoapi-tray.lnk")) || File.Exists(Path.Combine(startupDir, "momoapi-tray.cmd"));
+            return File.Exists(Path.Combine(startupDir, "momoapi-proxy.lnk")) || File.Exists(Path.Combine(startupDir, "momoapi-proxy-tray.lnk"));
         }
 
         private void ToggleAutostart(bool enable)
         {
             string startupDir = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            string cmdFile = Path.Combine(startupDir, "momoapi-tray.cmd");
+            string lnkPath = Path.Combine(startupDir, "momoapi-proxy-tray.lnk");
             string currentExe = Application.ExecutablePath;
 
             try
             {
                 if (enable)
                 {
-                    File.WriteAllText(cmdFile, "@start \"\" \"" + currentExe + "\"\r\n");
+                    CreateShortcut(lnkPath, currentExe, "MOMO API Proxy Tray Companion");
                 }
                 else
                 {
-                    if (File.Exists(cmdFile)) File.Delete(cmdFile);
+                    if (File.Exists(lnkPath)) File.Delete(lnkPath);
                 }
+            }
+            catch { }
+        }
+
+        private static void CreateShortcut(string shortcutPath, string targetPath, string description)
+        {
+            try
+            {
+                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                dynamic shell = Activator.CreateInstance(shellType);
+                dynamic shortcut = shell.CreateShortcut(shortcutPath);
+                shortcut.TargetPath = targetPath;
+                shortcut.Description = description;
+                shortcut.Save();
             }
             catch { }
         }
@@ -358,8 +389,6 @@ namespace MomoApi.Tray
             {
                 if (healthTimer != null) healthTimer.Dispose();
                 if (notifyIcon != null) notifyIcon.Dispose();
-                if (activeIcon != null) activeIcon.Dispose();
-                if (inactiveIcon != null) inactiveIcon.Dispose();
             }
             base.Dispose(disposing);
         }

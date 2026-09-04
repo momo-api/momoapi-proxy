@@ -13,6 +13,7 @@ import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogs, logInfo, logError } from "../src/logger.mjs";
 import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
+import { installWindowsDesktop } from "../src/desktop-install.mjs";
 
 process.on("uncaughtException", (err) => {
   logError("Uncaught Exception", err);
@@ -164,26 +165,23 @@ async function main() {
     } catch {}
 
     if (!isRunning) {
-      console.log("✅ [3/4] 启动本地代理服务: http://127.0.0.1:" + port + "/v1");
+      console.log("✅ [3/5] 启动本地代理服务: http://127.0.0.1:" + port + "/v1");
       await startDaemon(binFile, scriptDir, port);
-      console.log("✅ [4/4] 系统托盘常驻就绪");
-      console.log("\n🎉 MOMO API Proxy 启动就绪！");
+      
+      const desktop = installWindowsDesktop({ port });
+      if (desktop?.installed) {
+        console.log("✅ [4/5] 已创建桌面快捷方式与开始菜单: 'MOMO API Proxy.lnk'");
+        console.log("✅ [5/5] 系统托盘常驻就绪 (右下角任务栏已点亮图标)");
+      } else {
+        console.log("✅ [4/4] 代理服务常驻就绪");
+      }
+
+      console.log("\n🎉 MOMO API Proxy 安装与启动完成！");
       console.log("在 Codex 中选择 'momoapi-proxy' 即可开始享受极速编程与工具调用体验。");
       console.log("\n常用命令:\n  momoapi status   - 查看服务状态\n  momoapi models   - 查看可用模型\n  momoapi restart  - 重启代理服务\n  momoapi stop     - 停止代理服务");
     } else {
-      if (process.platform === "win32") {
-        const isTrayRunning = isWindowsProcessRunning("tray.ps1");
-        if (!isTrayRunning) {
-          const trayScript = join(scriptDir, "tray.ps1");
-          const tray = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Sta", "-WindowStyle", "Hidden", "-File", trayScript, "-Port", String(port)], {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: true,
-          });
-          tray.unref();
-        }
-      }
-      console.log("MOMO API Proxy 当前正在运行: http://127.0.0.1:" + port + "/v1");
+      installWindowsDesktop({ port });
+      console.log("MOMO API Proxy 当前正在运行: http://127.0.0.1:" + port + "/v1 (托盘已激活)");
       const catalog = readCatalog();
       console.log("已同步模型数: " + (catalog?.models?.length || 0) + " (上游: " + (settings.endpoint || "https://momoapi.us") + ")");
       console.log("\n常用命令:\n  momoapi status   - 查看详细状态\n  momoapi models   - 查看可用模型\n  momoapi restart  - 重启服务与托盘\n  momoapi stop     - 停止服务\n  momoapi update   - 更新到最新版本");
@@ -206,12 +204,13 @@ async function main() {
 
     console.log("正在配置 MOMO API Proxy...");
     const result = await setup({ apiKey, endpoint, port, autostart, desktopAliases });
+    const desktop = installWindowsDesktop({ port });
     console.log("MOMO API Proxy 配置成功！");
     console.log("  - 上游端点: " + (endpoint || "https://momoapi.us"));
     console.log("  - 本地代理: http://127.0.0.1:" + port + "/v1");
     console.log("  - 模型已同步: " + result.models + " (默认: " + result.defaultModel + ")");
-    console.log("  - 开机自启: " + (result.autostart?.installed ? "已启用 (" + result.autostart.type + ")" : "未启用"));
-    console.log("\n运行 'momoapi start' 启动后台服务，或 'momoapi doctor' 运行健康检查。");
+    console.log("  - 桌面快捷方式: " + (desktop?.installed ? "已创建 (桌面/开始菜单/开机自启)" : "无"));
+    console.log("\n运行 'momoapi start' 启动后台服务，或直接双击桌面 'MOMO API Proxy' 图标。");
   } else if (command === "start" || command === "up" || command === "daemon") {
     let settings = null;
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
