@@ -1,8 +1,9 @@
 import { spawnSync, spawn } from "node:child_process";
-import { writeFileSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileSync, copyFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { TRAY_EXE_BASE64 } from "./tray-binary.mjs";
+import { APP_ICO_BASE64 } from "./ico-binary.mjs";
 
 function isWindowsProcessRunning(pattern) {
   if (process.platform !== "win32") return false;
@@ -22,11 +23,13 @@ function isWindowsProcessRunning(pattern) {
 export function installWindowsDesktop({ port = 18789, env = process.env } = {}) {
   if (process.platform !== "win32") return { installed: false, reason: "not_windows" };
   const userHome = env.USERPROFILE || homedir();
-  const proxyBinDir = join(userHome, ".momoapi-proxy", "bin");
+  const proxyHome = join(userHome, ".momoapi-proxy");
+  const proxyBinDir = join(proxyHome, "bin");
   mkdirSync(proxyBinDir, { recursive: true });
 
   const targetExe = join(proxyBinDir, "momoapi-proxy.exe");
   const targetTray = join(proxyBinDir, "MomoApiProxyTray.exe");
+  const targetIco = join(proxyHome, "app.ico");
 
   // 1. Copy current running exe to permanent app directory
   if (process.execPath && (!existsSync(targetExe) || process.execPath.toLowerCase() !== targetExe.toLowerCase())) {
@@ -35,14 +38,20 @@ export function installWindowsDesktop({ port = 18789, env = process.env } = {}) 
     } catch {}
   }
 
-  // 2. Extract embedded tray executable
+  // 2. Extract embedded tray and true-alpha ICO binaries
   if (TRAY_EXE_BASE64) {
     try {
       writeFileSync(targetTray, Buffer.from(TRAY_EXE_BASE64, "base64"));
     } catch {}
   }
 
-  // 3. Create Desktop, Start Menu and Startup Shortcuts
+  if (APP_ICO_BASE64) {
+    try {
+      writeFileSync(targetIco, Buffer.from(APP_ICO_BASE64, "base64"));
+    } catch {}
+  }
+
+  // 3. Create Desktop, Start Menu and Startup Shortcuts with explicit IconLocation
   const desktopDir = join(userHome, "Desktop");
   const startMenuDir = join(env.APPDATA || join(userHome, "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs");
   const startupDir = join(startMenuDir, "Startup");
@@ -53,22 +62,29 @@ export function installWindowsDesktop({ port = 18789, env = process.env } = {}) 
 
   const targetForShortcut = existsSync(targetTray) ? targetTray : targetExe;
 
+  // Remove old shortcuts to force Windows to clear icon cache
+  try { if (existsSync(desktopLnk)) unlinkSync(desktopLnk); } catch {}
+  try { if (existsSync(startMenuLnk)) unlinkSync(startMenuLnk); } catch {}
+
   const psScript = `
 $WshShell = New-Object -ComObject WScript.Shell
-function Make-Lnk($Path, $Target, $Desc) {
+function Make-Lnk($Path, $Target, $Desc, $Icon) {
   $Shortcut = $WshShell.CreateShortcut($Path)
   $Shortcut.TargetPath = $Target
   $Shortcut.Description = $Desc
+  if ($Icon -and (Test-Path $Icon)) {
+    $Shortcut.IconLocation = "$Icon,0"
+  }
   $Shortcut.Save()
 }
 if (Test-Path '${desktopDir.replace(/'/g, "''")}') {
-  Make-Lnk '${desktopLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy Desktop Companion'
+  Make-Lnk '${desktopLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy Desktop Companion' '${targetIco.replace(/'/g, "''")}'
 }
 if (Test-Path '${startMenuDir.replace(/'/g, "''")}') {
-  Make-Lnk '${startMenuLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy'
+  Make-Lnk '${startMenuLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy' '${targetIco.replace(/'/g, "''")}'
 }
 if (Test-Path '${startupDir.replace(/'/g, "''")}') {
-  Make-Lnk '${startupLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy Tray Companion'
+  Make-Lnk '${startupLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy Tray Companion' '${targetIco.replace(/'/g, "''")}'
 }
 `;
 
