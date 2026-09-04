@@ -7,13 +7,13 @@ import { installAutostart, uninstallAutostart } from "./autostart.mjs";
 import { installWindowsService, uninstallWindowsService } from "./service.mjs";
 import { migrateHistory } from "./history.mjs";
 
-const MARKER = "# MOMO_CODEX_SWITCH_MANAGED";
+export const MARKER = "# MOMO_CODEX_BRIDGE_MANAGED";
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free"]);
 
 function authPath(env) { return join(codexHome(env), "auth.json"); }
 function configPath(env) { return join(codexHome(env), "config.toml"); }
 function backup(file) {
-  const bak = file + ".momo-switch.bak";
+  const bak = file + ".momo-bridge.bak";
   if (existsSync(file) && !existsSync(bak)) {
     copyFileSync(file, bak);
   }
@@ -32,6 +32,8 @@ export function cleanConfigToml(content) {
     }
     if (trimmed.startsWith("[")) {
       if (
+        trimmed === "[model_providers.momo-codex-bridge]" ||
+        trimmed === '[model_providers."momo-codex-bridge"]' ||
         trimmed === "[model_providers.momo-switch]" ||
         trimmed === '[model_providers."momo-switch"]' ||
         trimmed === "[model_providers.momoapi-proxy]" ||
@@ -66,11 +68,16 @@ export function cleanConfigToml(content) {
 function managedConfig(catalog, port, defaultModel) {
   return MARKER + "\n" +
     'openai_base_url = "http://127.0.0.1:' + port + '/v1"\n' +
-    'model_provider = "momoapi-proxy"\n' +
+    'model_provider = "momo-codex-bridge"\n' +
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +
     'model_catalog_json = "' + catalog.replace(/\\/g, "/") + '"\n' +
     'disable_response_storage = false\n\n' +
+    '[model_providers.momo-codex-bridge]\n' +
+    'name = "MOMO Codex Bridge"\n' +
+    'base_url = "http://127.0.0.1:' + port + '/v1"\n' +
+    'wire_api = "responses"\n' +
+    'requires_openai_auth = false\n\n' +
     '[model_providers.momoapi-proxy]\n' +
     'name = "MOMO API Proxy"\n' +
     'base_url = "http://127.0.0.1:' + port + '/v1"\n' +
@@ -125,7 +132,13 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
   writeCatalog(models, env, { includeDesktopAliases: desktopAliases });
   const finalConfig = managedConfig(catalog, port, defaultModel) + (cleanedOther ? "\n\n" + cleanedOther + "\n" : "\n");
   writeFileSync(config, finalConfig);
-  writeFileSync(auth, JSON.stringify({ OPENAI_API_KEY: localToken, "momoapi-proxy": localToken, "momoapi proxy": localToken, "momo-switch": localToken }, null, 2) + "\n");
+  writeFileSync(auth, JSON.stringify({
+    OPENAI_API_KEY: localToken,
+    "momo-codex-bridge": localToken,
+    "momoapi-proxy": localToken,
+    "momoapi proxy": localToken,
+    "momo-switch": localToken
+  }, null, 2) + "\n");
   const settingsFile = writeSettings(settings, env);
 
   let autostartResult = null;
@@ -146,7 +159,7 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
 
   let historyResult = null;
   try {
-    historyResult = await migrateHistory({ dbPath: join(codexHome(env), "state_5.sqlite"), targetProvider: "momoapi-proxy" });
+    historyResult = await migrateHistory({ dbPath: join(codexHome(env), "state_5.sqlite"), targetProvider: "momo-codex-bridge" });
   } catch (err) {
     historyResult = { migrated: 0, error: err.message };
   }
@@ -158,14 +171,16 @@ export function rollback(env = process.env) {
   const files = [configPath(env), authPath(env), catalogPath(env)];
   const restored = [];
   for (const file of files) {
-    const source = file + ".momo-switch.bak";
-    if (!existsSync(source)) continue;
+    const source = existsSync(file + ".momo-bridge.bak")
+      ? file + ".momo-bridge.bak"
+      : (existsSync(file + ".momo-switch.bak") ? file + ".momo-switch.bak" : null);
+    if (!source) continue;
     copyFileSync(source, file);
     restored.push(file);
   }
   const dbPath = join(codexHome(env), "state_5.sqlite");
-  const dbBak = dbPath + ".momo-history.bak";
-  if (existsSync(dbBak)) {
+  const dbBak = existsSync(dbPath + ".momo-bridge.bak") ? dbPath + ".momo-bridge.bak" : (existsSync(dbPath + ".momo-history.bak") ? dbPath + ".momo-history.bak" : null);
+  if (dbBak) {
     try { copyFileSync(dbBak, dbPath); restored.push(dbPath); } catch {}
   }
   return restored;
