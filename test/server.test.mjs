@@ -26,7 +26,7 @@ test("passes a Responses model through without leaking MOMO credentials", async 
     return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
   };
   await withServer(fakeFetch, async (base) => {
-    const response = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({ model: "deepseek-v4-flash", input: [] }) });
+    const response = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-5.6-sol", input: [] }) });
     assert.equal(response.status, 200);
     assert.match(await response.text(), /response.completed/);
   });

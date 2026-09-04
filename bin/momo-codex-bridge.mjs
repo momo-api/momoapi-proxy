@@ -9,9 +9,16 @@ import { rollback, setup, uninstall } from "../src/setup.mjs";
 import { readCatalog } from "../src/catalog.mjs";
 import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
-import { logPath, readRecentLogs } from "../src/logger.mjs";
+import { logPath, readRecentLogs, logInfo, logError } from "../src/logger.mjs";
 import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
+
+process.on("uncaughtException", (err) => {
+  logError("Uncaught Exception", err);
+});
+process.on("unhandledRejection", (reason) => {
+  logError("Unhandled Rejection", reason);
+});
 
 function killWindowsProcessByPattern(pattern) {
   if (process.platform !== "win32") return;

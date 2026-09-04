@@ -78,10 +78,13 @@ function upstreamHeaders(settings, contentType = "application/json") {
   return { authorization: "Bearer " + settings.apiKey, "content-type": contentType };
 }
 
-function resolveTargetModel(model) {
+export function resolveTargetModel(model) {
   if (GEMINI_PREFIX.test(model)) return { targetModel: model, protocol: "gemini" };
   if (CLAUDE_PREFIX.test(model)) return { targetModel: model, protocol: "claude" };
-  return { targetModel: model, protocol: "responses" };
+  if (model === "gpt-5.6-sol" || model.endsWith("-sol") || model.endsWith("-responses")) {
+    return { targetModel: model, protocol: "responses" };
+  }
+  return { targetModel: model, protocol: "chat" };
 }
 
 function customInput(value) {
@@ -1191,6 +1194,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
         
         let handlerPromise;
         if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, fetchImpl, abortController.signal);
+        else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(response, settings, routedPayload, fetchImpl, abortController.signal);
         else if (protocol === "gemini") handlerPromise = bridgeGemini(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
 
