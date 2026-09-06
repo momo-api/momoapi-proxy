@@ -17,6 +17,8 @@
     "doctor": "node bin/momoapi-proxy.mjs doctor",
     "models": "node bin/momoapi-proxy.mjs models",
     "status": "node bin/momoapi-proxy.mjs status",
+    "benchmark:multimodal:fixtures": "python scripts/generate-multimodal-fixtures.py",
+    "benchmark:multimodal": "node scripts/benchmark-multimodal.mjs",
     "test:container": "podman build -t momoapi-proxy:test . && podman run --rm momoapi-proxy:test",
     "test:codex-container": "podman build -f Dockerfile.codex-smoke -t momoapi-proxy:codex-smoke . && podman run --rm momoapi-proxy:codex-smoke"
   },
