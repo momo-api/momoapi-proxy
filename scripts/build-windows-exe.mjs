@@ -45,7 +45,7 @@ execSync(`npx --yes postject "${exeOutput}" NODE_SEA_BLOB "${blobPath}" --sentin
 if (existsSync(ICO_PATH)) {
   console.log("=== 5. Injecting HD Application Icon & Metadata with resedit ===");
   try {
-    execSync(`npx --yes resedit-cli --in "${exeOutput}" --out "${exeOutput}" --ignore-signed --icon "1,${ICO_PATH}" --product-name "MOMO API Proxy" --file-description "MOMO API Proxy for Codex & Desktop AI" --company-name "MOMO API" --file-version "0.9.6.0" --product-version "0.9.6.0" --original-filename "momoapi-proxy-windows-x64.exe"`, {
+    execSync(`npx --yes resedit-cli --in "${exeOutput}" --out "${exeOutput}" --ignore-signed --icon "1,${ICO_PATH}" --product-name "MOMO API Proxy" --file-description "MOMO API Proxy for Codex & Desktop AI" --company-name "MOMO API" --file-version "0.9.7.0" --product-version "0.9.7.0" --original-filename "momoapi-proxy-windows-x64.exe"`, {
       cwd: ROOT,
       stdio: "inherit",
     });
