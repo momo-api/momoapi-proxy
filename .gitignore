@@ -6,3 +6,5 @@ dist/
 
 *.tgz
 tmp/
+__pycache__/
+*.pyc
