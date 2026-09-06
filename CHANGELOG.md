@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.6 - 2026-09-06
+
+- Preserved PDF and other supported files as native Responses or Gemini media instead of serializing Base64 into text.
+- Routed Luna and Muse 1.3 through their verified native Responses paths.
+- Rejected oversized Base64, opaque binary, encrypted content, and unsupported attachment shapes from text fallbacks.
+- Added regression coverage for direct uploads, tool-result files, mislabeled binary text, and large PDF payloads.
+
 ## 0.9.5 - 2026-09-06
 
 - Verified realistically large tool-result images stay in native image fields across Gemini, Claude, Responses, and Chat Completions model routes.
