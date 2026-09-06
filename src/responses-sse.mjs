@@ -159,7 +159,7 @@ export class ResponseStreamEmitter {
     return { callId: cid, itemId };
   }
 
-  complete() {
+  complete(usage) {
     this.flushTextMessage();
     this.response.write(event("response.completed", {
       response: {
@@ -167,7 +167,8 @@ export class ResponseStreamEmitter {
         object: "response",
         status: "completed",
         model: this.model,
-        output: this.outputItems
+        output: this.outputItems,
+        ...(usage ? { usage } : {})
       }
     }));
     this.response.end();

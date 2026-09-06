@@ -1,6 +1,6 @@
 {
   "name": "@momo-api/momoapi-proxy",
-  "version": "0.9.0",
+  "version": "0.9.4",
   "private": true,
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",
@@ -23,5 +23,9 @@
   "engines": {
     "node": ">=22"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "png-to-ico": "^3.0.2"
+  }
 }

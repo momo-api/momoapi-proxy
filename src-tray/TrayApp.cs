@@ -85,6 +85,9 @@ namespace MomoApi.Tray
             var viewModels = menu.Items.Add("查看可用模型列表 (Models)");
             viewModels.Click += (s, e) => RunCli("models", true);
 
+            var syncModels = menu.Items.Add("同步模型列表 (Sync)");
+            syncModels.Click += (s, e) => RunCli("sync", true);
+
             var runDoctor = menu.Items.Add("运行健康诊断 (Doctor)");
             runDoctor.Click += (s, e) => RunCli("doctor", true);
 

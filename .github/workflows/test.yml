@@ -19,5 +19,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --tag momo-codex-bridge:test .
-      - run: docker run --rm momo-codex-bridge:test
+      - run: docker build --tag momoapi-proxy:test .
+      - run: docker run --rm momoapi-proxy:test

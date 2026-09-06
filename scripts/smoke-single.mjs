@@ -8,12 +8,14 @@ import { resolveSettings } from '../src/config.mjs';
 
 const targetModel = process.argv[2] || 'deepseek-v4-pro';
 const expectedWord = process.argv[3] || 'MOMO_SMOKE_PASS';
+const apiKey = process.env.MOMO_API_KEY;
+if (!apiKey) throw new Error('MOMO_API_KEY is required for the live smoke test.');
 const root = mkdtempSync(join(tmpdir(), 'momo-live-'));
 const env = { ...process.env, CODEX_HOME: join(root, '.codex'), NO_COLOR: '1' };
 await import('node:fs/promises').then(({ mkdir }) => mkdir(env.CODEX_HOME, { recursive: true }));
 
 console.log(`Setting up bridge in isolated container environment for ${targetModel}...`);
-await setup({ apiKey: process.env.MOMO_API_KEY || 'sk-momo-demo-dummy-key-placeholder', endpoint: 'https://momoapi.us', port: 18789, autostart: false, env });
+await setup({ apiKey, endpoint: 'https://momoapi.us', port: 18789, autostart: false, env });
 const server = await listen(resolveSettings(env));
 console.log('Bridge daemon running on 127.0.0.1:18789');
 

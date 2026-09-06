@@ -16,8 +16,8 @@ test("checkLatestVersion detects updates from CDN JSON payload", async () => {
     if (url.includes("bridge-latest.json")) {
       return new Response(JSON.stringify({
         version: "0.9.9",
-        url: "https://momoapi.us/install/packages/momo-api-codex-bridge-0.9.9.tgz",
-        latest_url: "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
+        url: "https://momoapi.us/install/packages/momoapi-proxy-0.9.9.tgz",
+        latest_url: "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     return new Response("Not found", { status: 404 });
@@ -26,5 +26,5 @@ test("checkLatestVersion detects updates from CDN JSON payload", async () => {
   const info = await checkLatestVersion({ endpoint: "https://mock.momo", fetchImpl: fakeFetch });
   assert.equal(info.latest, "0.9.9");
   assert.equal(info.hasUpdate, true);
-  assert.equal(info.downloadUrl, "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz");
+  assert.equal(info.downloadUrl, "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz");
 });

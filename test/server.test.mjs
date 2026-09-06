@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMomoSwitch } from "../src/server.mjs";
+import { buildClaudeMessages, buildGeminiContents, buildOpenAIChatMessages, createMomoSwitch, normalizeResponsesPayload } from "../src/server.mjs";
 import { startAutoSync } from "../src/sync.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "momo-secret", localToken: "local-secret", host: "127.0.0.1", port: 0 };
@@ -126,6 +126,7 @@ test("preserves Claude tool-use context for the next tool-result turn", async ()
 test("preserves Gemini function-call context for the next function-response turn", async () => {
   const requests = [];
   let invocation = 0;
+  let callId;
   const fakeFetch = async (_url, init) => {
     const body = JSON.parse(init.body);
     requests.push(body);
@@ -138,13 +139,206 @@ test("preserves Gemini function-call context for the next function-response turn
   await withServer(fakeFetch, async (base) => {
     const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
     const first = await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.7-flash", input: [{ role: "user", content: [{ type: "input_text", text: "Run pwd" }] }], tools: [{ type: "function", name: "shell_command", parameters: { type: "object" } }] }) });
-    const callId = (await first.text()).match(/"call_id":"([^"]+)"/)?.[1];
+    callId = (await first.text()).match(/"call_id":"([^"]+)"/)?.[1];
     assert.ok(callId);
     await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.7-flash", input: [{ type: "function_call_output", call_id: callId, output: "/tmp" }] }) });
   });
   assert.equal(requests[1].contents[0].parts[0].text, "Run pwd");
-  assert.deepEqual(requests[1].contents[1], { role: "model", parts: [{ thoughtSignature: "signature_for_tool_result", functionCall: { name: "shell_command", args: { command: "pwd" } } }] });
-  assert.deepEqual(requests[1].contents[2], { role: "user", parts: [{ functionResponse: { name: "shell_command", response: { result: "/tmp" } } }] });
+  assert.deepEqual(requests[1].contents[1], { role: "model", parts: [{ thoughtSignature: "signature_for_tool_result", functionCall: { name: "shell_command", id: callId, args: { command: "pwd" } } }] });
+  assert.deepEqual(requests[1].contents[2], { role: "user", parts: [{ functionResponse: { name: "shell_command", id: callId, response: { result: "/tmp" } } }] });
+});
+
+test("replays every Claude tool-use block before a result batch", () => {
+  const calls = new Map([
+    ["call_a", {
+      name: "exec",
+      arguments: { input: "a" },
+      claudeMessages: [{ role: "user", content: [{ type: "text", text: "run both" }] }],
+      toolUseBlock: { type: "tool_use", id: "call_a", name: "exec", input: { input: "a" } },
+    }],
+    ["call_b", {
+      name: "view_image",
+      arguments: { path: "b.png" },
+      claudeMessages: [{ role: "user", content: [{ type: "text", text: "run both" }] }],
+      toolUseBlock: { type: "tool_use", id: "call_b", name: "view_image", input: { path: "b.png" } },
+    }],
+  ]);
+  const messages = buildClaudeMessages([
+    { type: "custom_tool_call_output", call_id: "call_a", output: "a done" },
+    { type: "function_call_output", call_id: "call_b", output: "b done" },
+  ], calls);
+
+  assert.deepEqual(messages[1].content.map((part) => [part.name, part.id]), [
+    ["exec", "call_a"],
+    ["view_image", "call_b"],
+  ]);
+  assert.deepEqual(messages[2].content.map((part) => part.tool_use_id), ["call_a", "call_b"]);
+});
+
+test("preserves an upstream Gemini function-call id", async () => {
+  const upstreamCallId = "call_from_gemini";
+  const fakeFetch = async () => {
+    const sse = "data: " + JSON.stringify({
+      candidates: [{ content: { parts: [{ functionCall: { id: upstreamCallId, name: "shell_command", args: { command: "pwd" } } }] } }],
+    }) + "\n\n";
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gemini-3.7-flash", input: [], tools: [{ type: "function", name: "shell_command" }] }),
+    });
+    assert.match(await response.text(), new RegExp(`\"call_id\":\"${upstreamCallId}\"`));
+  });
+});
+
+test("replays a Gemini batch with matching names and ids for every tool result", () => {
+  const calls = new Map([
+    ["call_a", {
+      name: "exec",
+      arguments: { input: "a" },
+      geminiContents: [{ role: "user", parts: [{ text: "run both" }] }],
+      geminiFunctionCallPart: { functionCall: { name: "exec", args: { input: "a" } } },
+    }],
+    ["call_b", {
+      name: "view_image",
+      arguments: { path: "b.png" },
+      geminiContents: [{ role: "user", parts: [{ text: "run both" }] }],
+      geminiFunctionCallPart: { functionCall: { name: "view_image", args: { path: "b.png" } } },
+    }],
+  ]);
+  const contents = buildGeminiContents([
+    { type: "custom_tool_call_output", call_id: "call_a", output: "a done" },
+    { type: "function_call_output", call_id: "call_b", output: "b done" },
+  ], calls);
+
+  assert.deepEqual(contents[1].parts.map((part) => [part.functionCall.name, part.functionCall.id]), [
+    ["exec", "call_a"],
+    ["view_image", "call_b"],
+  ]);
+  assert.deepEqual(contents[2].parts.map((part) => [part.functionResponse.name, part.functionResponse.id]), [
+    ["exec", "call_a"],
+    ["view_image", "call_b"],
+  ]);
+});
+
+test("pairs replayed Gemini custom-tool results by call_id and sends images as inline data", () => {
+  const imageUrl = "data:image/jpeg;base64,QUJDRA==";
+  const contents = buildGeminiContents([
+    { type: "custom_tool_call", call_id: "call_exec_image", name: "exec", input: "image(1)" },
+    {
+      type: "custom_tool_call_output",
+      call_id: "call_exec_image",
+      output: [
+        { type: "input_text", text: "image loaded" },
+        { type: "input_image", image_url: imageUrl, detail: "original" },
+      ],
+    },
+  ], new Map());
+
+  assert.equal(contents[0].parts[0].functionCall.name, "exec");
+  assert.equal(contents[0].parts[0].functionCall.id, "call_exec_image");
+  assert.equal(contents[1].parts[0].functionResponse.name, "exec");
+  assert.equal(contents[1].parts[0].functionResponse.id, "call_exec_image");
+  assert.equal(contents[1].parts[0].functionResponse.response.result, "image loaded");
+  assert.deepEqual(contents[1].parts[1], { inline_data: { mime_type: "image/jpeg", data: "QUJDRA==" } });
+  assert.doesNotMatch(JSON.stringify(contents[1].parts[0]), /data:image/);
+});
+
+test("keeps a realistically large Gemini image out of function-response text", () => {
+  const encodedImage = "A".repeat(1_118_032);
+  const contents = buildGeminiContents([
+    { type: "custom_tool_call", call_id: "call_large_image", name: "exec", input: "image(1)" },
+    {
+      type: "custom_tool_call_output",
+      call_id: "call_large_image",
+      output: [
+        { type: "input_text", text: "image loaded" },
+        { type: "input_image", image_url: `data:image/jpeg;base64,${encodedImage}` },
+      ],
+    },
+  ], new Map());
+
+  const response = contents[1].parts[0].functionResponse;
+  const image = contents[1].parts[1].inline_data;
+  assert.equal(response.name, "exec");
+  assert.equal(response.response.result, "image loaded");
+  assert.ok(JSON.stringify(response).length < 1_000);
+  assert.equal(image.mime_type, "image/jpeg");
+  assert.equal(image.data.length, encodedImage.length);
+});
+
+test("sends direct images natively and degrades orphan Gemini tool results to text", () => {
+  const imageUrl = "data:image/png;base64,QUJDRA==";
+  const direct = buildGeminiContents([{
+    role: "user",
+    content: [
+      { type: "input_text", text: "What is this?" },
+      { type: "input_image", image_url: imageUrl },
+    ],
+  }], new Map());
+  assert.deepEqual(direct[0].parts[1], { inline_data: { mime_type: "image/png", data: "QUJDRA==" } });
+
+  const orphan = buildGeminiContents([{
+    type: "function_call_output",
+    call_id: "missing_call",
+    output: [{ type: "input_image", image_url: imageUrl }],
+  }], new Map());
+  assert.match(orphan[0].parts[0].text, /without matching function call/);
+  assert.equal(orphan[0].parts.some((part) => part.functionResponse), false);
+  assert.deepEqual(orphan[0].parts[1], { inline_data: { mime_type: "image/png", data: "QUJDRA==" } });
+});
+
+test("returns Gemini usage metadata to Codex", async () => {
+  const fakeFetch = async () => {
+    const sse = "data: " + JSON.stringify({
+      candidates: [{ content: { parts: [{ text: "done" }] } }],
+      usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 5, totalTokenCount: 125, cachedContentTokenCount: 20 },
+    }) + "\n\n";
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gemini-3.7-flash", input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }] }),
+    });
+    const body = await response.text();
+    assert.match(body, /"input_tokens":120/);
+    assert.match(body, /"cached_tokens":20/);
+  });
+});
+
+test("keeps tool-result images out of text in Responses and Chat bridges", () => {
+  const imageUrl = "data:image/png;base64,QUJDRA==";
+  const input = [
+    { type: "function_call", call_id: "call_image", name: "view_image", arguments: "{}" },
+    {
+      type: "function_call_output",
+      call_id: "call_image",
+      output: [{ type: "input_image", image_url: imageUrl, detail: "original" }],
+    },
+  ];
+
+  const normalized = normalizeResponsesPayload({ model: "gpt-5.6-sol", input });
+  assert.ok(Array.isArray(normalized.input[1].output));
+  assert.equal(normalized.input[1].output[0].image_url, imageUrl);
+
+  const chat = buildOpenAIChatMessages(input);
+  assert.equal(chat[1].role, "tool");
+  assert.equal(chat[1].content, "[image output attached]");
+  assert.equal(chat[2].content[1].type, "image_url");
+  assert.equal(chat[2].content[1].image_url.url, imageUrl);
+  assert.doesNotMatch(chat[1].content, /data:image/);
+
+  const claude = buildClaudeMessages(input, new Map());
+  assert.equal(claude[1].content[0].content[0].text, "[image output attached]");
+  assert.deepEqual(claude[1].content[0].content[1], {
+    type: "image",
+    source: { type: "base64", media_type: "image/png", data: "QUJDRA==" },
+  });
+  assert.doesNotMatch(JSON.stringify(claude[1].content[0].content[0]), /data:image/);
 });
 
 test("routes models cleanly: Claude to /v1/messages, Gemini to gemini endpoint, and others to /v1/responses", async () => {

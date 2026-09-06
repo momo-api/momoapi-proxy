@@ -38,14 +38,14 @@ if (-not $node) {
 }
 
 if (-not $node) {
-  Write-Err "Node.js 18+ is required. Please download and install Node.js from https://nodejs.org/"
+  Write-Err "Node.js 22+ is required. Please download and install Node.js from https://nodejs.org/"
   exit 1
 }
 
 $nodeVer = (& $node.Source --version).Trim().TrimStart("v")
 $major = [int]($nodeVer.Split(".")[0])
-if ($major -lt 18) {
-  Write-Err "Node.js version must be >= 18; found v$nodeVer. Please update Node.js."
+if ($major -lt 22) {
+  Write-Err "Node.js version must be >= 22; found v$nodeVer. Please update Node.js."
   exit 1
 }
 Write-Step "Found Node.js v$nodeVer"
@@ -62,8 +62,8 @@ if (-not $ApiKey) {
   exit 1
 }
 
-# 3. Download / Install to ~/.momo-codex-bridge
-$installDir = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "app")
+# 3. Download / Install to ~/.momoapi-proxy
+$installDir = [System.IO.Path]::Combine($HOME, ".momoapi-proxy", "app")
 if (Test-Path $installDir) {
   Remove-Item -Recurse -Force $installDir
 }
@@ -71,46 +71,14 @@ if (Test-Path $installDir) {
   
   Write-Step "Downloading latest release package..."
   $urls = @(
+    "$Endpoint/install/packages/momoapi-proxy-latest.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.8.4.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.8.3.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.8.2.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.8.1.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.8.0.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.7.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.6.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.5.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.4.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.3.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.2.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-0.7.1.tgz",
+    "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.4/momo-api-codex-bridge-0.8.4.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.3/momo-api-codex-bridge-0.8.3.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.2/momo-api-codex-bridge-0.8.2.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.1/momo-api-codex-bridge-0.8.1.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.0/momo-api-codex-bridge-0.8.0.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.7/momo-api-codex-bridge-0.7.7.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.6/momo-api-codex-bridge-0.7.6.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.5/momo-api-codex-bridge-0.7.5.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.4/momo-api-codex-bridge-0.7.4.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.3/momo-api-codex-bridge-0.7.3.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.2/momo-api-codex-bridge-0.7.2.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.1/momo-api-codex-bridge-0.7.1.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.4/momo-api-codex-bridge-0.8.4.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.3/momo-api-codex-bridge-0.8.3.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.2/momo-api-codex-bridge-0.8.2.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.1/momo-api-codex-bridge-0.8.1.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.8.0/momo-api-codex-bridge-0.8.0.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.7/momo-api-codex-bridge-0.7.7.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.6/momo-api-codex-bridge-0.7.6.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.5/momo-api-codex-bridge-0.7.5.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.4/momo-api-codex-bridge-0.7.4.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.3/momo-api-codex-bridge-0.7.3.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.2/momo-api-codex-bridge-0.7.2.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.7.1/momo-api-codex-bridge-0.7.1.tgz"
+    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.4/momoapi-proxy-0.9.4.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.4/momoapi-proxy-0.9.4.tgz"
   )
-  $tgzPath = [System.IO.Path]::Combine($HOME, ".momo-codex-bridge", "package.tgz")
+  $tgzPath = [System.IO.Path]::Combine($HOME, ".momoapi-proxy", "package.tgz")
 
   $downloaded = $false
   foreach ($url in $urls) {
@@ -128,12 +96,12 @@ if (Test-Path $installDir) {
     Remove-Item $tgzPath -Force -ErrorAction SilentlyContinue
   } else {
     Write-Step "Direct download failed, falling back to git clone..."
-    git clone https://github.com/momo-api/momo-codex-bridge.git $installDir
+    git clone https://github.com/momo-api/momoapi-proxy.git $installDir
   }
 
 # 4. Generate Windows CLI wrappers in bin & compile Native Tray EXE
 $binDir = [System.IO.Path]::Combine($installDir, "bin")
-$bridgeBin = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.mjs")
+$bridgeBin = [System.IO.Path]::Combine($binDir, "momoapi-proxy.mjs")
 $momoapiCmd = [System.IO.Path]::Combine($binDir, "momoapi.cmd")
 $momoCmd    = [System.IO.Path]::Combine($binDir, "momo.cmd")
 $bridgeCmd = [System.IO.Path]::Combine($binDir, "momo-codex-bridge.cmd")

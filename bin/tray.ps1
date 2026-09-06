@@ -24,7 +24,7 @@ function Get-MomoBinPath {
   return [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs")
 }
 
-$Version = "v0.9.0"
+$Version = "v0.9.4"
 
 # Single-instance mutex
 $mutexName = "Local\MomoApiProxyTrayMutex_" + [System.Environment]::UserName
@@ -120,6 +120,15 @@ $modelsItem.add_Click({
   if (Test-Path $bin) {
     $output = & node "$bin" models 2>&1 | Out-String
     [System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Models", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+  }
+})
+
+$syncItem = $contextMenu.Items.Add("同步模型列表 (Sync)")
+$syncItem.add_Click({
+  $bin = Get-MomoBinPath
+  if (Test-Path $bin) {
+    $output = & node "$bin" sync 2>&1 | Out-String
+    [System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Sync", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
   }
 })
 

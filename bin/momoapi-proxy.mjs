@@ -247,6 +247,7 @@ async function main() {
         ], { stdio: "ignore" });
         killWindowsProcessByPattern("tray.ps1");
         killWindowsProcessByPattern("momoapi-tray.exe");
+        killWindowsProcessByPattern("MomoApiProxyTray.exe");
       } catch {}
     } else {
       try {
@@ -270,6 +271,7 @@ async function main() {
         ], { stdio: "ignore" });
         killWindowsProcessByPattern("tray.ps1");
         killWindowsProcessByPattern("momoapi-tray.exe");
+        killWindowsProcessByPattern("MomoApiProxyTray.exe");
       } catch {}
     } else {
       try {

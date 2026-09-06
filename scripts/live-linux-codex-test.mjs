@@ -6,7 +6,8 @@ import { setup } from '../src/setup.mjs';
 import { listen } from '../src/server.mjs';
 import { resolveSettings } from '../src/config.mjs';
 
-const API_KEY = process.env.MOMO_API_KEY || "sk-momo-demo-dummy-key-placeholder";
+const API_KEY = process.env.MOMO_API_KEY;
+if (!API_KEY) throw new Error("MOMO_API_KEY is required for the live Linux Codex test.");
 const root = join(homedir(), "test-workspace");
 const codexHome = join(homedir(), ".codex");
 
