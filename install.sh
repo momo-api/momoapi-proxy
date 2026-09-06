@@ -32,8 +32,8 @@ rm -rf "$INSTALL_DIR"
   
   echo "==> [momo-codex-bridge] Downloading latest release..."
   URLS=(
-    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.5/momoapi-proxy-0.9.5.tgz"
-    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.5/momoapi-proxy-0.9.5.tgz"
+    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.6/momoapi-proxy-0.9.6.tgz"
+    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.6/momoapi-proxy-0.9.6.tgz"
     "${ENDPOINT%/}/install/packages/momoapi-proxy-latest.tgz"
     "${ENDPOINT%/}/install/packages/momo-api-codex-bridge-latest.tgz"
     "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz"

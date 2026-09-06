@@ -383,6 +383,80 @@ test("keeps a realistically large image native across every model protocol", () 
   assert.ok(Math.max(...textValues.map((value) => value.length)) < 1_000);
 });
 
+test("keeps a realistically large PDF native in Responses and Gemini, and out of text everywhere", () => {
+  const encodedFile = "A".repeat(1_123_696);
+  const fileData = `data:application/pdf;base64,${encodedFile}`;
+  const file = { type: "input_file", filename: "large.pdf", file_data: fileData };
+  const direct = [{ role: "user", content: [{ type: "input_text", text: "inspect" }, file] }];
+  const tool = [
+    { type: "function_call", call_id: "call_large_pdf", name: "read_file", arguments: "{}" },
+    { type: "function_call_output", call_id: "call_large_pdf", output: [{ type: "input_text", text: "inspect" }, file] },
+  ];
+
+  for (const input of [direct, tool]) {
+    const chat = buildOpenAIChatMessages(input);
+    const claude = buildClaudeMessages(input, new Map());
+    const gemini = buildGeminiContents(input, new Map());
+    assert.ok(JSON.stringify(chat).length < 2_000);
+    assert.ok(JSON.stringify(claude).length < 2_000);
+    assert.ok(JSON.stringify(gemini).length > encodedFile.length);
+    assert.match(JSON.stringify(chat), /\[file: large\.pdf\]/);
+    assert.match(JSON.stringify(claude), /\[file: large\.pdf\]/);
+    const geminiJson = JSON.stringify(gemini);
+    assert.equal(geminiJson.includes(`\"text\":\"${encodedFile.slice(0, 10_000)}`), false);
+    const geminiParts = gemini.flatMap((message) => message.parts);
+    const pdfPart = geminiParts.find((part) => part.inline_data?.mime_type === "application/pdf");
+    assert.equal(pdfPart.inline_data.data.length, encodedFile.length);
+  }
+
+  const directResponses = normalizeResponsesPayload({ model: "gpt-5.6-sol", input: direct });
+  assert.equal(directResponses.input[0].content[1].file_data, fileData);
+  const toolResponses = normalizeResponsesPayload({ model: "gpt-5.6-sol", input: tool });
+  assert.equal(toolResponses.input[1].output[1].file_data, fileData);
+  assert.equal(toolResponses.input[1].output[0].text, "inspect");
+});
+
+test("never serializes large opaque binary-like content into model text", () => {
+  const huge = "A".repeat(200_000);
+  const riskyParts = [
+    { type: "input_video", video_url: `data:video/mp4;base64,${huge}` },
+    { type: "input_audio", input_audio: { format: "wav", data: huge } },
+    { type: "encrypted_content", encrypted_content: huge },
+    { type: "resource", resource: { uri: "file:///large.bin", blob: huge } },
+    { type: "unknown_binary", payload: huge },
+  ];
+
+  for (const part of riskyParts) {
+    const input = [
+      { type: "function_call", call_id: "call_binary", name: "read", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_binary", output: [part] },
+    ];
+    const payloads = [
+      buildOpenAIChatMessages(input),
+      buildClaudeMessages(input, new Map()),
+      buildGeminiContents(input, new Map()),
+      normalizeResponsesPayload({ model: "gpt-5.6-sol", input }).input,
+    ];
+    for (const payload of payloads) {
+      assert.ok(JSON.stringify(payload).length < 2_000);
+      assert.doesNotMatch(JSON.stringify(payload), new RegExp(huge.slice(0, 10_000)));
+    }
+  }
+});
+
+test("omits data URLs and long raw base64 even when mislabeled as text", () => {
+  const dataUrl = `data:application/pdf;base64,${"A".repeat(200_000)}`;
+  const rawPdf = `JVBERi0${"A".repeat(200_000)}`;
+  const anonymousBase64 = "Q".repeat(200_000);
+  for (const text of [dataUrl, rawPdf, anonymousBase64]) {
+    const input = [{ role: "user", content: [{ type: "input_text", text }] }];
+    assert.ok(JSON.stringify(buildOpenAIChatMessages(input)).length < 1_000);
+    assert.ok(JSON.stringify(buildClaudeMessages(input, new Map())).length < 1_000);
+    assert.ok(JSON.stringify(buildGeminiContents(input, new Map())).length < 1_000);
+    assert.ok(JSON.stringify(normalizeResponsesPayload({ model: "gpt-5.6-sol", input })).length < 1_000);
+  }
+});
+
 test("preserves direct and native-shape images without converting bytes to text", () => {
   const dataUrl = "data:image/png;base64,QUJDRA==";
   const directInput = [{
@@ -433,16 +507,26 @@ test("routes models cleanly: Claude to /v1/messages, Gemini to gemini endpoint, 
     assert.equal(captured[0].url, "https://gateway.example/v1/responses");
     assert.equal(captured[0].body.model, "gpt-5.6-sol");
 
-    // 2. Claude Thinking -> Claude Messages
-    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "claude-opus-4-6-thinking", input: [] }) });
-    assert.equal(captured[1].url, "https://gateway.example/v1/messages");
-    assert.equal(captured[1].body.model, "claude-opus-4-6-thinking");
-    assert.deepEqual(captured[1].body.thinking, { type: "enabled", budget_tokens: 4048 });
+    // 2. Luna -> native Responses (verified to support native input_file)
+    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gpt-5.6-luna", input: [] }) });
+    assert.equal(captured[1].url, "https://gateway.example/v1/responses");
+    assert.equal(captured[1].body.model, "gpt-5.6-luna");
 
-    // 3. Gemini -> Gemini endpoint
+    // 3. Muse -> native Responses (verified to support native input_file)
+    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "muse-spark-1.3-contributor-free", input: [] }) });
+    assert.equal(captured[2].url, "https://gateway.example/v1/responses");
+    assert.equal(captured[2].body.model, "muse-spark-1.3-contributor-free");
+
+    // 4. Claude Thinking -> Claude Messages
+    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "claude-opus-4-6-thinking", input: [] }) });
+    assert.equal(captured[3].url, "https://gateway.example/v1/messages");
+    assert.equal(captured[3].body.model, "claude-opus-4-6-thinking");
+    assert.deepEqual(captured[3].body.thinking, { type: "enabled", budget_tokens: 4048 });
+
+    // 5. Gemini -> Gemini endpoint
     await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.7-flash", reasoning_effort: "high", input: [] }) });
-    assert.ok(captured[2].url.includes("v1beta/models/gemini-3.7-flash:streamGenerateContent"));
-    assert.equal(captured[2].body.generationConfig.thinkingConfig.thinkingLevel, "HIGH");
+    assert.ok(captured[4].url.includes("v1beta/models/gemini-3.7-flash:streamGenerateContent"));
+    assert.equal(captured[4].body.generationConfig.thinkingConfig.thinkingLevel, "HIGH");
   });
 });
 
