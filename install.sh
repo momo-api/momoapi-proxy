@@ -7,13 +7,13 @@ PORT="${MOMO_BRIDGE_PORT:-18789}"
 
 echo "==> [momo-codex-bridge] Checking Node.js environment..."
 if ! command -v node >/dev/null 2>&1; then
-  echo "==> ERROR: Node.js 18+ is required. Please install Node.js from https://nodejs.org/"
+  echo "==> ERROR: Node.js 22+ is required. Please install Node.js from https://nodejs.org/"
   exit 1
 fi
 
 NODE_MAJOR=$(node -v | tr -d 'v' | cut -d. -f1)
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "==> ERROR: Node.js version must be >= 18; found $(node -v)"
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "==> ERROR: Node.js version must be >= 22; found $(node -v)"
   exit 1
 fi
 
@@ -26,16 +26,18 @@ if [ -z "$API_KEY" ]; then
   exit 1
 fi
 
-INSTALL_DIR="$HOME/.momo-codex-bridge/app"
+INSTALL_DIR="$HOME/.momoapi-proxy/app"
 rm -rf "$INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
   
   echo "==> [momo-codex-bridge] Downloading latest release..."
   URLS=(
+    "${ENDPOINT%/}/install/packages/momoapi-proxy-latest.tgz"
     "${ENDPOINT%/}/install/packages/momo-api-codex-bridge-latest.tgz"
+    "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz"
     "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz"
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.3/momo-api-codex-bridge-0.6.3.tgz"
-    "https://ghproxy.net/https://github.com/momo-api/momo-codex-bridge/releases/download/v0.6.3/momo-api-codex-bridge-0.6.3.tgz"
+    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.4/momoapi-proxy-0.9.4.tgz"
+    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.9.4/momoapi-proxy-0.9.4.tgz"
   )
   
   DOWNLOADED=0
@@ -55,10 +57,10 @@ rm -rf "$INSTALL_DIR"
 
   if [ "$DOWNLOADED" -eq 0 ]; then
     echo "==> [momo-codex-bridge] Direct download failed, falling back to git clone..."
-    git clone https://github.com/momo-api/momo-codex-bridge.git "$INSTALL_DIR"
+    git clone https://github.com/momo-api/momoapi-proxy.git "$INSTALL_DIR"
   fi
 
-BRIDGE_BIN="$INSTALL_DIR/bin/momo-codex-bridge.mjs"
+BRIDGE_BIN="$INSTALL_DIR/bin/momoapi-proxy.mjs"
 chmod +x "$BRIDGE_BIN"
 
 echo "==> [momo-codex-bridge] Configuring Codex provider and syncing models..."

@@ -34,7 +34,7 @@ export async function checkLatestVersion({ endpoint = "https://momoapi.us", fetc
   const candidates = [
     endpoint.replace(/\/$/, "") + "/install/bridge-latest.json",
     "https://momoapi.us/install/bridge-latest.json",
-    "https://api.github.com/repos/momo-api/momo-codex-bridge/releases/latest",
+    "https://api.github.com/repos/momo-api/momoapi-proxy/releases/latest",
   ];
 
   for (const url of candidates) {
@@ -64,11 +64,11 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
     return { updated: false, current: info.current, latest: info.latest, message: "Already on the latest version (v" + info.current + ")." };
   }
 
-  const tmpTgz = join(tmpdir(), "momo-codex-bridge-update.tgz");
+  const tmpTgz = join(tmpdir(), "momoapi-proxy-update.tgz");
   const urls = [
     info.downloadUrl,
-    "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz",
-    "https://github.com/momo-api/momo-codex-bridge/releases/download/v" + info.latest + "/momo-api-codex-bridge-" + info.latest + ".tgz",
+    "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",
+    "https://github.com/momo-api/momoapi-proxy/releases/download/v" + info.latest + "/momoapi-proxy-" + info.latest + ".tgz",
   ].filter(Boolean);
 
   let downloaded = false;

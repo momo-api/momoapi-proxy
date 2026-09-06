@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = dirname(__dirname);
 const BIN_PATH = join(ROOT_DIR, "bin", "momo-codex-bridge.mjs");
-const API_KEY = process.env.MOMO_API_KEY || "sk-7TSbtR3bsr4Q2dym0E42wbivGWwcST17Z6zGT0PugnsqE6Mz";
+const API_KEY = process.env.MOMO_API_KEY;
+if (!API_KEY) throw new Error("MOMO_API_KEY is required for the Canvas container test.");
 
 const root = mkdtempSync(join(tmpdir(), "momo-canvas-test-"));
 const env = {

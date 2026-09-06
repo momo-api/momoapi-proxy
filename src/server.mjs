@@ -42,6 +42,7 @@ const CLAUDE_REASONING_BUDGETS = {
   max: 24576,
   ultra: 32768,
 };
+const MAX_CACHED_CALLS = 512;
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -116,6 +117,105 @@ function parseJsonSafe(value, fallback = {}) {
   return fallback;
 }
 
+function rememberCall(calls, callId, value) {
+  calls.set(callId, { createdAt: Date.now(), ...value });
+  while (calls.size > MAX_CACHED_CALLS) {
+    const oldest = calls.keys().next().value;
+    if (oldest === undefined) break;
+    calls.delete(oldest);
+  }
+}
+
+function dataImage(value) {
+  if (typeof value !== "string") return null;
+  const match = /^data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)$/.exec(value);
+  if (!match) return null;
+  return { mimeType: match[1], data: match[2].replace(/[\r\n]/g, ""), url: value };
+}
+
+function imageFromPart(part) {
+  if (!part || typeof part !== "object") return null;
+  if (part.type === "image" && typeof part.data === "string") {
+    const mimeType = part.mimeType || part.mime_type || "image/png";
+    return { mimeType, data: part.data, url: `data:${mimeType};base64,${part.data}` };
+  }
+  const rawUrl = typeof part.image_url === "string"
+    ? part.image_url
+    : (typeof part.image_url?.url === "string" ? part.image_url.url : null);
+  return dataImage(rawUrl);
+}
+
+function outputParts(value) {
+  const text = [];
+  const images = [];
+  const values = Array.isArray(value) ? value : [value];
+  for (const part of values) {
+    if (typeof part === "string") {
+      text.push(part);
+      continue;
+    }
+    if (!part || typeof part !== "object") continue;
+    const image = imageFromPart(part);
+    if (image) {
+      images.push(image);
+      continue;
+    }
+    if (typeof part.text === "string") {
+      text.push(part.text);
+      continue;
+    }
+    text.push(JSON.stringify(part, (key, nested) => {
+      if ((key === "image_url" || key === "data") && typeof nested === "string" && (nested.startsWith("data:image/") || nested.length > 100_000)) {
+        return "[image data omitted from text]";
+      }
+      return nested;
+    }));
+  }
+  return {
+    text: text.filter(Boolean).join("\n") || (images.length ? "[image output attached]" : ""),
+    images,
+  };
+}
+
+function geminiOutputParts(value, name, callId) {
+  const output = outputParts(value);
+  const functionResponse = {
+    name,
+    response: { result: output.text },
+    ...(callId ? { id: callId } : {}),
+  };
+  return [
+    { functionResponse },
+    ...output.images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } })),
+  ];
+}
+
+function claudeToolResultContent(value) {
+  const output = outputParts(value);
+  if (output.images.length === 0) return output.text;
+  return [
+    ...(output.text ? [{ type: "text", text: output.text }] : []),
+    ...output.images.map((image) => ({
+      type: "image",
+      source: { type: "base64", media_type: image.mimeType, data: image.data },
+    })),
+  ];
+}
+
+function geminiUsage(usage) {
+  if (!usage || typeof usage !== "object") return undefined;
+  const inputTokens = Number(usage.promptTokenCount || 0);
+  const outputTokens = Number(usage.candidatesTokenCount || 0);
+  const totalTokens = Number(usage.totalTokenCount || inputTokens + outputTokens);
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+    input_tokens_details: { cached_tokens: Number(usage.cachedContentTokenCount || 0) },
+    output_tokens_details: { reasoning_tokens: Number(usage.thoughtsTokenCount || 0) },
+  };
+}
+
 export function buildClaudeMessages(input, calls) {
   const items = asArray(input);
   const hasOnlyToolResults = items.length > 0 && items.every((i) => i && (i.type === "function_call_output" || i.type === "custom_tool_call_output"));
@@ -125,15 +225,22 @@ export function buildClaudeMessages(input, calls) {
   if (hasOnlyToolResults && knownFirst?.claudeMessages) {
     const messages = structuredClone(knownFirst.claudeMessages);
     const assistantContent = [];
-    if (knownFirst.toolUseBlock) {
-      assistantContent.push(structuredClone(knownFirst.toolUseBlock));
-    } else {
-      assistantContent.push({
-        type: "tool_use",
-        id: firstCallId,
-        name: knownFirst.name || "tool",
-        input: knownFirst.arguments || {},
-      });
+    const seenCallIds = new Set();
+    for (const item of items) {
+      const callId = item.call_id || firstCallId;
+      if (!callId || seenCallIds.has(callId)) continue;
+      const known = calls?.get(callId);
+      if (known?.toolUseBlock) {
+        assistantContent.push(structuredClone(known.toolUseBlock));
+      } else {
+        assistantContent.push({
+          type: "tool_use",
+          id: callId,
+          name: known?.name || item.name || "tool",
+          input: known?.arguments || {},
+        });
+      }
+      seenCallIds.add(callId);
     }
     messages.push({ role: "assistant", content: assistantContent });
     messages.push({
@@ -141,7 +248,7 @@ export function buildClaudeMessages(input, calls) {
       content: items.map((item) => ({
         type: "tool_result",
         tool_use_id: item.call_id || firstCallId,
-        content: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? ""),
+        content: claudeToolResultContent(item.output),
       })),
     });
     return messages;
@@ -186,6 +293,14 @@ export function buildClaudeMessages(input, calls) {
           currentContent.push({ type: "text", text: part });
         } else if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
           if (part.text) currentContent.push({ type: "text", text: part.text });
+        } else {
+          const image = imageFromPart(part);
+          if (image) {
+            currentContent.push({
+              type: "image",
+              source: { type: "base64", media_type: image.mimeType, data: image.data },
+            });
+          }
         }
       }
       continue;
@@ -209,11 +324,10 @@ export function buildClaudeMessages(input, calls) {
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       if (currentRole && currentRole !== "user") flush();
       currentRole = "user";
-      const textOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
       currentContent.push({
         type: "tool_result",
         tool_use_id: item.call_id || "call_unknown",
-        content: textOutput,
+        content: claudeToolResultContent(item.output),
       });
       continue;
     }
@@ -225,29 +339,52 @@ export function buildClaudeMessages(input, calls) {
 
 export function buildGeminiContents(input, calls) {
   const items = asArray(input);
-  const hasOnlyToolResults = items.length > 0 && items.every((i) => i && (i.type === "function_call_output" || i.type === "custom_tool_call_output"));
-  const firstCallId = hasOnlyToolResults ? items[0].call_id : null;
-  const knownFirst = firstCallId ? calls?.get(firstCallId) : null;
-
-  if (hasOnlyToolResults && knownFirst?.geminiContents) {
-    const contents = structuredClone(knownFirst.geminiContents);
-    if (knownFirst.geminiFunctionCallPart) {
-      contents.push({ role: "model", parts: [structuredClone(knownFirst.geminiFunctionCallPart)] });
-    } else {
-      contents.push({
-        role: "model",
-        parts: [{ functionCall: { name: knownFirst.name || "tool", args: knownFirst.arguments || {} } }],
-      });
-    }
-    contents.push({
-      role: "user",
-      parts: items.map((item) => ({
-        functionResponse: {
-          name: knownFirst.name || item.name || "tool",
-          response: { result: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "") },
-        },
-      })),
+  const historyCalls = new Map();
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    if (item.type !== "function_call" && item.type !== "custom_tool_call") continue;
+    if (!item.call_id) continue;
+    const known = calls?.get(item.call_id);
+    historyCalls.set(item.call_id, {
+      name: known?.name || item.name || "tool",
+      arguments: known?.arguments || parseJsonSafe(item.arguments || item.input),
+      geminiFunctionCallPart: known?.geminiFunctionCallPart,
     });
+  }
+  const lookupCall = (callId) => calls?.get(callId) || historyCalls.get(callId);
+  const hasOnlyToolResults = items.length > 0 && items.every((i) => i && (i.type === "function_call_output" || i.type === "custom_tool_call_output"));
+  const replayBase = hasOnlyToolResults
+    ? items.map((item) => lookupCall(item.call_id)).find((known) => known?.geminiContents)
+    : null;
+  if (replayBase) {
+    const contents = structuredClone(replayBase.geminiContents);
+    const callParts = [];
+    const responseParts = [];
+    const emittedCallIds = new Set();
+    for (const item of items) {
+      const known = lookupCall(item.call_id);
+      if (!known && !item.name) {
+        const output = outputParts(item.output);
+        responseParts.push(
+          { text: `[tool result without matching function call: ${item.call_id || "call_unknown"}]\n${output.text}` },
+          ...output.images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } })),
+        );
+        continue;
+      }
+      const callId = item.call_id;
+      const name = known?.name || item.name || "tool";
+      if (!emittedCallIds.has(callId)) {
+        const callPart = known?.geminiFunctionCallPart
+          ? structuredClone(known.geminiFunctionCallPart)
+          : { functionCall: { name, args: known?.arguments || {} } };
+        if (callPart.functionCall && callId) callPart.functionCall.id = callId;
+        callParts.push(callPart);
+        emittedCallIds.add(callId);
+      }
+      responseParts.push(...geminiOutputParts(item.output, name, callId));
+    }
+    if (callParts.length > 0) contents.push({ role: "model", parts: callParts });
+    if (responseParts.length > 0) contents.push({ role: "user", parts: responseParts });
     return contents;
   }
 
@@ -285,6 +422,9 @@ export function buildGeminiContents(input, calls) {
           currentParts.push({ text: part });
         } else if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
           if (part.text) currentParts.push({ text: part.text });
+        } else {
+          const image = imageFromPart(part);
+          if (image) currentParts.push({ inline_data: { mime_type: image.mimeType, data: image.data } });
         }
       }
       continue;
@@ -293,7 +433,7 @@ export function buildGeminiContents(input, calls) {
     if (item.type === "function_call" || item.type === "custom_tool_call") {
       if (currentRole && currentRole !== "model") flush();
       currentRole = "model";
-      const known = calls?.get(item.call_id);
+      const known = lookupCall(item.call_id);
       if (known?.geminiFunctionCallPart) {
         currentParts.push(structuredClone(known.geminiFunctionCallPart));
       } else {
@@ -303,6 +443,7 @@ export function buildGeminiContents(input, calls) {
           functionCall: {
             name,
             args: typeof args === "object" && args !== null ? args : { value: args },
+            ...(item.call_id ? { id: item.call_id } : {}),
           },
         });
       }
@@ -312,15 +453,17 @@ export function buildGeminiContents(input, calls) {
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       if (currentRole && currentRole !== "user") flush();
       currentRole = "user";
-      const known = calls?.get(item.call_id);
+      const known = lookupCall(item.call_id);
+      if (!known && !item.name) {
+        const output = outputParts(item.output);
+        currentParts.push(
+          { text: `[tool result without matching function call: ${item.call_id || "call_unknown"}]\n${output.text}` },
+          ...output.images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } })),
+        );
+        continue;
+      }
       const name = known?.name || item.name || "tool";
-      const textOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
-      currentParts.push({
-        functionResponse: {
-          name,
-          response: { result: textOutput },
-        },
-      });
+      currentParts.push(...geminiOutputParts(item.output, name, item.call_id));
       continue;
     }
   }
@@ -467,19 +610,21 @@ export function normalizeResponsesPayload(payload) {
     }
 
     if (item.type === "function_call_output") {
+      const output = outputParts(item.output);
       cleanInput.push({
         type: "function_call_output",
         call_id: item.call_id || "call_unknown",
-        output: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? ""),
+        output: Array.isArray(item.output) ? item.output : output.text,
       });
       continue;
     }
 
     if (item.type === "custom_tool_call_output") {
+      const output = outputParts(item.output);
       cleanInput.push({
         type: "custom_tool_call_output",
         call_id: item.call_id || "call_unknown",
-        output: typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? ""),
+        output: Array.isArray(item.output) ? item.output : output.text,
       });
       continue;
     }
@@ -734,7 +879,8 @@ export function buildOpenAIChatMessages(input, instructions) {
 
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       const callId = item.call_id || "call_unknown";
-      const textOutput = typeof item.output === "string" ? item.output : JSON.stringify(item.output ?? "");
+      const output = outputParts(item.output);
+      const textOutput = output.text;
       const matchIdx = pendingToolCalls.findIndex((c) => c.id === callId);
       if (matchIdx >= 0) {
         pendingToolCalls.splice(matchIdx, 1);
@@ -753,6 +899,15 @@ export function buildOpenAIChatMessages(input, instructions) {
         tool_call_id: callId,
         content: textOutput,
       });
+      if (output.images.length > 0) {
+        messages.push({
+          role: "user",
+          content: [
+            { type: "text", text: `[image output from tool ${callId}]` },
+            ...output.images.map((image) => ({ type: "image_url", image_url: { url: image.url } })),
+          ],
+        });
+      }
       continue;
     }
   }
@@ -1022,18 +1177,25 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
   initSseResponse(response);
   const emitter = new ResponseStreamEmitter(response, payload.model);
   emitter.start();
+  let usage;
 
   for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
-    for (const part of data?.candidates?.[0]?.content?.parts || []) {
+    const root = data?.response && typeof data.response === "object" ? data.response : data;
+    if (root?.usageMetadata) usage = geminiUsage(root.usageMetadata);
+    for (const part of root?.candidates?.[0]?.content?.parts || []) {
       if (part.text) {
         emitter.writeTextDelta(part.text);
       }
       if (part.functionCall) {
         const mapped = restoreToolName(part.functionCall.name, functions);
+        const upstreamCallId = typeof part.functionCall.id === "string" && part.functionCall.id
+          ? part.functionCall.id
+          : undefined;
+        const callId = upstreamCallId && !calls.has(upstreamCallId) ? upstreamCallId : undefined;
         const tool = mapped.kind === "custom"
-          ? emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(part.functionCall.args) })
-          : emitter.writeFunctionCall({ name: mapped.originalName, arguments: part.functionCall.args || {} });
-        calls.set(tool.callId, {
+          ? emitter.writeCustomToolCall({ callId, name: mapped.originalName, input: customInput(part.functionCall.args) })
+          : emitter.writeFunctionCall({ callId, name: mapped.originalName, arguments: part.functionCall.args || {} });
+        rememberCall(calls, tool.callId, {
           name: mapped.name,
           originalName: mapped.originalName,
           kind: mapped.kind,
@@ -1044,7 +1206,7 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
       }
     }
   }
-  emitter.complete();
+  emitter.complete(usage);
 }
 
 async function bridgeClaude(response, settings, payload, calls, fetchImpl, signal) {
@@ -1094,7 +1256,7 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
       const tool = mapped.kind === "custom"
         ? emitter.writeCustomToolCall({ callId: block.id, name: mapped.originalName, input: customInput(argumentsValue) })
         : emitter.writeFunctionCall({ callId: block.id, name: mapped.originalName, arguments: argumentsValue });
-      calls.set(tool.callId, {
+      rememberCall(calls, tool.callId, {
         name: mapped.name,
         originalName: mapped.originalName,
         kind: mapped.kind,

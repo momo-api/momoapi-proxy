@@ -1,10 +1,12 @@
 const t0 = Date.now();
+const apiKey = process.env.MOMO_API_KEY;
+if (!apiKey) throw new Error("MOMO_API_KEY is required for the container connectivity test.");
 console.log("Fetching https://momoapi.us/v1/responses inside container...");
 try {
   const r = await fetch("https://momoapi.us/v1/responses", {
     method: "POST",
     headers: {
-      authorization: "Bearer sk-7TSbtR3bsr4Q2dym0E42wbivGWwcST17Z6zGT0PugnsqE6Mz",
+      authorization: `Bearer ${apiKey}`,
       "content-type": "application/json"
     },
     body: JSON.stringify({

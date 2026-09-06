@@ -1,18 +1,21 @@
-# MOMO Codex Bridge
+# MOMO API Proxy
 
-`MOMO Codex Bridge` (formerly Switch) is a dedicated, lightweight local proxy that lets Codex CLI and ChatGPT/Codex Desktop use MOMO models with one MOMO API key.
+`MOMO API Proxy` (formerly MOMO Codex Bridge/Switch) is a dedicated, lightweight local proxy that lets Codex CLI and ChatGPT/Codex Desktop use MOMO models with one MOMO API key.
 
 ```text
-Codex CLI / Desktop -> 127.0.0.1 MOMO Codex Bridge -> https://momoapi.us/v1 -> MOMO routing
+Codex CLI / Desktop -> 127.0.0.1 MOMO API Proxy -> https://momoapi.us/v1 -> MOMO routing
 ```
 
 It is deliberately MOMO-specific. It does not collect provider keys, run an account pool, expose a LAN listener, or replace MOMO server-side billing and routing.
+It implements a focused subset of OpenCodex-inspired protocol compatibility; it is not a feature-complete or drop-in copy of OpenCodex.
 
 ## Key Capabilities
 
 - **Zero OpenAI Auth / Sign-in Dependency**: Emits `requires_openai_auth = false` in loopback provider config.
 - **Desktop App Picker Compatibility**: Maps slots for Desktop (`gpt-5.6-sol` -> DeepSeek V4 Pro, `gpt-5.6-terra` -> Claude Opus 4.6 Thinking, `gpt-5.6-luna` -> Gemini 3.7 Flash).
 - **Thinking / Reasoning Mapping**: Maps per-model reasoning efforts to native upstream parameters (`thinkingConfig.thinkingLevel`, `adaptive` thinking, or `reasoning.effort`).
+- **Multimodal Tool Results**: Keeps tool-returned images in native Gemini, Claude, and OpenAI-compatible image fields instead of serializing base64 image data as text.
+- **Gemini Usage Accounting**: Returns Gemini token usage in Responses events so Codex can track its context budget.
 - **Hourly Model Sync**: Background worker periodically pulls rich model capabilities from `https://momoapi.us/agent/catalog` (fallback to `/v1/models`).
 - **Autostart Support**: Configures login autostart on Windows, macOS launchd, and Linux systemd.
 - **Doctor & Rollback**: Built-in environment diagnostic and one-step backup restore.
@@ -30,12 +33,12 @@ It is deliberately MOMO-specific. It does not collect provider keys, run an acco
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/momo-api/momo-codex-bridge/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/momo-api/momoapi-proxy/main/install.ps1 | iex
 ```
 
 **macOS / Linux (Bash):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/momo-api/momo-codex-bridge/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/momo-api/momoapi-proxy/main/install.sh | bash
 ```
 
 ---
@@ -69,8 +72,8 @@ momo-codex-bridge uninstall [--remove-key]
 ```
 
 ```powershell
-git clone https://github.com/momo-api/momo-codex-bridge.git
-cd momo-codex-bridge
+git clone https://github.com/momo-api/momoapi-proxy.git
+cd momoapi-proxy
 node .\bin\momo-codex-switch.mjs setup --api-key $env:MOMO_API_KEY
 node .\bin\momo-codex-switch.mjs serve
 ```
@@ -97,10 +100,11 @@ node .\scripts\codex-cli-smoke.mjs --claude
 
 `rollback` must be run before a second setup invocation.
 
-## Deliberate limits in v0.1
+## Deliberate limits
 
 - It is for Codex CLI first. Codex Desktop needs a separate acceptance pass per release.
 - It supports standard function tools. Codex-hosted services such as `codex-auto-review`, browser/computer use, image/video generation, and every third-party MCP shape are not marked universally compatible.
+- It does not currently implement OpenCodex's complete `/v1/responses/compact` subsystem; compatibility claims are limited to the paths covered by this repository's tests.
 - The installer is a developer command today; a signed one-line PowerShell/Bash installer and background process manager belong to the release work.
 
 ## Test evidence
