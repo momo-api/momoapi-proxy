@@ -37,29 +37,32 @@ export async function checkLatestVersion({ endpoint = "https://momoapi.us", fetc
     "https://api.github.com/repos/momo-api/momoapi-proxy/releases/latest",
   ];
 
+  const releases = [];
   for (const url of candidates) {
     try {
       const res = await fetchImpl(url, { headers: { "user-agent": "momo-codex-bridge" } });
       if (!res.ok) continue;
       const data = await res.json();
       const latestVersion = data.version || data.tag_name?.replace(/^v/, "");
-      const downloadUrl = data.latest_url || data.url || data.assets?.[0]?.browser_download_url;
       if (latestVersion) {
-        return {
-          current,
+        releases.push({
           latest: latestVersion,
-          hasUpdate: isNewer(latestVersion, current),
-          downloadUrl: downloadUrl || null,
+          downloadUrl: data.latest_url || data.assets?.[0]?.browser_download_url || data.url || null,
           releaseNotes: data.body || null,
-        };
+        });
       }
     } catch {}
   }
-  return { current, latest: current, hasUpdate: false, downloadUrl: null };
+  const latest = releases.reduce((best, release) => !best || isNewer(release.latest, best.latest) ? release : best, null);
+  if (!latest) return { current, latest: current, hasUpdate: false, downloadUrl: null };
+  return { current, ...latest, hasUpdate: isNewer(latest.latest, current) };
 }
 
 export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = fetch, force = false } = {}) {
   const info = await checkLatestVersion({ endpoint, fetchImpl });
+  if (isNewer(info.current, info.latest)) {
+    return { updated: false, current: info.current, latest: info.latest, message: "Refusing to downgrade from v" + info.current + " to v" + info.latest + "." };
+  }
   if (!info.hasUpdate && !force) {
     return { updated: false, current: info.current, latest: info.latest, message: "Already on the latest version (v" + info.current + ")." };
   }

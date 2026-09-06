@@ -24,7 +24,7 @@ function Get-MomoBinPath {
   return [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs")
 }
 
-$Version = "v0.9.6"
+$Version = "v0.9.7"
 
 # Single-instance mutex
 $mutexName = "Local\MomoApiProxyTrayMutex_" + [System.Environment]::UserName
