@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.7 - 2026-09-06
+
+- Selected the highest version across CDN and GitHub release sources instead of trusting the first response.
+- Refused forced self-updates that would downgrade an installed proxy.
+
 ## 0.9.6 - 2026-09-06
 
 - Preserved PDF and other supported files as native Responses or Gemini media instead of serializing Base64 into text.
