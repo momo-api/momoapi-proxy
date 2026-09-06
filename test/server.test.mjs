@@ -383,7 +383,7 @@ test("keeps a realistically large image native across every model protocol", () 
   assert.ok(Math.max(...textValues.map((value) => value.length)) < 1_000);
 });
 
-test("keeps a realistically large PDF native in Responses and Gemini, and out of text everywhere", () => {
+test("keeps a realistically large PDF native in Responses, Gemini, and Claude, and out of text everywhere", () => {
   const encodedFile = "A".repeat(1_123_696);
   const fileData = `data:application/pdf;base64,${encodedFile}`;
   const file = { type: "input_file", filename: "large.pdf", file_data: fileData };
@@ -398,10 +398,22 @@ test("keeps a realistically large PDF native in Responses and Gemini, and out of
     const claude = buildClaudeMessages(input, new Map());
     const gemini = buildGeminiContents(input, new Map());
     assert.ok(JSON.stringify(chat).length < 2_000);
-    assert.ok(JSON.stringify(claude).length < 2_000);
+    assert.ok(JSON.stringify(claude).length > encodedFile.length);
     assert.ok(JSON.stringify(gemini).length > encodedFile.length);
     assert.match(JSON.stringify(chat), /\[file: large\.pdf\]/);
-    assert.match(JSON.stringify(claude), /\[file: large\.pdf\]/);
+    assert.doesNotMatch(JSON.stringify(claude), /\[file: large\.pdf\]/);
+    const claudeDocument = JSON.stringify(claude).includes(`\"type\":\"document\"`);
+    assert.equal(claudeDocument, true);
+    const claudeTextValues = [];
+    const collectClaudeText = (value) => {
+      if (Array.isArray(value)) value.forEach(collectClaudeText);
+      else if (value && typeof value === "object") {
+        if (value.type === "text" && typeof value.text === "string") claudeTextValues.push(value.text);
+        Object.values(value).forEach(collectClaudeText);
+      }
+    };
+    collectClaudeText(claude);
+    assert.equal(claudeTextValues.some((value) => value.includes(encodedFile.slice(0, 10_000))), false);
     const geminiJson = JSON.stringify(gemini);
     assert.equal(geminiJson.includes(`\"text\":\"${encodedFile.slice(0, 10_000)}`), false);
     const geminiParts = gemini.flatMap((message) => message.parts);
