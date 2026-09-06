@@ -14,6 +14,7 @@ import { getCurrentVersion } from "./updater.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
+const MUSE_PREFIX = /^muse-/;
 const ALLOWED_CONTENT_TYPES = new Set(["input_text", "output_text", "input_image", "input_file"]);
 const KNOWN_METADATA_TYPES = new Set([
   "session_meta", "event_msg", "task_started", "world_state", "turn_context",
@@ -82,7 +83,7 @@ function upstreamHeaders(settings, contentType = "application/json") {
 export function resolveTargetModel(model) {
   if (GEMINI_PREFIX.test(model)) return { targetModel: model, protocol: "gemini" };
   if (CLAUDE_PREFIX.test(model)) return { targetModel: model, protocol: "claude" };
-  if (model === "gpt-5.6-sol" || model.endsWith("-sol") || model.endsWith("-responses")) {
+  if (MUSE_PREFIX.test(model) || model === "gpt-5.6-sol" || model === "gpt-5.6-luna" || model.endsWith("-sol") || model.endsWith("-luna") || model.endsWith("-responses")) {
     return { targetModel: model, protocol: "responses" };
   }
   return { targetModel: model, protocol: "chat" };
@@ -133,6 +134,89 @@ function dataImage(value) {
   return { kind: "base64", mimeType: match[1], data: match[2].replace(/[\r\n]/g, ""), url: value };
 }
 
+const INLINE_DATA_URL = /^data:([^;,]+)(?:;[^,]*)?;base64,([A-Za-z0-9+/=\r\n]+)$/i;
+const LARGE_INLINE_TEXT = 100_000;
+
+function inlineAttachment(value, filename) {
+  if (typeof value !== "string") return null;
+  const match = INLINE_DATA_URL.exec(value);
+  if (!match || match[1].toLowerCase().startsWith("image/")) return null;
+  return {
+    marker: filename ? `[file: ${filename}]` : `[file: inline ${match[1]} data]`,
+    native: {
+      type: "input_file",
+      ...(filename ? { filename } : {}),
+      file_data: value,
+    },
+  };
+}
+
+function attachmentFromPart(part) {
+  if (!part || typeof part !== "object") return null;
+  if (part.type === "input_file") {
+    const filename = typeof part.filename === "string" && part.filename ? part.filename : null;
+    const fileId = typeof part.file_id === "string" && part.file_id ? part.file_id : null;
+    const fileData = typeof part.file_data === "string" && part.file_data ? part.file_data : null;
+    const fileUrl = typeof part.file_url === "string" && part.file_url ? part.file_url : null;
+    if (!fileId && !fileData && !fileUrl) return null;
+    return {
+      marker: filename ? `[file: ${filename}]` : (fileId ? `[file: ${fileId}]` : "[file: inline data]"),
+      native: {
+        type: "input_file",
+        ...(filename ? { filename } : {}),
+        ...(fileId ? { file_id: fileId } : {}),
+        ...(fileData ? { file_data: fileData } : {}),
+        ...(fileUrl ? { file_url: fileUrl } : {}),
+      },
+    };
+  }
+  if (part.type === "input_video" && typeof part.video_url === "string") {
+    return { marker: "[video attachment omitted: unsupported by this model route]", native: null };
+  }
+  if (part.type === "input_audio" || part.type === "audio") {
+    return { marker: "[audio attachment omitted: unsupported by this model route]", native: null };
+  }
+  if (part.type === "encrypted_content") {
+    return { marker: "[encrypted content omitted]", native: null };
+  }
+  if (part.type === "resource" && part.resource && typeof part.resource === "object") {
+    if (typeof part.resource.text === "string") return { marker: part.resource.text, native: null };
+    const name = typeof part.resource.uri === "string" ? part.resource.uri : "embedded resource";
+    return { marker: `[file: ${name}]`, native: null };
+  }
+  if (part.type === "resource_link" && typeof part.uri === "string") {
+    return { marker: `[file: ${part.name || part.uri}]`, native: null };
+  }
+  const directUrl = typeof part.file_data === "string" ? part.file_data
+    : (typeof part.file_url === "string" ? part.file_url
+      : (typeof part.video_url === "string" ? part.video_url : null));
+  return inlineAttachment(directUrl, typeof part.filename === "string" ? part.filename : undefined);
+}
+
+function looksLikeInlineBinary(value) {
+  if (typeof value !== "string" || value.length <= LARGE_INLINE_TEXT) return false;
+  if (/^data:[^,]+;base64,/i.test(value)) return true;
+  if (/^(?:JVBERi0|UEsDB|iVBORw0KGgo|\/9j\/|R0lGOD|UklGR)/.test(value)) return true;
+  const compact = value.replace(/[\r\n]/g, "");
+  return compact.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(compact);
+}
+
+function safePartJson(part) {
+  return JSON.stringify(part, (key, nested) => {
+    if (typeof nested !== "string") return nested;
+    if (looksLikeInlineBinary(nested)) return "[inline binary data omitted from text]";
+    if (nested.length > LARGE_INLINE_TEXT && key !== "text") return "[oversized non-text data omitted]";
+    return nested;
+  });
+}
+
+function safeTextValue(value) {
+  if (typeof value !== "string") return value;
+  const attachment = inlineAttachment(value);
+  if (attachment) return attachment.marker;
+  return looksLikeInlineBinary(value) ? "[inline binary data omitted]" : value;
+}
+
 function imageFromPart(part) {
   if (!part || typeof part !== "object") return null;
   const inline = part.inline_data || part.inlineData;
@@ -162,12 +246,18 @@ function imageFromPart(part) {
 function outputParts(value) {
   const text = [];
   const images = [];
+  const attachments = [];
   const values = Array.isArray(value) ? value : [value];
   for (const part of values) {
     if (typeof part === "string") {
       const image = dataImage(part);
       if (image) images.push(image);
-      else text.push(part);
+      else {
+        const attachment = inlineAttachment(part);
+        if (attachment) attachments.push(attachment);
+        else if (looksLikeInlineBinary(part)) attachments.push({ marker: "[inline binary data omitted]", native: null });
+        else text.push(part);
+      }
       continue;
     }
     if (!part || typeof part !== "object") continue;
@@ -176,30 +266,36 @@ function outputParts(value) {
       images.push(image);
       continue;
     }
-    if (typeof part.text === "string") {
-      text.push(part.text);
+    const attachment = attachmentFromPart(part);
+    if (attachment) {
+      attachments.push(attachment);
       continue;
     }
-    text.push(JSON.stringify(part, (key, nested) => {
-      if ((key === "image_url" || key === "data") && typeof nested === "string" && (nested.startsWith("data:image/") || nested.length > 100_000)) {
-        return "[image data omitted from text]";
-      }
-      return nested;
-    }));
+    if (typeof part.text === "string") {
+      text.push(safeTextValue(part.text));
+      continue;
+    }
+    text.push(safePartJson(part));
   }
+  const explicitText = text.filter(Boolean).join("\n");
+  const attachmentText = attachments.map((item) => item.marker).filter(Boolean).join("\n");
+  const responseFallbackText = attachments.filter((item) => !item.native).map((item) => item.marker).filter(Boolean).join("\n");
   return {
-    text: text.filter(Boolean).join("\n") || (images.length ? "[image output attached]" : ""),
+    text: [explicitText, attachmentText].filter(Boolean).join("\n") || (images.length ? "[image output attached]" : ""),
+    responseText: [explicitText, responseFallbackText].filter(Boolean).join("\n"),
     images,
+    files: attachments.map((item) => item.native).filter(Boolean),
     hasText: text.some(Boolean),
   };
 }
 
 function responsesToolOutput(value) {
   const output = outputParts(value);
-  if (output.images.length === 0) return typeof value === "string" ? value : output.text;
+  if (output.images.length === 0 && output.files.length === 0) return typeof value === "string" && !looksLikeInlineBinary(value) ? value : output.responseText;
   return [
-    ...(output.hasText ? [{ type: "input_text", text: output.text }] : []),
+    ...(output.responseText ? [{ type: "input_text", text: output.responseText }] : []),
     ...output.images.map((image) => ({ type: "input_image", image_url: image.url })),
+    ...output.files,
   ];
 }
 
@@ -213,6 +309,7 @@ function geminiOutputParts(value, name, callId) {
   return [
     { functionResponse },
     ...output.images.map(geminiImagePart),
+    ...output.files.map(geminiFilePart).filter(Boolean),
   ];
 }
 
@@ -220,6 +317,22 @@ function geminiImagePart(image) {
   return image.kind === "url"
     ? { text: `[image: ${image.url}]` }
     : { inline_data: { mime_type: image.mimeType, data: image.data } };
+}
+
+function geminiFilePart(file) {
+  if (!file || typeof file !== "object") return null;
+  if (typeof file.file_data === "string") {
+    const match = INLINE_DATA_URL.exec(file.file_data);
+    if (match) {
+      return {
+        inline_data: {
+          mime_type: match[1],
+          data: match[2].replace(/[\r\n]/g, ""),
+        },
+      };
+    }
+  }
+  return null;
 }
 
 function claudeImagePart(image) {
@@ -314,7 +427,7 @@ export function buildClaudeMessages(input, calls) {
     if (typeof item === "string") {
       if (currentRole && currentRole !== "user") flush();
       currentRole = "user";
-      currentContent.push({ type: "text", text: item });
+      currentContent.push({ type: "text", text: safeTextValue(item) });
       continue;
     }
     if (typeof item !== "object") continue;
@@ -328,13 +441,16 @@ export function buildClaudeMessages(input, calls) {
       for (const part of rawParts) {
         if (!part) continue;
         if (typeof part === "string") {
-          currentContent.push({ type: "text", text: part });
+          currentContent.push({ type: "text", text: safeTextValue(part) });
         } else if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
-          if (part.text) currentContent.push({ type: "text", text: part.text });
+          if (part.text) currentContent.push({ type: "text", text: safeTextValue(part.text) });
         } else {
           const image = imageFromPart(part);
           if (image) {
             currentContent.push(claudeImagePart(image));
+          } else {
+            const attachment = attachmentFromPart(part);
+            if (attachment) currentContent.push({ type: "text", text: attachment.marker });
           }
         }
       }
@@ -440,7 +556,7 @@ export function buildGeminiContents(input, calls) {
     if (typeof item === "string") {
       if (currentRole && currentRole !== "user") flush();
       currentRole = "user";
-      currentParts.push({ text: item });
+      currentParts.push({ text: safeTextValue(item) });
       continue;
     }
     if (typeof item !== "object") continue;
@@ -454,12 +570,19 @@ export function buildGeminiContents(input, calls) {
       for (const part of rawParts) {
         if (!part) continue;
         if (typeof part === "string") {
-          currentParts.push({ text: part });
+          currentParts.push({ text: safeTextValue(part) });
         } else if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
-          if (part.text) currentParts.push({ text: part.text });
+          if (part.text) currentParts.push({ text: safeTextValue(part.text) });
         } else {
           const image = imageFromPart(part);
           if (image) currentParts.push(geminiImagePart(image));
+          else {
+            const attachment = attachmentFromPart(part);
+            if (attachment) {
+              const nativePart = geminiFilePart(attachment.native);
+              currentParts.push(nativePart || { text: attachment.marker });
+            }
+          }
         }
       }
       continue;
@@ -511,7 +634,7 @@ function geminiRequest(request, model, calls) {
   const functions = extractFunctions(request);
   const contents = buildGeminiContents(request.input, calls);
   const body = { contents };
-  if (request.instructions) body.systemInstruction = { parts: [{ text: String(request.instructions) }] };
+  if (request.instructions) body.systemInstruction = { parts: [{ text: safeTextValue(String(request.instructions)) }] };
   if (functions.length) body.tools = [{ functionDeclarations: functions.map(({ name, description, parameters }) => ({ name, description, parameters })) }];
   const rawEffort = request.reasoning_effort || request.model_reasoning_effort || request.reasoning?.effort;
   if (rawEffort) {
@@ -539,7 +662,7 @@ function claudeRequest(request, model, calls) {
       model,
       max_tokens: maxTokens,
       stream: true,
-      ...(request.instructions ? { system: String(request.instructions) } : {}),
+      ...(request.instructions ? { system: safeTextValue(String(request.instructions)) } : {}),
       messages,
       ...(functions.length ? { tools: functions.map(({ name, description, parameters }) => ({ name, description, input_schema: parameters })) } : {}),
       ...(isThinkingModel ? { thinking: { type: "enabled", budget_tokens: budget } } : {}),
@@ -609,7 +732,7 @@ export function normalizeResponsesPayload(payload) {
       cleanInput.push({
         type: "message",
         role: "user",
-        content: [{ type: "input_text", text: item }],
+        content: [{ type: "input_text", text: safeTextValue(item) }],
       });
       continue;
     }
@@ -639,7 +762,7 @@ export function normalizeResponsesPayload(payload) {
       cleanInput.push({
         type: "message",
         role: "user",
-        content: [item],
+        content: [{ ...item, text: safeTextValue(item.text) }],
       });
       continue;
     }
@@ -687,16 +810,20 @@ export function normalizeResponsesPayload(payload) {
       let content = [];
       if (typeof item.content === "string") {
         const contentType = role === "assistant" ? "output_text" : "input_text";
-        content = [{ type: contentType, text: item.content }];
+        content = [{ type: contentType, text: safeTextValue(item.content) }];
       } else if (Array.isArray(item.content)) {
         for (const part of item.content) {
           if (!part) continue;
           if (typeof part === "string") {
             const contentType = role === "assistant" ? "output_text" : "input_text";
-            content.push({ type: contentType, text: part });
+            content.push({ type: contentType, text: safeTextValue(part) });
           } else if (typeof part === "object") {
             if (ALLOWED_CONTENT_TYPES.has(part.type)) {
-              content.push(part);
+              if ((part.type === "input_text" || part.type === "output_text") && typeof part.text === "string") {
+                content.push({ ...part, text: safeTextValue(part.text) });
+              } else {
+                content.push(part);
+              }
             } else if (part.text && !part.type) {
               const contentType = role === "assistant" ? "output_text" : "input_text";
               content.push({ type: contentType, text: part.text });
@@ -805,7 +932,7 @@ export function normalizeResponsesPayload(payload) {
 export function buildOpenAIChatMessages(input, instructions) {
   const messages = [];
   if (instructions && String(instructions).trim().length > 0) {
-    messages.push({ role: "system", content: String(instructions).trim() });
+    messages.push({ role: "system", content: safeTextValue(String(instructions).trim()) });
   }
 
   const items = asArray(input);
@@ -838,7 +965,7 @@ export function buildOpenAIChatMessages(input, instructions) {
     if (!item) continue;
     if (typeof item === "string") {
       flushPendingToolCalls();
-      messages.push({ role: "user", content: item });
+      messages.push({ role: "user", content: safeTextValue(item) });
       continue;
     }
     if (typeof item !== "object") continue;
@@ -846,7 +973,7 @@ export function buildOpenAIChatMessages(input, instructions) {
     if (item.type === "agent_message" && Array.isArray(item.content)) {
       const textParts = item.content
         .filter((c) => c && (c.type === "input_text" || c.type === "text") && typeof c.text === "string")
-        .map((c) => c.text);
+        .map((c) => safeTextValue(c.text));
       if (textParts.length > 0) {
         flushPendingToolCalls();
         messages.push({ role: "user", content: textParts.join("\n\n") });
