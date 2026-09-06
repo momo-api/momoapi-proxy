@@ -344,12 +344,30 @@ function claudeImagePart(image) {
   };
 }
 
+function claudeFilePart(file) {
+  if (!file || typeof file !== "object" || typeof file.file_data !== "string") return null;
+  const match = INLINE_DATA_URL.exec(file.file_data);
+  if (!match || match[1].toLowerCase() !== "application/pdf") return null;
+  return {
+    type: "document",
+    source: {
+      type: "base64",
+      media_type: match[1],
+      data: match[2].replace(/[\r\n]/g, ""),
+    },
+    ...(typeof file.filename === "string" && file.filename ? { title: file.filename } : {}),
+  };
+}
+
 function claudeToolResultContent(value) {
   const output = outputParts(value);
-  if (output.images.length === 0) return output.text;
+  const documents = output.files.map(claudeFilePart).filter(Boolean);
+  if (output.images.length === 0 && documents.length === 0) return output.text;
+  const safeText = output.responseText || (output.images.length ? "[image output attached]" : "");
   return [
-    ...(output.text ? [{ type: "text", text: output.text }] : []),
+    ...(safeText ? [{ type: "text", text: safeText }] : []),
     ...output.images.map(claudeImagePart),
+    ...documents,
   ];
 }
 
@@ -450,7 +468,10 @@ export function buildClaudeMessages(input, calls) {
             currentContent.push(claudeImagePart(image));
           } else {
             const attachment = attachmentFromPart(part);
-            if (attachment) currentContent.push({ type: "text", text: attachment.marker });
+            if (attachment) {
+              const document = claudeFilePart(attachment.native);
+              currentContent.push(document || { type: "text", text: attachment.marker });
+            }
           }
         }
       }
