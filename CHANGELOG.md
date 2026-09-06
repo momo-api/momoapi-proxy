@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.5 - 2026-09-06
+
+- Verified realistically large tool-result images stay in native image fields across Gemini, Claude, Responses, and Chat Completions model routes.
+- Preserved direct user images when a model routes through the Chat Completions fallback.
+- Recognized Gemini inline-data and Claude base64/URL image blocks without serializing their bytes into text.
+
 ## 0.9.4 - 2026-09-06
 
 - Fixed replayed Gemini tool results using the fallback name `tool` instead of the matching call name.
