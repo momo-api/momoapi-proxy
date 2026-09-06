@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.8 - 2026-09-06
+
+- Preserved inline PDF uploads as native Claude `document` blocks so the server-side CPA compatibility fallback can read them.
+- Covered PDF files returned by tools without copying their Base64 payloads into text.
+- Added large-PDF regression coverage for the Claude route.
+
 ## 0.9.7 - 2026-09-06
 
 - Selected the highest version across CDN and GitHub release sources instead of trusting the first response.
