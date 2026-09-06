@@ -130,19 +130,33 @@ function dataImage(value) {
   if (typeof value !== "string") return null;
   const match = /^data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)$/.exec(value);
   if (!match) return null;
-  return { mimeType: match[1], data: match[2].replace(/[\r\n]/g, ""), url: value };
+  return { kind: "base64", mimeType: match[1], data: match[2].replace(/[\r\n]/g, ""), url: value };
 }
 
 function imageFromPart(part) {
   if (!part || typeof part !== "object") return null;
-  if (part.type === "image" && typeof part.data === "string") {
-    const mimeType = part.mimeType || part.mime_type || "image/png";
-    return { mimeType, data: part.data, url: `data:${mimeType};base64,${part.data}` };
+  const inline = part.inline_data || part.inlineData;
+  const source = part.source;
+  const rawData = typeof inline?.data === "string"
+    ? inline.data
+    : (source?.type === "base64" && typeof source.data === "string"
+      ? source.data
+      : (part.type === "image" && typeof part.data === "string" ? part.data : null));
+  if (rawData) {
+    const mimeType = inline?.mime_type || inline?.mimeType || source?.media_type || part.mimeType || part.mime_type || "image/png";
+    return { kind: "base64", mimeType, data: rawData, url: `data:${mimeType};base64,${rawData}` };
   }
   const rawUrl = typeof part.image_url === "string"
     ? part.image_url
-    : (typeof part.image_url?.url === "string" ? part.image_url.url : null);
-  return dataImage(rawUrl);
+    : (typeof part.image_url?.url === "string"
+      ? part.image_url.url
+      : (source?.type === "url" && typeof source.url === "string" ? source.url : null));
+  const embedded = dataImage(rawUrl);
+  if (embedded) return embedded;
+  if (/^https?:\/\//i.test(rawUrl || "")) {
+    return { kind: "url", mimeType: part.mimeType || part.mime_type || "image/jpeg", url: rawUrl };
+  }
+  return null;
 }
 
 function outputParts(value) {
@@ -151,7 +165,9 @@ function outputParts(value) {
   const values = Array.isArray(value) ? value : [value];
   for (const part of values) {
     if (typeof part === "string") {
-      text.push(part);
+      const image = dataImage(part);
+      if (image) images.push(image);
+      else text.push(part);
       continue;
     }
     if (!part || typeof part !== "object") continue;
@@ -174,7 +190,17 @@ function outputParts(value) {
   return {
     text: text.filter(Boolean).join("\n") || (images.length ? "[image output attached]" : ""),
     images,
+    hasText: text.some(Boolean),
   };
+}
+
+function responsesToolOutput(value) {
+  const output = outputParts(value);
+  if (output.images.length === 0) return typeof value === "string" ? value : output.text;
+  return [
+    ...(output.hasText ? [{ type: "input_text", text: output.text }] : []),
+    ...output.images.map((image) => ({ type: "input_image", image_url: image.url })),
+  ];
 }
 
 function geminiOutputParts(value, name, callId) {
@@ -186,8 +212,23 @@ function geminiOutputParts(value, name, callId) {
   };
   return [
     { functionResponse },
-    ...output.images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } })),
+    ...output.images.map(geminiImagePart),
   ];
+}
+
+function geminiImagePart(image) {
+  return image.kind === "url"
+    ? { text: `[image: ${image.url}]` }
+    : { inline_data: { mime_type: image.mimeType, data: image.data } };
+}
+
+function claudeImagePart(image) {
+  return {
+    type: "image",
+    source: image.kind === "url"
+      ? { type: "url", url: image.url }
+      : { type: "base64", media_type: image.mimeType, data: image.data },
+  };
 }
 
 function claudeToolResultContent(value) {
@@ -195,10 +236,7 @@ function claudeToolResultContent(value) {
   if (output.images.length === 0) return output.text;
   return [
     ...(output.text ? [{ type: "text", text: output.text }] : []),
-    ...output.images.map((image) => ({
-      type: "image",
-      source: { type: "base64", media_type: image.mimeType, data: image.data },
-    })),
+    ...output.images.map(claudeImagePart),
   ];
 }
 
@@ -296,10 +334,7 @@ export function buildClaudeMessages(input, calls) {
         } else {
           const image = imageFromPart(part);
           if (image) {
-            currentContent.push({
-              type: "image",
-              source: { type: "base64", media_type: image.mimeType, data: image.data },
-            });
+            currentContent.push(claudeImagePart(image));
           }
         }
       }
@@ -367,7 +402,7 @@ export function buildGeminiContents(input, calls) {
         const output = outputParts(item.output);
         responseParts.push(
           { text: `[tool result without matching function call: ${item.call_id || "call_unknown"}]\n${output.text}` },
-          ...output.images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } })),
+          ...output.images.map(geminiImagePart),
         );
         continue;
       }
@@ -424,7 +459,7 @@ export function buildGeminiContents(input, calls) {
           if (part.text) currentParts.push({ text: part.text });
         } else {
           const image = imageFromPart(part);
-          if (image) currentParts.push({ inline_data: { mime_type: image.mimeType, data: image.data } });
+          if (image) currentParts.push(geminiImagePart(image));
         }
       }
       continue;
@@ -458,7 +493,7 @@ export function buildGeminiContents(input, calls) {
         const output = outputParts(item.output);
         currentParts.push(
           { text: `[tool result without matching function call: ${item.call_id || "call_unknown"}]\n${output.text}` },
-          ...output.images.map((image) => ({ inline_data: { mime_type: image.mimeType, data: image.data } })),
+          ...output.images.map(geminiImagePart),
         );
         continue;
       }
@@ -610,21 +645,19 @@ export function normalizeResponsesPayload(payload) {
     }
 
     if (item.type === "function_call_output") {
-      const output = outputParts(item.output);
       cleanInput.push({
         type: "function_call_output",
         call_id: item.call_id || "call_unknown",
-        output: Array.isArray(item.output) ? item.output : output.text,
+        output: responsesToolOutput(item.output),
       });
       continue;
     }
 
     if (item.type === "custom_tool_call_output") {
-      const output = outputParts(item.output);
       cleanInput.push({
         type: "custom_tool_call_output",
         call_id: item.call_id || "call_unknown",
-        output: Array.isArray(item.output) ? item.output : output.text,
+        output: responsesToolOutput(item.output),
       });
       continue;
     }
@@ -825,15 +858,8 @@ export function buildOpenAIChatMessages(input, instructions) {
 
     if (item.type === "message" || item.role) {
       const role = item.role === "assistant" ? "assistant" : (item.role === "developer" || item.role === "system" ? "system" : "user");
-      let textContent = "";
-      if (typeof item.content === "string") {
-        textContent = item.content;
-      } else if (Array.isArray(item.content)) {
-        textContent = item.content
-          .filter((p) => p && typeof p === "object" && (p.type === "input_text" || p.type === "output_text" || p.type === "text"))
-          .map((p) => p.text || "")
-          .join("");
-      }
+      const output = outputParts(item.content);
+      const textContent = output.text;
       if (role === "assistant") {
         flushPendingToolCalls();
         messages.push({ role: "assistant", content: textContent });
@@ -841,7 +867,15 @@ export function buildOpenAIChatMessages(input, instructions) {
         messages.push({ role: "system", content: textContent });
       } else {
         flushPendingToolCalls();
-        messages.push({ role: "user", content: textContent || "Continue." });
+        messages.push({
+          role: "user",
+          content: output.images.length > 0
+            ? [
+              ...(textContent ? [{ type: "text", text: textContent }] : []),
+              ...output.images.map((image) => ({ type: "image_url", image_url: { url: image.url } })),
+            ]
+            : (textContent || "Continue."),
+        });
       }
       continue;
     }

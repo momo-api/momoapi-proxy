@@ -341,6 +341,85 @@ test("keeps tool-result images out of text in Responses and Chat bridges", () =>
   assert.doesNotMatch(JSON.stringify(claude[1].content[0].content[0]), /data:image/);
 });
 
+test("keeps a realistically large image native across every model protocol", () => {
+  const encodedImage = "A".repeat(1_118_032);
+  const imageUrl = `data:image/jpeg;base64,${encodedImage}`;
+  const input = [
+    { type: "function_call", call_id: "call_large_all", name: "view_image", arguments: "{}" },
+    {
+      type: "function_call_output",
+      call_id: "call_large_all",
+      output: [
+        { type: "input_text", text: "image loaded" },
+        { type: "input_image", image_url: imageUrl },
+      ],
+    },
+  ];
+
+  const gemini = buildGeminiContents(input, new Map());
+  assert.equal(gemini[1].parts[0].functionResponse.response.result, "image loaded");
+  assert.equal(gemini[1].parts[1].inline_data.data.length, encodedImage.length);
+
+  const claude = buildClaudeMessages(input, new Map());
+  assert.equal(claude[1].content[0].content[0].text, "image loaded");
+  assert.equal(claude[1].content[0].content[1].source.data.length, encodedImage.length);
+
+  const chat = buildOpenAIChatMessages(input);
+  assert.equal(chat[1].content, "image loaded");
+  assert.equal(chat[2].content[1].image_url.url.length, imageUrl.length);
+
+  const responses = normalizeResponsesPayload({ model: "gpt-5.6-sol", input });
+  assert.equal(responses.input[1].output[0].text, "image loaded");
+  assert.equal(responses.input[1].output[1].image_url.length, imageUrl.length);
+
+  const textValues = [];
+  const collectText = (value, key = "") => {
+    if (typeof value === "string" && ["text", "content", "result"].includes(key)) textValues.push(value);
+    else if (Array.isArray(value)) value.forEach((item) => collectText(item));
+    else if (value && typeof value === "object") Object.entries(value).forEach(([name, item]) => collectText(item, name));
+  };
+  [gemini, claude, chat, responses.input].forEach((payload) => collectText(payload));
+  assert.equal(textValues.some((value) => value.includes(encodedImage.slice(0, 10_000))), false);
+  assert.ok(Math.max(...textValues.map((value) => value.length)) < 1_000);
+});
+
+test("preserves direct and native-shape images without converting bytes to text", () => {
+  const dataUrl = "data:image/png;base64,QUJDRA==";
+  const directInput = [{
+    role: "user",
+    content: [{ type: "input_text", text: "inspect" }, { type: "input_image", image_url: dataUrl }],
+  }];
+  const chat = buildOpenAIChatMessages(directInput);
+  assert.equal(chat[0].content[0].text, "inspect");
+  assert.equal(chat[0].content[1].image_url.url, dataUrl);
+
+  const claudeNative = buildClaudeMessages([{
+    role: "user",
+    content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "QUJDRA==" } }],
+  }], new Map());
+  assert.equal(claudeNative[0].content[0].source.data, "QUJDRA==");
+
+  const geminiNative = buildGeminiContents([{
+    role: "user",
+    content: [{ inlineData: { mimeType: "image/png", data: "QUJDRA==" } }],
+  }], new Map());
+  assert.equal(geminiNative[0].parts[0].inline_data.data, "QUJDRA==");
+
+  const responsesNative = normalizeResponsesPayload({
+    model: "gpt-5.6-sol",
+    input: [{
+      type: "function_call_output",
+      call_id: "call_native",
+      output: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "QUJDRA==" } }],
+    }],
+  });
+  assert.deepEqual(responsesNative.input[0].output, [{ type: "input_image", image_url: dataUrl }]);
+
+  const remoteUrl = "https://example.com/image.jpg";
+  const remote = buildGeminiContents([{ role: "user", content: [{ type: "input_image", image_url: remoteUrl }] }], new Map());
+  assert.equal(remote[0].parts[0].text, `[image: ${remoteUrl}]`);
+});
+
 test("routes models cleanly: Claude to /v1/messages, Gemini to gemini endpoint, and others to /v1/responses", async () => {
   const captured = [];
   const fakeFetch = async (url, init) => {
