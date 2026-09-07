@@ -200,6 +200,26 @@ namespace MomoApi.Tray
         private ProcessStartInfo ResolveCliProcessInfo(string subCommand)
         {
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+            // Prioritize executing JS via node.exe with full script path to prevent invoking raw node.exe copies
+            string[] possibleMjs = new string[]
+            {
+                Path.Combine(home, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs"),
+                Path.Combine(home, ".momoapi-proxy", "bin", "momoapi-proxy.mjs"),
+                Path.Combine(home, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "momoapi-proxy.mjs"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "app", "bin", "momoapi-proxy.mjs"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "bin", "momoapi-proxy.mjs")
+            };
+
+            foreach (string mjs in possibleMjs)
+            {
+                if (File.Exists(mjs))
+                {
+                    return new ProcessStartInfo("node", "\"" + mjs + "\" " + subCommand);
+                }
+            }
+
             string[] possibleExes = new string[]
             {
                 Path.Combine(home, ".momoapi-proxy", "bin", "momoapi-proxy.exe"),
@@ -211,23 +231,17 @@ namespace MomoApi.Tray
             {
                 if (File.Exists(exe))
                 {
+                    try
+                    {
+                        var vi = FileVersionInfo.GetVersionInfo(exe);
+                        if (!string.IsNullOrEmpty(vi.ProductName) && vi.ProductName.IndexOf("Node.js", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            continue;
+                        }
+                    }
+                    catch { }
+
                     return new ProcessStartInfo(exe, subCommand);
-                }
-            }
-
-            string[] possibleMjs = new string[]
-            {
-                Path.Combine(home, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs"),
-                Path.Combine(home, ".momoapi-proxy", "app", "bin", "momo-codex-bridge.mjs"),
-                Path.Combine(home, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs"),
-                Path.Combine(home, ".momo-codex-bridge", "app", "bin", "momo-codex-bridge.mjs")
-            };
-
-            foreach (string mjs in possibleMjs)
-            {
-                if (File.Exists(mjs))
-                {
-                    return new ProcessStartInfo("node", "\"" + mjs + "\" " + subCommand);
                 }
             }
 
@@ -252,11 +266,15 @@ namespace MomoApi.Tray
         {
             try
             {
-                ProcessStartInfo psi = ResolveCliProcessInfo("serve");
+                ProcessStartInfo psi = ResolveCliProcessInfo("start");
                 psi.CreateNoWindow = true;
                 psi.UseShellExecute = false;
                 psi.WindowStyle = ProcessWindowStyle.Hidden;
-                Process.Start(psi);
+                Process p = Process.Start(psi);
+                if (p != null)
+                {
+                    p.WaitForExit(5000);
+                }
             }
             catch { }
         }
@@ -447,3 +465,4 @@ namespace MomoApi.Tray
         }
     }
 }
+

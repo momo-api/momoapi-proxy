@@ -1,5 +1,5 @@
 import { spawnSync, spawn } from "node:child_process";
-import { writeFileSync, copyFileSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { writeFileSync, copyFileSync, existsSync, mkdirSync, unlinkSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { TRAY_EXE_BASE64 } from "./tray-binary.mjs";
@@ -31,8 +31,17 @@ export function installWindowsDesktop({ port = 18789, env = process.env } = {}) 
   const targetTray = join(proxyBinDir, "MomoApiProxyTray.exe");
   const targetIco = join(proxyHome, "app.ico");
 
-  // 1. Copy current running exe to permanent app directory
-  if (process.execPath && (!existsSync(targetExe) || process.execPath.toLowerCase() !== targetExe.toLowerCase())) {
+  // 1. Clean up legacy node.exe copy and only copy real compiled standalone binaries
+  const isNodeRuntime = /node(\.exe)?$/i.test(process.execPath || "");
+  if (existsSync(targetExe)) {
+    try {
+      const stats = statSync(targetExe);
+      if (stats.size > 50 * 1024 * 1024) {
+        unlinkSync(targetExe);
+      }
+    } catch {}
+  }
+  if (!isNodeRuntime && process.execPath && (!existsSync(targetExe) || process.execPath.toLowerCase() !== targetExe.toLowerCase())) {
     try {
       copyFileSync(process.execPath, targetExe);
     } catch {}
