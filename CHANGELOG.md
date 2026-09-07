@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.9 - 2026-09-07
+
+- Fixed Windows System Tray daemon launcher: prioritized full script path execution and guarded against invoking raw Node.js binary copies.
+- Removed legacy 92MB `node.exe` file duplication in Windows desktop installer.
+- Added Gitleaks automated secret scanning with custom MOMO API token detection rules.
+- Purged leaked credentials across all historical release assets and rewritten Git commits.
+
 ## 0.9.8 - 2026-09-06
 
 - Preserved inline PDF uploads as native Claude `document` blocks so the server-side CPA compatibility fallback can read them.
