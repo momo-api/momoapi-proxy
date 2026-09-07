@@ -9,6 +9,8 @@ Codex CLI / Desktop -> 127.0.0.1 MOMO API Proxy -> https://momoapi.us/v1 -> MOMO
 It is deliberately MOMO-specific. It does not collect provider keys, run an account pool, expose a LAN listener, or replace MOMO server-side billing and routing.
 It implements a focused subset of OpenCodex-inspired protocol compatibility; it is not a feature-complete or drop-in copy of OpenCodex.
 
+> **2026-09-07 multimodal/file notice:** The Base64 token-explosion path is fixed and verified across five production model routes. See the [Chinese service announcement](docs/announcements/2026-09-07-multimodal-file-fix-zh-CN.md) and the [full benchmark report](docs/multimodal-file-benchmark-2026-09-06.md).
+
 ## Key Capabilities
 
 - **Zero OpenAI Auth / Sign-in Dependency**: Emits `requires_openai_auth = false` in loopback provider config.
