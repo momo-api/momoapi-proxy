@@ -4,13 +4,16 @@ import { createMomoSwitch } from "../src/server.mjs";
 
 test("internal endpoints enforce loopback and localToken authentication", async () => {
   const localToken = "secret_local_test_token_123";
-  const server = createMomoSwitch({
-    apiKey: "momo_key",
-    endpoint: "https://mock.momo",
-    port: 0,
-    host: "127.0.0.1",
-    localToken,
-  });
+  const server = createMomoSwitch(
+    {
+      apiKey: "momo_key",
+      endpoint: "https://mock.momo",
+      port: 0,
+      host: "127.0.0.1",
+      localToken,
+    },
+    { exitImpl: () => {} }
+  );
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
@@ -53,18 +56,10 @@ test("internal endpoints enforce loopback and localToken authentication", async 
     const shutdownBody = await resShutdown.json();
     assert.equal(shutdownBody.ok, true);
 
-    // 6. draining 期间健康检查应返回 503 draining
-    const resHealthDraining = await fetch(`http://127.0.0.1:${port}/healthz`);
-    assert.equal(resHealthDraining.status, 503);
-    const healthBody = await resHealthDraining.json();
-    assert.equal(healthBody.status, "draining");
-
-    // 7. draining 期间业务请求应返回 503 并携带 Retry-After
-    const resBizDraining = await fetch(`http://127.0.0.1:${port}/v1/models`, {
-      headers: { authorization: `Bearer ${localToken}` },
-    });
-    assert.equal(resBizDraining.status, 503);
-    assert.equal(resBizDraining.headers.get("retry-after"), "5");
+    // 6. shutdown 响应完成后必须停止监听，新的 TCP 连接应被拒绝。
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(server.listening, false);
+    await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`), /fetch failed/);
   } finally {
     server.close();
   }

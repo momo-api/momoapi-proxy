@@ -145,8 +145,24 @@ test("Gemini bridge: converts Gemini bare exec with raw/input/command/cmd to Cod
     assert.match(bodyText, /"name":"exec"/);
     assert.match(bodyText, /response\.custom_tool_call_input\.done/);
 
-    // 3. 验证参数被正确包裹并提取为 await tools.exec_command
-    assert.match(bodyText, /tools\.exec_command/);
+    // 3. 验证参数被正确包裹并提取为 await tools.exec_command({ cmd: ... })
+    const outputItemDone = bodyText
+      .split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)))
+      .find((event) => event.type === "response.output_item.done");
+    assert.ok(outputItemDone);
+    assert.equal(outputItemDone.item.input, 'await tools.exec_command({ cmd: "echo test" });');
+    assert.doesNotMatch(outputItemDone.item.input, /\{ command:/);
+    let executedArgs;
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await new AsyncFunction("tools", outputItemDone.item.input)({
+      exec_command: async (args) => {
+        executedArgs = args;
+        return { output: "ok", exit_code: 0 };
+      },
+    });
+    assert.deepEqual(executedArgs, { cmd: "echo test" });
     assert.match(bodyText, /echo test/);
   } finally {
     server.close();
@@ -229,7 +245,7 @@ test("Gemini bridge: second turn custom_tool_call_output is replayed properly to
             id: "ctc_1",
             call_id: "call_gemini_456",
             name: "exec",
-            input: 'await tools.exec_command({ command: "dir" });',
+            input: 'await tools.exec_command({ cmd: "dir" });',
           },
           {
             type: "custom_tool_call_output",

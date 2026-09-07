@@ -180,7 +180,7 @@ function customInput(value) {
   // Auto-wrap bare shell commands / scripts into valid Codex V8 isolate JavaScript
   const isJs = raw.startsWith("await ") || raw.startsWith("tools.") || raw.startsWith("const ") || raw.startsWith("let ") || raw.startsWith("var ") || raw.startsWith("function ") || raw.startsWith("return ") || raw.startsWith("/*") || raw.startsWith("//") || raw.startsWith("try {");
   if (!isJs) {
-    return `await tools.exec_command({ command: ${JSON.stringify(raw)} });`;
+    return `await tools.exec_command({ cmd: ${JSON.stringify(raw)} });`;
   }
   return raw;
 }
@@ -1566,12 +1566,14 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
   response.end();
 }
 
-export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
+export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = process.exit } = {}) {
+  metricsState.isDraining = false;
   const calls = new Map();
   const activeSockets = new Set();
   const activeSseEmitters = new Set();
   const activeAbortControllers = new Set();
   let serverInstance = null;
+  let shutdownLifecycle = null;
 
   const server = createServer(async (request, response) => {
     const t0 = Date.now();
@@ -1685,54 +1687,75 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
         }
 
         metricsState.isDraining = true;
-        json(response, 200, { ok: true, message: "Server draining initiated; terminating in up to 5s." });
-
+        const configuredDrainTimeoutMs = Number(settings.drainTimeoutMs);
+        const drainTimeoutMs = Number.isFinite(configuredDrainTimeoutMs) && configuredDrainTimeoutMs > 0
+          ? configuredDrainTimeoutMs
+          : 5000;
         let shutdownFinished = false;
-        const drainTimeoutMs = Number(settings.drainTimeoutMs || 5000);
+        let deadlineTimer = null;
 
-        const finishShutdown = () => {
+        const exitProcess = () => {
+          setTimeout(() => {
+            try { exitImpl(0); } catch {}
+          }, 50);
+        };
+
+        const finishNaturally = () => {
           if (shutdownFinished) return;
           shutdownFinished = true;
+          if (deadlineTimer) clearTimeout(deadlineTimer);
+          shutdownLifecycle = null;
+          exitProcess();
+        };
 
-          // 终止尚未完成的上游 AbortController
+        const forceShutdown = () => {
+          if (shutdownFinished) return;
+          shutdownFinished = true;
+          shutdownLifecycle = null;
+
           for (const ac of activeAbortControllers) {
             try { ac.abort(); } catch {}
           }
           activeAbortControllers.clear();
 
-          // 规范格式未完结 SSE 写入 response.incomplete
           for (const emitter of activeSseEmitters) {
             try {
               emitter.response.write("event: response.incomplete\ndata: " + JSON.stringify({
-                id: "resp_incomplete_" + Date.now(),
-                object: "response",
-                status: "incomplete",
-                error: { message: "Server shutting down gracefully", type: "server_shutdown" }
+                type: "response.incomplete",
+                response: {
+                  id: "resp_incomplete_" + Date.now(),
+                  object: "response",
+                  status: "incomplete",
+                  incomplete_details: { reason: "server_shutdown" },
+                  error: { message: "Server shutting down gracefully", type: "server_shutdown" },
+                  output: []
+                }
               }) + "\n\n");
               emitter.response.end();
             } catch {}
           }
           activeSseEmitters.clear();
 
-          if (serverInstance) {
-            try { serverInstance.close(); } catch {}
-          }
-
           for (const sock of activeSockets) {
             try { sock.destroy(); } catch {}
           }
           activeSockets.clear();
-
-          if (process.env.NODE_ENV !== "test") {
-            setTimeout(() => {
-              try { process.exit(0); } catch {}
-            }, 50);
-          }
+          exitProcess();
         };
 
-        // 最长优雅等待截止时间
-        const deadlineTimer = setTimeout(finishShutdown, drainTimeoutMs);
+        shutdownLifecycle = { forceShutdown };
+        deadlineTimer = setTimeout(forceShutdown, drainTimeoutMs);
         if (deadlineTimer.unref) deadlineTimer.unref();
+
+        response.once("finish", () => {
+          if (!serverInstance) return finishNaturally();
+          try { serverInstance.close(finishNaturally); } catch { finishNaturally(); }
+        });
+
+        json(response, 200, {
+          ok: true,
+          message: `Server draining initiated; no new connections accepted, terminating in up to ${drainTimeoutMs}ms.`
+        });
 
         return;
       }
@@ -1882,6 +1905,10 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
   server.on("connection", (socket) => {
     activeSockets.add(socket);
     socket.on("close", () => activeSockets.delete(socket));
+  });
+
+  server.on("error", () => {
+    if (shutdownLifecycle) shutdownLifecycle.forceShutdown();
   });
 
   return server;

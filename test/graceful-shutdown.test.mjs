@@ -34,7 +34,7 @@ test("graceful shutdown: draining state, 503 responses, and incomplete SSE on de
       localToken,
       drainTimeoutMs: 300,
     },
-    { fetchImpl: fakeFetch }
+    { fetchImpl: fakeFetch, exitImpl: () => {} }
   );
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -63,16 +63,13 @@ test("graceful shutdown: draining state, 503 responses, and incomplete SSE on de
     });
     assert.equal(shutdownRes.status, 200);
 
-    const bizRes = await fetch(`http://127.0.0.1:${port}/v1/models`, {
-      headers: { authorization: `Bearer ${localToken}` },
-    });
-    assert.equal(bizRes.status, 503);
-    assert.equal(bizRes.headers.get("retry-after"), "5");
-
-    const healthRes = await fetch(`http://127.0.0.1:${port}/healthz`);
-    assert.equal(healthRes.status, 503);
-    const healthBody = await healthRes.json();
-    assert.equal(healthBody.status, "draining");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(server.listening, false, "shutdown must stop accepting new TCP connections immediately");
+    await assert.rejects(
+      fetch(`http://127.0.0.1:${port}/healthz`),
+      /fetch failed/,
+      "a new connection after shutdown must be refused"
+    );
 
     let sseOutput = "";
     while (true) {
@@ -82,10 +79,66 @@ test("graceful shutdown: draining state, 503 responses, and incomplete SSE on de
     }
 
     assert.match(sseOutput, /response\.incomplete/);
+    assert.match(sseOutput, /"type":"response\.incomplete"/);
+    assert.match(sseOutput, /"incomplete_details":{"reason":"server_shutdown"}/);
     assert.match(sseOutput, /Server shutting down gracefully/);
 
     assert.ok(upstreamSignal && upstreamSignal.aborted);
   } finally {
     server.close();
   }
+});
+
+test("graceful shutdown lets an active request finish naturally before the deadline", async () => {
+  const localToken = "shutdown_natural_finish_token";
+  let upstreamAborted = false;
+  let releaseUpstream;
+  let markUpstreamEntered;
+  const upstreamGate = new Promise((resolve) => { releaseUpstream = resolve; });
+  const upstreamEntered = new Promise((resolve) => { markUpstreamEntered = resolve; });
+
+  const fakeFetch = async (_url, init) => {
+    init.signal.addEventListener("abort", () => { upstreamAborted = true; });
+    markUpstreamEntered();
+    await upstreamGate;
+    return new Response(JSON.stringify({ data: [{ id: "model_after_drain" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  const server = createMomoSwitch(
+    {
+      apiKey: "momo_key",
+      endpoint: "https://mock.momo",
+      port: 0,
+      host: "127.0.0.1",
+      localToken,
+      drainTimeoutMs: 1000,
+    },
+    { fetchImpl: fakeFetch, exitImpl: () => {} }
+  );
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const activeRequest = fetch(`http://127.0.0.1:${port}/v1/models`, {
+    headers: { authorization: `Bearer ${localToken}` },
+  });
+  await upstreamEntered;
+
+  const shutdownRes = await fetch(`http://127.0.0.1:${port}/internal/shutdown`, {
+    method: "POST",
+    headers: { "x-local-token": localToken },
+  });
+  assert.equal(shutdownRes.status, 200);
+  assert.equal((await shutdownRes.json()).ok, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(server.listening, false);
+  assert.equal(upstreamAborted, false);
+
+  releaseUpstream();
+  const completedResponse = await activeRequest;
+  assert.equal(completedResponse.status, 200);
+  assert.deepEqual(await completedResponse.json(), { data: [{ id: "model_after_drain" }] });
+  assert.equal(upstreamAborted, false);
 });
