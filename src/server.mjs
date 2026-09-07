@@ -1544,6 +1544,50 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
         logRequest({ method: "GET", url: pathname, status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
         return json(response, 200, { ok: true, service: "momo-codex-bridge", version: getCurrentVersion(), host: settings.host, port: settings.port });
       }
+      if (request.method === "POST" && pathname === "/internal/shutdown") {
+        const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
+        const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
+        if (!isLocal || (settings.localToken && headerToken !== settings.localToken)) {
+          return json(response, 403, { error: "Forbidden: shutdown is restricted to authenticated loopback clients." });
+        }
+        json(response, 200, { ok: true, message: "Server shutting down gracefully in 500ms..." });
+        setTimeout(() => {
+          try { process.exit(0); } catch {}
+        }, 500);
+        return;
+      }
+      if (request.method === "GET" && pathname === "/internal/metrics") {
+        const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
+        const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
+        if (!isLocal || (settings.localToken && headerToken !== settings.localToken)) {
+          return json(response, 403, { error: "Forbidden: metrics are restricted to authenticated loopback clients." });
+        }
+        const mem = process.memoryUsage();
+        if (mem.rss > metricsState.maxRssBytes) metricsState.maxRssBytes = mem.rss;
+        return json(response, 200, {
+          ok: true,
+          uptimeSeconds: Math.floor((Date.now() - metricsState.startedAt) / 1000),
+          requests: {
+            total: metricsState.requestsTotal,
+            success: metricsState.requestsSuccess,
+            failed: metricsState.requestsFailed,
+            active: metricsState.activeRequests,
+            activeSse: metricsState.activeSse,
+          },
+          ttfbMs: {
+            p50: calculatePercentile(metricsState.ttfbHistory, 0.5),
+            p95: calculatePercentile(metricsState.ttfbHistory, 0.95),
+            samples: metricsState.ttfbHistory.length,
+          },
+          memory: {
+            rssBytes: mem.rss,
+            heapUsedBytes: mem.heapUsed,
+            heapTotalBytes: mem.heapTotal,
+            maxRssBytes: metricsState.maxRssBytes,
+          },
+          version: getCurrentVersion(),
+        });
+      }
       if (!authorized(request, settings)) {
         finalStatus = 401;
         logRequest({ method: request.method, url: pathname, status: 401, elapsedMs: Date.now() - t0, error: "Unauthorized", ip: remoteIp });
