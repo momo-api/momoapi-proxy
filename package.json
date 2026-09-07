@@ -13,7 +13,7 @@
   },
   "scripts": {
     "start": "node bin/momoapi-proxy.mjs serve",
-    "test": "node --test test/server.test.mjs test/setup.test.mjs test/updater.test.mjs test/compat.test.mjs test/body-limit.test.mjs test/internal-endpoints.test.mjs test/metrics.test.mjs test/doctor-metrics.test.mjs",
+    "test": "node --test test/server.test.mjs test/setup.test.mjs test/updater.test.mjs test/compat.test.mjs test/body-limit.test.mjs test/internal-endpoints.test.mjs test/metrics.test.mjs test/doctor-metrics.test.mjs test/graceful-shutdown.test.mjs",
     "doctor": "node bin/momoapi-proxy.mjs doctor",
     "models": "node bin/momoapi-proxy.mjs models",
     "status": "node bin/momoapi-proxy.mjs status",

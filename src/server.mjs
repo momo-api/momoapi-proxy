@@ -1560,6 +1560,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
   const calls = new Map();
   const activeSockets = new Set();
   const activeSseEmitters = new Set();
+  const activeAbortControllers = new Set();
   let serverInstance = null;
 
   const server = createServer(async (request, response) => {
@@ -1587,6 +1588,9 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
     };
 
     const abortController = new AbortController();
+    activeAbortControllers.add(abortController);
+    response.on("finish", () => activeAbortControllers.delete(abortController));
+    response.on("close", () => activeAbortControllers.delete(abortController));
     const remoteIp = request.socket?.remoteAddress || "";
     let requestedModel = null;
     let finalStatus = 200;
@@ -1624,13 +1628,23 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
       }
     });
 
-    // 基础 CORS 响应
-    response.setHeader("Access-Control-Allow-Origin", "*");
-    response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
-    response.setHeader("Access-Control-Allow-Headers", "*");
+    const rawUrl = request.url || "/";
+    const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+    const isInternal = pathname.startsWith("/internal/");
 
-    if (request.method === "OPTIONS") {
-      response.writeHead(204);
+    // 严禁对内部端点暴露公共 CORS headers
+    if (!isInternal) {
+      response.setHeader("Access-Control-Allow-Origin", "*");
+      response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+      response.setHeader("Access-Control-Allow-Headers", "*");
+
+      if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        return response.end();
+      }
+    } else if (request.method === "OPTIONS") {
+      // 内部端点直接拒绝 OPTIONS 探测
+      response.writeHead(403);
       return response.end();
     }
 
@@ -1663,21 +1677,37 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
         metricsState.isDraining = true;
         json(response, 200, { ok: true, message: "Server draining initiated; terminating in up to 5s." });
 
-        // 5秒优雅排障计时器
-        const timer = setTimeout(() => {
-          // 未完结的 SSE 写入 incomplete
+        let shutdownFinished = false;
+        const drainTimeoutMs = Number(settings.drainTimeoutMs || 5000);
+
+        const finishShutdown = () => {
+          if (shutdownFinished) return;
+          shutdownFinished = true;
+
+          // 终止尚未完成的上游 AbortController
+          for (const ac of activeAbortControllers) {
+            try { ac.abort(); } catch {}
+          }
+          activeAbortControllers.clear();
+
+          // 规范格式未完结 SSE 写入 response.incomplete
           for (const emitter of activeSseEmitters) {
             try {
-              emitter.response.write("event: response.incomplete\ndata: {\"error\":{\"message\":\"Server shutting down\"}}\n\n");
+              emitter.response.write("event: response.incomplete\ndata: " + JSON.stringify({
+                id: "resp_incomplete_" + Date.now(),
+                object: "response",
+                status: "incomplete",
+                error: { message: "Server shutting down gracefully", type: "server_shutdown" }
+              }) + "\n\n");
               emitter.response.end();
             } catch {}
           }
           activeSseEmitters.clear();
 
-          // 关闭服务器并销毁残留 socket
           if (serverInstance) {
             try { serverInstance.close(); } catch {}
           }
+
           for (const sock of activeSockets) {
             try { sock.destroy(); } catch {}
           }
@@ -1686,10 +1716,13 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
           if (process.env.NODE_ENV !== "test") {
             setTimeout(() => {
               try { process.exit(0); } catch {}
-            }, 100);
+            }, 50);
           }
-        }, 5000);
-        if (timer.unref) timer.unref();
+        };
+
+        // 最长优雅等待截止时间
+        const deadlineTimer = setTimeout(finishShutdown, drainTimeoutMs);
+        if (deadlineTimer.unref) deadlineTimer.unref();
 
         return;
       }

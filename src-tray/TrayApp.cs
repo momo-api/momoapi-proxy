@@ -351,20 +351,30 @@ namespace MomoApi.Tray
         {
             try
             {
-                string settingsPath = Path.Combine(proxyHome, "settings.json");
-                if (File.Exists(settingsPath))
+                string customHome = Environment.GetEnvironmentVariable("MOMO_PROXY_HOME");
+                string[] possibleSettings = new string[]
                 {
-                    string json = File.ReadAllText(settingsPath);
-                    int idx = json.IndexOf("\"localToken\":", StringComparison.OrdinalIgnoreCase);
-                    if (idx >= 0)
+                    !string.IsNullOrEmpty(customHome) ? Path.Combine(customHome, "settings.json") : null,
+                    Path.Combine(proxyHome, "settings.json"),
+                    Path.Combine(userHome, ".momo-codex-bridge", "settings.json")
+                };
+
+                foreach (var settingsPath in possibleSettings)
+                {
+                    if (!string.IsNullOrEmpty(settingsPath) && File.Exists(settingsPath))
                     {
-                        int start = json.IndexOf('"', idx + 13);
-                        if (start >= 0)
+                        string json = File.ReadAllText(settingsPath);
+                        int idx = json.IndexOf("\"localToken\":", StringComparison.OrdinalIgnoreCase);
+                        if (idx >= 0)
                         {
-                            int end = json.IndexOf('"', start + 1);
-                            if (end > start)
+                            int start = json.IndexOf('"', idx + 13);
+                            if (start >= 0)
                             {
-                                return json.Substring(start + 1, end - start - 1).Trim();
+                                int end = json.IndexOf('"', start + 1);
+                                if (end > start)
+                                {
+                                    return json.Substring(start + 1, end - start - 1).Trim();
+                                }
                             }
                         }
                     }
@@ -372,6 +382,27 @@ namespace MomoApi.Tray
             }
             catch { }
             return "";
+        }
+
+        private async Task<bool> IsPortListeningAsync(int timeoutMs)
+        {
+            try
+            {
+                using (var tcpClient = new System.Net.Sockets.TcpClient())
+                {
+                    var connectTask = tcpClient.ConnectAsync("127.0.0.1", port);
+                    var completedTask = await Task.WhenAny(connectTask, Task.Delay(timeoutMs));
+                    if (completedTask == connectTask && tcpClient.Connected)
+                    {
+                        return true;
+                    }
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private async Task StopBridgeAsync()
@@ -391,13 +422,13 @@ namespace MomoApi.Tray
                 }
                 catch { }
 
-                // 2. 轮询等待端口释放 (最多等待 2.5 秒)
-                for (int i = 0; i < 5; i++)
+                // 2. 轮询等待 TCP 端口彻底释放 (最多等待 3.5 秒)
+                for (int i = 0; i < 7; i++)
                 {
                     await Task.Delay(500);
-                    if (!await CheckHealthOnceAsync(200))
+                    if (!await IsPortListeningAsync(200))
                     {
-                        return; // 已经优雅关闭
+                        return; // 端口已释放，服务优雅退出完成
                     }
                 }
 
@@ -421,15 +452,15 @@ namespace MomoApi.Tray
         private async Task RestartBridgeAsync()
         {
             await StopBridgeAsync();
-            // 确保旧端口彻底释放
-            for (int i = 0; i < 6; i++)
+            // 确保旧端口彻底释放，避免端口冲突
+            for (int i = 0; i < 10; i++)
             {
-                if (!await CheckHealthOnceAsync(200)) break;
+                if (!await IsPortListeningAsync(200)) break;
                 await Task.Delay(500);
             }
             await StartBridgeAsync();
             // 等待新服务健康恢复
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < 12; i++)
             {
                 if (await CheckHealthOnceAsync(300)) break;
                 await Task.Delay(500);

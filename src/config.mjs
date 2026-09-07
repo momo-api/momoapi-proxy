@@ -60,5 +60,6 @@ export function resolveSettings(env = process.env) {
     lastSyncTime: saved.lastSyncTime || null,
     lastSyncStatus: saved.lastSyncStatus || null,
     lastError: saved.lastError || null,
+    maxRequestBodyMb: saved.maxRequestBodyMb ? Number(saved.maxRequestBodyMb) : 64,
   };
 }
