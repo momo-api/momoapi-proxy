@@ -5,7 +5,10 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace MomoApi.Tray
@@ -19,6 +22,17 @@ namespace MomoApi.Tray
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                try
+                {
+                    string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                    string log = Path.Combine(home, ".momoapi-proxy", "tray-crash.log");
+                    File.AppendAllText(log, "[" + DateTime.Now.ToString("s") + "] Crash: " + e.ExceptionObject + "\r\n");
+                }
+                catch { }
+            };
 
             bool createdNew = false;
             try
@@ -54,18 +68,24 @@ namespace MomoApi.Tray
         private readonly string userHome;
         private readonly string proxyHome;
         private readonly NotifyIcon notifyIcon;
-        private readonly System.Windows.Forms.Timer healthTimer;
         private readonly Icon activeIcon;
         private readonly Icon inactiveIcon;
         private readonly ToolStripMenuItem titleItem;
         private readonly ToolStripMenuItem autostartItem;
+        private readonly SynchronizationContext syncContext;
+        private readonly CancellationTokenSource cts = new CancellationTokenSource();
+        private IntPtr jobHandle = IntPtr.Zero;
         private bool isRunning = false;
+        private bool isCliRunning = false;
 
         public TrayApplicationContext(int port)
         {
             this.port = port;
             this.userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             this.proxyHome = Path.Combine(userHome, ".momoapi-proxy");
+            this.syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+
+            InitJobObject();
 
             this.activeIcon = CreateBadgeIcon(true);
             this.inactiveIcon = CreateBadgeIcon(false);
@@ -83,26 +103,20 @@ namespace MomoApi.Tray
             openPortal.Click += (s, e) => Process.Start(new ProcessStartInfo("https://momoapi.us") { UseShellExecute = true });
 
             var viewModels = menu.Items.Add("查看可用模型列表 (Models)");
-            viewModels.Click += (s, e) => RunCli("models", true);
+            viewModels.Click += async (s, e) => await RunCliAsync("models", true);
 
             var syncModels = menu.Items.Add("同步模型列表 (Sync)");
-            syncModels.Click += (s, e) => RunCli("sync", true);
+            syncModels.Click += async (s, e) => await RunCliAsync("sync", true);
 
             var runDoctor = menu.Items.Add("运行健康诊断 (Doctor)");
-            runDoctor.Click += (s, e) => RunCli("doctor", true);
+            runDoctor.Click += async (s, e) => await RunCliAsync("doctor", true);
 
             var viewLogs = menu.Items.Add("查看代理日志 (Logs)");
             viewLogs.Click += (s, e) =>
             {
                 string logFile = Path.Combine(proxyHome, "daemon.log");
-                if (!File.Exists(logFile))
-                {
-                    logFile = Path.Combine(proxyHome, "proxy.log");
-                }
-                if (!File.Exists(logFile))
-                {
-                    logFile = Path.Combine(userHome, ".momo-codex-bridge", "daemon.log");
-                }
+                if (!File.Exists(logFile)) logFile = Path.Combine(proxyHome, "proxy.log");
+                if (!File.Exists(logFile)) logFile = Path.Combine(userHome, ".momo-codex-bridge", "daemon.log");
                 if (File.Exists(logFile))
                 {
                     Process.Start(new ProcessStartInfo("notepad.exe", "\"" + logFile + "\"") { UseShellExecute = true });
@@ -116,14 +130,14 @@ namespace MomoApi.Tray
             menu.Items.Add(new ToolStripSeparator());
 
             var restartService = menu.Items.Add("重启代理服务 (Restart)");
-            restartService.Click += (s, e) =>
+            restartService.Click += async (s, e) =>
             {
-                RestartBridge();
                 notifyIcon.ShowBalloonTip(2000, "MOMO API Proxy", "服务正在重启...", ToolTipIcon.Info);
+                await RestartBridgeAsync();
             };
 
             var updateItem = menu.Items.Add("检查并更新版本 (Update)");
-            updateItem.Click += (s, e) => RunCli("update", true);
+            updateItem.Click += async (s, e) => await RunCliAsync("update", true);
 
             autostartItem = new ToolStripMenuItem("开机自动启动");
             autostartItem.CheckOnClick = true;
@@ -133,11 +147,20 @@ namespace MomoApi.Tray
 
             menu.Items.Add(new ToolStripSeparator());
 
-            var exitItem = menu.Items.Add("退出托盘与服务 (Exit)");
-            exitItem.Click += (s, e) =>
+            var exitTrayOnly = menu.Items.Add("仅退出托盘 (服务保持后台)");
+            exitTrayOnly.Click += (s, e) =>
             {
                 notifyIcon.Visible = false;
-                StopBridge();
+                cts.Cancel();
+                Application.Exit();
+            };
+
+            var exitItem = menu.Items.Add("退出托盘与服务 (Exit)");
+            exitItem.Click += async (s, e) =>
+            {
+                notifyIcon.Visible = false;
+                cts.Cancel();
+                await StopBridgeAsync();
                 Application.Exit();
             };
 
@@ -151,16 +174,37 @@ namespace MomoApi.Tray
 
             notifyIcon.DoubleClick += (s, e) => Process.Start(new ProcessStartInfo("https://momoapi.us") { UseShellExecute = true });
 
-            EnsureBridgeRunning();
-
-            healthTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-            healthTimer.Tick += (s, e) => UpdateHealthStatus();
-            healthTimer.Start();
+            // 启动独立异步退避心跳任务
+            Task.Run(() => StartHealthLoopAsync(cts.Token));
         }
 
-        private void UpdateHealthStatus()
+        private async Task StartHealthLoopAsync(CancellationToken token)
         {
-            bool healthy = CheckHealthOnce();
+            // 首次启动时确保后台服务已运行
+            if (!await CheckHealthOnceAsync(400))
+            {
+                await StartBridgeAsync();
+            }
+
+            while (!token.IsCancellationRequested)
+            {
+                bool healthy = await CheckHealthOnceAsync(300);
+                syncContext.Post(_ => UpdateHealthUI(healthy), null);
+
+                int delay = healthy ? 8000 : 1500;
+                try
+                {
+                    await Task.Delay(delay, token);
+                }
+                catch (TaskCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        private void UpdateHealthUI(bool healthy)
+        {
             if (healthy != isRunning)
             {
                 isRunning = healthy;
@@ -174,34 +218,91 @@ namespace MomoApi.Tray
             }
         }
 
-        private void EnsureBridgeRunning()
-        {
-            if (!CheckHealthOnce())
-            {
-                StartBridge();
-            }
-            UpdateHealthStatus();
-        }
-
-        private bool CheckHealthOnce()
+        private async Task<bool> CheckHealthOnceAsync(int timeoutMs)
         {
             try
             {
                 HttpWebRequest req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/healthz");
-                req.Timeout = 1000;
-                using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
+                req.Timeout = timeoutMs;
+                req.ReadWriteTimeout = timeoutMs;
+                using (var resp = (HttpWebResponse)await req.GetResponseAsync())
                 {
                     return resp.StatusCode == HttpStatusCode.OK;
                 }
             }
-            catch { return false; }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static string EscapeWindowsArgument(string arg)
+        {
+            if (string.IsNullOrEmpty(arg)) return "\"\"";
+            if (!arg.Contains(" ") && !arg.Contains("\t") && !arg.Contains("\n") && !arg.Contains("\v") && !arg.Contains("\""))
+            {
+                return arg;
+            }
+            var sb = new StringBuilder();
+            sb.Append('"');
+            for (int i = 0; i < arg.Length; i++)
+            {
+                int backslashes = 0;
+                while (i < arg.Length && arg[i] == '\\')
+                {
+                    backslashes++;
+                    i++;
+                }
+                if (i == arg.Length)
+                {
+                    sb.Append('\\', backslashes * 2);
+                    break;
+                }
+                if (arg[i] == '"')
+                {
+                    sb.Append('\\', backslashes * 2 + 1);
+                    sb.Append('"');
+                }
+                else
+                {
+                    sb.Append('\\', backslashes);
+                    sb.Append(arg[i]);
+                }
+            }
+            sb.Append('"');
+            return sb.ToString();
+        }
+
+        private string FindNodeExe()
+        {
+            string[] directCandidates = new string[]
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "nodejs", "node.exe"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "nodejs", "node.exe")
+            };
+            foreach (var path in directCandidates)
+            {
+                if (File.Exists(path)) return path;
+            }
+
+            var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in pathEnv.Split(';'))
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(dir)) continue;
+                    var cand = Path.Combine(dir.Trim(), "node.exe");
+                    if (File.Exists(cand)) return cand;
+                }
+                catch { }
+            }
+            return "node";
         }
 
         private ProcessStartInfo ResolveCliProcessInfo(string subCommand)
         {
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            // Prioritize executing JS via node.exe with full script path to prevent invoking raw node.exe copies
             string[] possibleMjs = new string[]
             {
                 Path.Combine(home, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs"),
@@ -212,57 +313,21 @@ namespace MomoApi.Tray
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "bin", "momoapi-proxy.mjs")
             };
 
+            string nodeExe = FindNodeExe();
+
             foreach (string mjs in possibleMjs)
             {
                 if (File.Exists(mjs))
                 {
-                    return new ProcessStartInfo("node", "\"" + mjs + "\" " + subCommand);
+                    string args = EscapeWindowsArgument(mjs) + " " + EscapeWindowsArgument(subCommand);
+                    return new ProcessStartInfo(nodeExe, args);
                 }
             }
 
-            string[] possibleExes = new string[]
-            {
-                Path.Combine(home, ".momoapi-proxy", "bin", "momoapi-proxy.exe"),
-                Path.Combine(home, ".momo-codex-bridge", "bin", "momoapi-proxy.exe"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "momoapi-proxy.exe")
-            };
-
-            foreach (string exe in possibleExes)
-            {
-                if (File.Exists(exe))
-                {
-                    try
-                    {
-                        var vi = FileVersionInfo.GetVersionInfo(exe);
-                        if (!string.IsNullOrEmpty(vi.ProductName) && vi.ProductName.IndexOf("Node.js", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            continue;
-                        }
-                    }
-                    catch { }
-
-                    return new ProcessStartInfo(exe, subCommand);
-                }
-            }
-
-            string[] possibleCmds = new string[]
-            {
-                Path.Combine(home, ".momoapi-proxy", "bin", "momoapi.cmd"),
-                Path.Combine(home, ".momo-codex-bridge", "bin", "momoapi.cmd")
-            };
-
-            foreach (string cmd in possibleCmds)
-            {
-                if (File.Exists(cmd))
-                {
-                    return new ProcessStartInfo("cmd.exe", "/c \"" + cmd + "\" " + subCommand);
-                }
-            }
-
-            return new ProcessStartInfo("cmd.exe", "/c momoapi " + subCommand);
+            return new ProcessStartInfo(nodeExe, EscapeWindowsArgument(subCommand));
         }
 
-        private void StartBridge()
+        private async Task StartBridgeAsync()
         {
             try
             {
@@ -270,41 +335,67 @@ namespace MomoApi.Tray
                 psi.CreateNoWindow = true;
                 psi.UseShellExecute = false;
                 psi.WindowStyle = ProcessWindowStyle.Hidden;
-                Process p = Process.Start(psi);
-                if (p != null)
+
+                await Task.Run(() =>
                 {
-                    p.WaitForExit(5000);
-                }
+                    using (Process p = Process.Start(psi))
+                    {
+                        if (p != null) p.WaitForExit(5000);
+                    }
+                });
             }
             catch { }
         }
 
-        private void StopBridge()
+        private async Task StopBridgeAsync()
         {
             try
             {
+                // 先尝试优雅关闭
+                try
+                {
+                    string tokenPath = Path.Combine(proxyHome, "local_token");
+                    string token = File.Exists(tokenPath) ? File.ReadAllText(tokenPath).Trim() : "";
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/internal/shutdown");
+                    req.Method = "POST";
+                    req.Timeout = 2000;
+                    if (!string.IsNullOrEmpty(token)) req.Headers["x-local-token"] = token;
+                    using (var resp = (HttpWebResponse)req.GetResponse()) { }
+                }
+                catch { }
+
                 ProcessStartInfo psi = ResolveCliProcessInfo("stop");
                 psi.CreateNoWindow = true;
                 psi.UseShellExecute = false;
                 psi.WindowStyle = ProcessWindowStyle.Hidden;
-                Process p = Process.Start(psi);
-                if (p != null)
+
+                await Task.Run(() =>
                 {
-                    p.WaitForExit(2000);
-                }
+                    using (Process p = Process.Start(psi))
+                    {
+                        if (p != null) p.WaitForExit(3000);
+                    }
+                });
             }
             catch { }
         }
 
-        private void RestartBridge()
+        private async Task RestartBridgeAsync()
         {
-            StopBridge();
-            Thread.Sleep(500);
-            StartBridge();
+            await StopBridgeAsync();
+            await Task.Delay(500);
+            await StartBridgeAsync();
         }
 
-        private void RunCli(string subCommand, bool showResult)
+        private async Task RunCliAsync(string subCommand, bool showResult)
         {
+            if (isCliRunning)
+            {
+                if (showResult) MessageBox.Show("已有任务正在执行中，请稍候...", "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            isCliRunning = true;
             try
             {
                 ProcessStartInfo psi = ResolveCliProcessInfo(subCommand);
@@ -312,19 +403,39 @@ namespace MomoApi.Tray
                 psi.UseShellExecute = false;
                 psi.RedirectStandardOutput = true;
                 psi.RedirectStandardError = true;
-                psi.StandardOutputEncoding = System.Text.Encoding.UTF8;
-                psi.StandardErrorEncoding = System.Text.Encoding.UTF8;
+                psi.StandardOutputEncoding = Encoding.UTF8;
+                psi.StandardErrorEncoding = Encoding.UTF8;
 
-                using (Process p = Process.Start(psi))
+                string output = "";
+                string error = "";
+
+                await Task.Run(() =>
                 {
-                    string output = p.StandardOutput.ReadToEnd();
-                    string error = p.StandardError.ReadToEnd();
-                    p.WaitForExit(10000);
-                    if (showResult)
+                    using (Process p = Process.Start(psi))
                     {
-                        string msg = string.IsNullOrWhiteSpace(output) ? error : output;
-                        MessageBox.Show(msg.Trim(), "MOMO API Proxy - " + subCommand, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        if (p != null)
+                        {
+                            // 短生命周期 CLI 加入 Job Object (排除 update)
+                            if (subCommand != "update" && jobHandle != IntPtr.Zero)
+                            {
+                                try { AssignProcessToJobObject(jobHandle, p.Handle); } catch { }
+                            }
+
+                            var outTask = Task.Run(() => p.StandardOutput.ReadToEnd());
+                            var errTask = Task.Run(() => p.StandardError.ReadToEnd());
+                            Task.WaitAll(new Task[] { outTask, errTask }, 15000);
+                            p.WaitForExit(2000);
+
+                            output = outTask.IsCompleted ? outTask.Result : "";
+                            error = errTask.IsCompleted ? errTask.Result : "";
+                        }
                     }
+                });
+
+                if (showResult)
+                {
+                    string msg = string.IsNullOrWhiteSpace(output) ? error : output;
+                    MessageBox.Show(msg.Trim(), "MOMO API Proxy - " + subCommand, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             catch (Exception ex)
@@ -334,12 +445,44 @@ namespace MomoApi.Tray
                     MessageBox.Show("执行出错: " + ex.Message, "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+            finally
+            {
+                isCliRunning = false;
+            }
+        }
+
+        private void InitJobObject()
+        {
+            try
+            {
+                jobHandle = CreateJobObject(IntPtr.Zero, null);
+                var basicLimit = new JOBOBJECT_BASIC_LIMIT_INFORMATION
+                {
+                    LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                };
+                var extendedInfo = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+                {
+                    BasicLimitInformation = basicLimit
+                };
+                int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+                IntPtr pInfo = Marshal.AllocHGlobal(length);
+                try
+                {
+                    Marshal.StructureToPtr(extendedInfo, pInfo, false);
+                    SetInformationJobObject(jobHandle, JobObjectExtendedLimitInformation, pInfo, (uint)length);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pInfo);
+                }
+            }
+            catch { }
         }
 
         private bool CheckAutostart()
         {
             string startupDir = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            return File.Exists(Path.Combine(startupDir, "momoapi-proxy.lnk")) || File.Exists(Path.Combine(startupDir, "momoapi-proxy-tray.lnk"));
+            return File.Exists(Path.Combine(startupDir, "momoapi-proxy-tray.lnk"));
         }
 
         private void ToggleAutostart(bool enable)
@@ -376,13 +519,64 @@ namespace MomoApi.Tray
             catch { }
         }
 
-        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetInformationJobObject(IntPtr hJob, int JobObjectInfoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        private const int JobObjectExtendedLimitInformation = 9;
+        private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+        {
+            public long PerProcessUserTimeLimit;
+            public long PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize;
+            public UIntPtr MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass;
+            public uint SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct IO_COUNTERS
+        {
+            public ulong ReadOperationCount;
+            public ulong WriteOperationCount;
+            public ulong OtherOperationCount;
+            public ulong ReadTransferCount;
+            public ulong WriteTransferCount;
+            public ulong OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+            public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit;
+            public UIntPtr JobMemoryLimit;
+            public UIntPtr PeakProcessMemoryLimit;
+            public UIntPtr PeakJobMemoryLimit;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern bool DestroyIcon(IntPtr handle);
 
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [DllImport("user32.dll")]
         private static extern IntPtr CreateIconIndirect(ref ICONINFO icon);
 
-        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        [StructLayout(LayoutKind.Sequential)]
         private struct ICONINFO
         {
             public bool fIcon;
@@ -392,7 +586,7 @@ namespace MomoApi.Tray
             public IntPtr hbmColor;
         }
 
-        [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+        [DllImport("gdi32.dll")]
         private static extern bool DeleteObject(IntPtr hObject);
 
         private static Icon CreateBadgeIcon(bool active)
@@ -458,11 +652,16 @@ namespace MomoApi.Tray
         {
             if (disposing)
             {
-                if (healthTimer != null) healthTimer.Dispose();
+                cts.Cancel();
+                cts.Dispose();
                 if (notifyIcon != null) notifyIcon.Dispose();
+                if (jobHandle != IntPtr.Zero)
+                {
+                    CloseHandle(jobHandle);
+                    jobHandle = IntPtr.Zero;
+                }
             }
             base.Dispose(disposing);
         }
     }
 }
-

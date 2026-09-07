@@ -44,6 +44,29 @@ const CLAUDE_REASONING_BUDGETS = {
   ultra: 32768,
 };
 const MAX_CACHED_CALLS = 512;
+const metricsState = {
+  startedAt: Date.now(),
+  requestsTotal: 0,
+  requestsSuccess: 0,
+  requestsFailed: 0,
+  activeRequests: 0,
+  activeSse: 0,
+  ttfbHistory: [],
+  maxRssBytes: 0,
+};
+
+function recordTtfb(ms) {
+  metricsState.ttfbHistory.push(ms);
+  if (metricsState.ttfbHistory.length > 500) metricsState.ttfbHistory.shift();
+}
+
+function calculatePercentile(arr, p) {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
+  return sorted[idx];
+}
+
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
