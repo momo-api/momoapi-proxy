@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
 import {
   rewriteRoutedNamespaceToolsForUpstream,
@@ -145,6 +145,67 @@ function upstreamHeaders(settings, contentType = "application/json") {
   return { authorization: "Bearer " + settings.apiKey, "content-type": contentType };
 }
 
+function safeSessionValue(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 4096 || /[\u0000-\u001f\u007f]/.test(trimmed)) return null;
+  return trimmed;
+}
+
+function deriveOpenCodeSessionId(seed) {
+  const digest = createHash("sha256")
+    .update("momoapi-proxy/opencode-go/session/v1\0")
+    .update(seed)
+    .digest("hex")
+    .slice(0, 32);
+  return `ocx_${digest}`;
+}
+
+function cachedOpenCodeSession(payload, calls) {
+  for (const item of asArray(payload?.input)) {
+    if (!item || typeof item !== "object" || !item.call_id) continue;
+    const cached = safeSessionValue(calls?.get(item.call_id)?.openCodeSessionId);
+    if (cached) return cached;
+  }
+  return null;
+}
+
+function firstConversationSeed(payload) {
+  for (const item of asArray(payload?.input)) {
+    if (typeof item === "string" && item.trim()) return `${payload?.model || ""}\0${item}`;
+    if (!item || typeof item !== "object") continue;
+    if (item.role === "user" || item.type === "message" || item.type === "input_text") {
+      return `${payload?.model || ""}\0${JSON.stringify(item)}`;
+    }
+  }
+  return null;
+}
+
+function resolveOpenCodeSession(request, payload, calls) {
+  const explicit = safeSessionValue(request?.headers?.["x-opencode-session"]);
+  if (explicit) return explicit;
+
+  const cached = cachedOpenCodeSession(payload, calls);
+  if (cached) return cached;
+
+  const parent = safeSessionValue(request?.headers?.["x-codex-parent-thread-id"]);
+  const thread = safeSessionValue(request?.headers?.["thread-id"]);
+  const session = safeSessionValue(request?.headers?.session_id || request?.headers?.["session-id"]);
+  const specific = thread || session;
+  const lane = parent && specific ? `${parent}\0${specific}` : (specific || parent);
+  if (lane) return deriveOpenCodeSessionId(lane);
+
+  const seed = firstConversationSeed(payload);
+  return deriveOpenCodeSessionId(seed || randomUUID());
+}
+
+function openCodeUpstreamHeaders(settings, request, payload, calls) {
+  return {
+    ...upstreamHeaders(settings),
+    "x-opencode-session": resolveOpenCodeSession(request, payload, calls),
+  };
+}
+
 export function resolveTargetModel(model) {
   if (GEMINI_PREFIX.test(model)) return { targetModel: model, protocol: "gemini" };
   if (CLAUDE_PREFIX.test(model)) return { targetModel: model, protocol: "claude" };
@@ -152,6 +213,35 @@ export function resolveTargetModel(model) {
     return { targetModel: model, protocol: "responses" };
   }
   return { targetModel: model, protocol: "chat" };
+}
+
+function normalizeSingleExecCommand(raw) {
+  const call = /^(?:await\s+)?tools\.exec_command\(\s*([\s\S]*?)\s*\)\s*;?$/.exec(raw);
+  if (!call) return null;
+  const argument = call[1].trim();
+  const quoted = /^("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)$/.exec(argument);
+  if (quoted && !quoted[1].includes("${")) {
+    return `await tools.exec_command({ cmd: ${quoted[1]} });`;
+  }
+
+  try {
+    const parsed = JSON.parse(argument);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const keys = Object.keys(parsed);
+      if (keys.length === 1 && typeof parsed.command === "string") {
+        return `await tools.exec_command({ cmd: ${JSON.stringify(parsed.command)} });`;
+      }
+      if (keys.length === 1 && typeof parsed.cmd === "string") {
+        return `await tools.exec_command({ cmd: ${JSON.stringify(parsed.cmd)} });`;
+      }
+    }
+  } catch {}
+
+  const object = /^\{\s*(?:["']?(command|cmd)["']?)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)\s*,?\s*\}$/.exec(argument);
+  if (object && !object[2].includes("${")) {
+    return `await tools.exec_command({ cmd: ${object[2]} });`;
+  }
+  return null;
 }
 
 function customInput(value) {
@@ -176,6 +266,8 @@ function customInput(value) {
   raw = raw.trim();
   if (raw.startsWith("*** Begin Patch")) return raw;
   if (!raw) return "";
+  const normalizedExec = normalizeSingleExecCommand(raw);
+  if (normalizedExec) return normalizedExec;
 
   // Auto-wrap bare shell commands / scripts into valid Codex V8 isolate JavaScript
   const isJs = raw.startsWith("await ") || raw.startsWith("tools.") || raw.startsWith("const ") || raw.startsWith("let ") || raw.startsWith("var ") || raw.startsWith("function ") || raw.startsWith("return ") || raw.startsWith("/*") || raw.startsWith("//") || raw.startsWith("try {");
@@ -1173,7 +1265,7 @@ export function buildOpenAIChatMessages(input, instructions) {
   return messages.length > 0 ? messages : [{ role: "user", content: "Continue." }];
 }
 
-export async function bridgeChatCompletionsToResponses(response, settings, payload, fetchImpl, signal) {
+export async function bridgeChatCompletionsToResponses(request, response, settings, payload, calls, fetchImpl, signal) {
   const functions = extractFunctions(payload);
   const messages = buildOpenAIChatMessages(payload.input || [], payload.instructions);
 
@@ -1202,7 +1294,7 @@ export async function bridgeChatCompletionsToResponses(response, settings, paylo
 
   const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
     method: "POST",
-    headers: upstreamHeaders(settings),
+    headers: openCodeUpstreamHeaders(settings, request, payload, calls),
     body: JSON.stringify(chatBody),
     signal,
   });
@@ -1269,9 +1361,11 @@ export async function bridgeChatCompletionsToResponses(response, settings, paylo
     for (const call of dsmlCalls) {
       const mapped = restoreToolName(call.name, functions);
       if (mapped.kind === "custom") {
-        emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
+        const tool = emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
+        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: call.arguments, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
       } else {
-        emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
+        const tool = emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
+        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: call.arguments || {}, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
       }
     }
   }
@@ -1287,12 +1381,11 @@ export async function bridgeChatCompletionsToResponses(response, settings, paylo
       }
 
       if (mapped.kind === "custom") {
-        const inputVal = typeof parsedArgs === "object" && parsedArgs !== null && typeof parsedArgs.input === "string"
-          ? parsedArgs.input
-          : customInput(parsedArgs);
-        emitter.writeCustomToolCall({ callId: call.id, name: mapped.originalName, input: inputVal });
+        const tool = emitter.writeCustomToolCall({ callId: call.id, name: mapped.originalName, input: customInput(parsedArgs) });
+        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: parsedArgs, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
       } else {
-        emitter.writeFunctionCall({ callId: call.id, name: mapped.originalName, arguments: parsedArgs });
+        const tool = emitter.writeFunctionCall({ callId: call.id, name: mapped.originalName, arguments: parsedArgs });
+        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: parsedArgs, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
       }
     }
   }
@@ -1300,7 +1393,7 @@ export async function bridgeChatCompletionsToResponses(response, settings, paylo
   emitter.complete();
 }
 
-async function forwardResponses(request, response, settings, payload, fetchImpl, signal) {
+async function forwardResponses(request, response, settings, payload, calls, fetchImpl, signal) {
   // 1. Lower tool_search to standard function
   const { body: searchBody, names: searchNames } = rewriteRoutedToolSearchForUpstream(payload);
   // 2. Lower custom tools (exec, etc.) to standard functions
@@ -1312,7 +1405,7 @@ async function forwardResponses(request, response, settings, payload, fetchImpl,
   const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...cleanPayload, stream: true }), signal });
   if (!upstream.ok) {
     // Seamless fallback to /v1/chat/completions if upstream /v1/responses returns 400/404/500
-    return bridgeChatCompletionsToResponses(response, settings, cleanPayload, fetchImpl, signal);
+    return bridgeChatCompletionsToResponses(request, response, settings, cleanPayload, calls, fetchImpl, signal);
   }
   initSseResponse(response);
   if (!upstream.body) return response.end();
@@ -1529,7 +1622,7 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
 async function forwardChatCompletions(request, response, settings, payload, fetchImpl, signal) {
   const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
     method: "POST",
-    headers: upstreamHeaders(settings),
+    headers: openCodeUpstreamHeaders(settings, request, payload, null),
     body: JSON.stringify(payload),
     signal,
   });
@@ -1856,8 +1949,8 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         response.on("close", () => activeSseEmitters.delete(sseHandle));
 
         let handlerPromise;
-        if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, fetchImpl, abortController.signal);
-        else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(response, settings, routedPayload, fetchImpl, abortController.signal);
+        if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal);
+        else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else if (protocol === "gemini") handlerPromise = bridgeGemini(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
 
