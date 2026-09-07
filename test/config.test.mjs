@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resolveSettings } from "../src/config.mjs";
+
+test("saved API key wins over a stale process environment key", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-"));
+  try {
+    writeFileSync(join(home, "settings.json"), JSON.stringify({
+      apiKey: "saved-current-key",
+      localToken: "local-token",
+      endpoint: "https://momoapi.us",
+    }));
+    const settings = resolveSettings({
+      MOMO_PROXY_HOME: home,
+      MOMO_API_KEY: "stale-process-key",
+    });
+    assert.equal(settings.apiKey, "saved-current-key");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("environment API key remains a fallback before setup creates settings", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-"));
+  try {
+    const settings = resolveSettings({
+      MOMO_PROXY_HOME: home,
+      MOMO_API_KEY: "bootstrap-env-key",
+      MOMO_BRIDGE_TOKEN: "local-token",
+    });
+    assert.equal(settings.apiKey, "bootstrap-env-key");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

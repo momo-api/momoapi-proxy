@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.4 - 2026-09-07
+
+- Made the installed `settings.json` API key authoritative over stale process-level environment variables.
+- Kept `MOMO_API_KEY` as a bootstrap fallback only when no saved key exists.
+- Added regression coverage for stale long-lived Codex/Desktop environments.
+
 ## 0.10.3 - 2026-09-07
 
 - Normalized Claude legacy `tools.exec_command("...")` and `{ command: ... }` calls to the unified `{ cmd: ... }` executor contract.

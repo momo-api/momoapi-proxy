@@ -44,7 +44,11 @@ export function newLocalToken() {
 
 export function resolveSettings(env = process.env) {
   const saved = readSettings(env);
-  const apiKey = env.MOMO_API_KEY || saved.apiKey;
+  // An installed daemon must remain pinned to its saved credential. Long-lived
+  // shells (Codex/Desktop in particular) can retain an older process-level
+  // MOMO_API_KEY after the user's credential has been updated. Treat the env
+  // value as bootstrap/fallback only when no saved key exists.
+  const apiKey = saved.apiKey || env.MOMO_API_KEY;
   const localToken = env.MOMO_BRIDGE_TOKEN || env.MOMO_SWITCH_TOKEN || saved.localToken;
   if (!apiKey) throw new Error("MOMO API key is not configured. Run setup with --api-key.");
   if (!localToken) throw new Error("MOMO Switch local token is not configured. Run setup again.");
