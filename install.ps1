@@ -148,22 +148,9 @@ if ($LASTEXITCODE -ne 0) {
 # 6. Launch Background Service & System Tray EXE
 Write-Step "Starting MOMO Codex Bridge daemon & Native Taskbar Tray..."
 & node "$bridgeBin" restart
-if (Test-Path $trayExe) {
-  Start-Process -FilePath $trayExe -ArgumentList "-p $Port"
-  
-  # Also create Startup entry and Desktop shortcut
-  try {
-    $startupCmd = Join-Path ([Environment]::GetFolderPath("Startup")) "momoapi-tray.cmd"
-    "@start `"`" `"$trayExe`" -p $Port`r`n" | Set-Content -Path $startupCmd -Encoding Ascii
-    
-    $desktopDir = [Environment]::GetFolderPath("Desktop")
-    $wsh = New-Object -ComObject WScript.Shell
-    $shortcut = $wsh.CreateShortcut((Join-Path $desktopDir "MOMO API Proxy.lnk"))
-    $shortcut.TargetPath = $trayExe
-    $shortcut.Arguments = "-p $Port"
-    $shortcut.Description = "MOMO API Proxy Desktop Tray"
-    $shortcut.Save()
-  } catch {}
+$cleanTrayExe = [System.IO.Path]::Combine($HOME, ".momoapi-proxy", "bin", "MomoApiProxyTray.exe")
+if (Test-Path $cleanTrayExe) {
+  Start-Process -FilePath $cleanTrayExe -ArgumentList "-p $Port"
 }
 
 # 7. Register PATH, environment variables & current session function
