@@ -1,0 +1,22 @@
+title = "momoapi-proxy secret detection"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "momo-api-token"
+description = "Detected a MOMO API / NewAPI Token"
+regex = '''\bsk-[A-Za-z0-9]{32,64}\b'''
+keywords = ["sk-"]
+
+[rules.allowlist]
+description = "Allow test placeholders and documentation examples"
+regexes = [
+  '''sk-momo-demo-dummy-key-placeholder''',
+  '''sk-momo-\.\.\.''',
+  '''sk-\.\.\.''',
+  '''sk-[xX]+''',
+  '''sk-your-.*''',
+  '''sk-demo-.*''',
+  '''sk-placeholder.*''',
+]
