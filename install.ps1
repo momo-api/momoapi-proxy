@@ -71,8 +71,8 @@ if (Test-Path $installDir) {
   
   Write-Step "Downloading latest release package..."
   $urls = @(
-    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.10.0/momoapi-proxy-0.10.0.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.10.0/momoapi-proxy-0.10.0.tgz",
+    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.10.1/momoapi-proxy-0.10.1.tgz",
+    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.10.1/momoapi-proxy-0.10.1.tgz",
     "$Endpoint/install/packages/momoapi-proxy-latest.tgz",
     "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
     "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",

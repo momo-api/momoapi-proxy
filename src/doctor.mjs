@@ -109,5 +109,37 @@ export async function runDoctor({ env = process.env, fetchImpl = fetch } = {}) {
     results.ok = false;
   }
 
+  // Check daemon metrics
+  const port = settings?.port || 18789;
+  try {
+    const headers = {};
+    if (settings?.localToken) {
+      headers["x-local-token"] = settings.localToken;
+    }
+    const metricsRes = await fetchImpl("http://127.0.0.1:" + port + "/internal/metrics", { headers });
+    if (metricsRes.ok) {
+      const metricsData = await metricsRes.json();
+      results.checks.daemonMetrics = {
+        available: true,
+        uptimeSeconds: metricsData.uptimeSeconds,
+        isDraining: metricsData.isDraining,
+        requests: metricsData.requests,
+        ttfbMs: metricsData.ttfbMs,
+        memory: metricsData.memory,
+      };
+    } else {
+      results.checks.daemonMetrics = {
+        available: false,
+        status: metricsRes.status,
+        reason: "Daemon metrics endpoint returned HTTP " + metricsRes.status,
+      };
+    }
+  } catch (err) {
+    results.checks.daemonMetrics = {
+      available: false,
+      reason: "Daemon offline or unreachable (" + err.message + ")",
+    };
+  }
+
   return results;
 }

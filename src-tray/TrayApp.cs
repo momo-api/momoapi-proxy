@@ -347,23 +347,61 @@ namespace MomoApi.Tray
             catch { }
         }
 
+        private string ResolveLocalToken()
+        {
+            try
+            {
+                string settingsPath = Path.Combine(proxyHome, "settings.json");
+                if (File.Exists(settingsPath))
+                {
+                    string json = File.ReadAllText(settingsPath);
+                    int idx = json.IndexOf("\"localToken\":", StringComparison.OrdinalIgnoreCase);
+                    if (idx >= 0)
+                    {
+                        int start = json.IndexOf('"', idx + 13);
+                        if (start >= 0)
+                        {
+                            int end = json.IndexOf('"', start + 1);
+                            if (end > start)
+                            {
+                                return json.Substring(start + 1, end - start - 1).Trim();
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return "";
+        }
+
         private async Task StopBridgeAsync()
         {
             try
             {
-                // 先尝试优雅关闭
+                // 1. 先尝试通过 HTTP 异步调用优雅停机
+                string token = ResolveLocalToken();
                 try
                 {
-                    string tokenPath = Path.Combine(proxyHome, "local_token");
-                    string token = File.Exists(tokenPath) ? File.ReadAllText(tokenPath).Trim() : "";
                     HttpWebRequest req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/internal/shutdown");
                     req.Method = "POST";
-                    req.Timeout = 2000;
+                    req.Timeout = 1500;
+                    req.ReadWriteTimeout = 1500;
                     if (!string.IsNullOrEmpty(token)) req.Headers["x-local-token"] = token;
-                    using (var resp = (HttpWebResponse)req.GetResponse()) { }
+                    using (var resp = (HttpWebResponse)await req.GetResponseAsync()) { }
                 }
                 catch { }
 
+                // 2. 轮询等待端口释放 (最多等待 2.5 秒)
+                for (int i = 0; i < 5; i++)
+                {
+                    await Task.Delay(500);
+                    if (!await CheckHealthOnceAsync(200))
+                    {
+                        return; // 已经优雅关闭
+                    }
+                }
+
+                // 3. 超时仍未退出则执行兜底 CLI stop
                 ProcessStartInfo psi = ResolveCliProcessInfo("stop");
                 psi.CreateNoWindow = true;
                 psi.UseShellExecute = false;
@@ -383,8 +421,20 @@ namespace MomoApi.Tray
         private async Task RestartBridgeAsync()
         {
             await StopBridgeAsync();
-            await Task.Delay(500);
+            // 确保旧端口彻底释放
+            for (int i = 0; i < 6; i++)
+            {
+                if (!await CheckHealthOnceAsync(200)) break;
+                await Task.Delay(500);
+            }
             await StartBridgeAsync();
+            // 等待新服务健康恢复
+            for (int i = 0; i < 10; i++)
+            {
+                if (await CheckHealthOnceAsync(300)) break;
+                await Task.Delay(500);
+            }
+            UpdateHealthUI(await CheckHealthOnceAsync(300));
         }
 
         private async Task RunCliAsync(string subCommand, bool showResult)

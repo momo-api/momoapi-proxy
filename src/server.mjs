@@ -44,8 +44,9 @@ const CLAUDE_REASONING_BUDGETS = {
   ultra: 32768,
 };
 const MAX_CACHED_CALLS = 512;
-const metricsState = {
+export const metricsState = {
   startedAt: Date.now(),
+  resetTime: new Date().toISOString(),
   requestsTotal: 0,
   requestsSuccess: 0,
   requestsFailed: 0,
@@ -53,36 +54,77 @@ const metricsState = {
   activeSse: 0,
   ttfbHistory: [],
   maxRssBytes: 0,
+  isDraining: false,
 };
 
-function recordTtfb(ms) {
+export function recordTtfb(ms) {
   metricsState.ttfbHistory.push(ms);
   if (metricsState.ttfbHistory.length > 500) metricsState.ttfbHistory.shift();
 }
 
-function calculatePercentile(arr, p) {
+export function calculatePercentile(arr, p) {
   if (arr.length === 0) return 0;
   const sorted = [...arr].sort((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
   return sorted[idx];
 }
 
+export function resetMetrics() {
+  metricsState.startedAt = Date.now();
+  metricsState.resetTime = new Date().toISOString();
+  metricsState.requestsTotal = 0;
+  metricsState.requestsSuccess = 0;
+  metricsState.requestsFailed = 0;
+  metricsState.activeRequests = 0;
+  metricsState.activeSse = 0;
+  metricsState.ttfbHistory = [];
+  metricsState.maxRssBytes = 0;
+  metricsState.isDraining = false;
+}
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function json(response, status, body) {
-  response.writeHead(status, { "content-type": "application/json" });
+function json(response, status, body, headers = {}) {
+  response.writeHead(status, { "content-type": "application/json", ...headers });
   response.end(JSON.stringify(body));
 }
 
-async function bodyOf(request) {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error("Request body must be valid JSON."); }
+export function getMaxRequestBodyBytes(settings = {}) {
+  const envVal = process.env.MOMO_MAX_REQUEST_BODY_MB;
+  const configVal = settings.maxRequestBodyMb;
+  const mb = parseInt(envVal || configVal || "64", 10);
+  const validMb = (isNaN(mb) || mb < 1 || mb > 256) ? 64 : mb;
+  return validMb * 1024 * 1024;
 }
 
+export async function bodyOf(request, settings = {}) {
+  const maxBytes = getMaxRequestBodyBytes(settings);
+  const chunks = [];
+  let totalLength = 0;
+
+  for await (const chunk of request) {
+    totalLength += chunk.length;
+    if (totalLength > maxBytes) {
+      const err = new Error("Payload Too Large: request body exceeds limit of " + (maxBytes / (1024 * 1024)) + "MB.");
+      err.statusCode = 413;
+      err.code = "payload_too_large";
+      throw err;
+    }
+    chunks.push(chunk);
+  }
+
+  const raw = Buffer.concat(chunks, totalLength).toString("utf8");
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const err = new Error("Request body must be valid JSON.");
+    err.statusCode = 400;
+    err.code = "invalid_json";
+    throw err;
+  }
+}
 function authorized(request, settings) {
   const auth = request.headers.authorization;
   if (auth) {
@@ -1516,14 +1558,73 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
 
 export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
   const calls = new Map();
-  return createServer(async (request, response) => {
+  const activeSockets = new Set();
+  const activeSseEmitters = new Set();
+  let serverInstance = null;
+
+  const server = createServer(async (request, response) => {
     const t0 = Date.now();
+    let firstByteRecorded = false;
+
+    // 记录 TTFB (首字节写入时间)
+    const originalWrite = response.write.bind(response);
+    const originalEnd = response.end.bind(response);
+
+    response.write = function (...args) {
+      if (!firstByteRecorded) {
+        firstByteRecorded = true;
+        recordTtfb(Date.now() - t0);
+      }
+      return originalWrite(...args);
+    };
+
+    response.end = function (...args) {
+      if (!firstByteRecorded) {
+        firstByteRecorded = true;
+        recordTtfb(Date.now() - t0);
+      }
+      return originalEnd(...args);
+    };
+
     const abortController = new AbortController();
     const remoteIp = request.socket?.remoteAddress || "";
     let requestedModel = null;
     let finalStatus = 200;
+    let isSse = false;
 
-    // Standard CORS headers for desktop/web clients (ChatGPT Desktop, WebUI, Chatbox, etc.)
+    // 统计活跃请求
+    metricsState.requestsTotal++;
+    metricsState.activeRequests++;
+
+    const mem = process.memoryUsage();
+    if (mem.rss > metricsState.maxRssBytes) metricsState.maxRssBytes = mem.rss;
+
+    const cleanupActive = () => {
+      metricsState.activeRequests = Math.max(0, metricsState.activeRequests - 1);
+      if (isSse) {
+        metricsState.activeSse = Math.max(0, metricsState.activeSse - 1);
+      }
+    };
+
+    let cleanupDone = false;
+    const finishCleanup = (success) => {
+      if (!cleanupDone) {
+        cleanupDone = true;
+        cleanupActive();
+        if (success) metricsState.requestsSuccess++;
+        else metricsState.requestsFailed++;
+      }
+    };
+
+    response.on("finish", () => finishCleanup(response.statusCode < 400));
+    response.on("close", () => {
+      if (!response.writableEnded) {
+        abortController.abort();
+        finishCleanup(false);
+      }
+    });
+
+    // 基础 CORS 响应
     response.setHeader("Access-Control-Allow-Origin", "*");
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
     response.setHeader("Access-Control-Allow-Headers", "*");
@@ -1533,40 +1634,82 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
       return response.end();
     }
 
-    response.on("close", () => {
-      if (!response.writableEnded) abortController.abort();
-    });
     try {
       const rawUrl = request.url || "/";
       const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
 
+      // 1. healthz
       if (request.method === "GET" && (pathname === "/healthz" || pathname === "/health")) {
+        if (metricsState.isDraining) {
+          logRequest({ method: "GET", url: pathname, status: 503, elapsedMs: Date.now() - t0, ip: remoteIp });
+          return json(response, 503, { ok: false, status: "draining", service: "momo-codex-bridge", version: getCurrentVersion() });
+        }
         logRequest({ method: "GET", url: pathname, status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
         return json(response, 200, { ok: true, service: "momo-codex-bridge", version: getCurrentVersion(), host: settings.host, port: settings.port });
       }
+
+      // 2. internal shutdown
       if (request.method === "POST" && pathname === "/internal/shutdown") {
         const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
         const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
         if (!isLocal || (settings.localToken && headerToken !== settings.localToken)) {
           return json(response, 403, { error: "Forbidden: shutdown is restricted to authenticated loopback clients." });
         }
-        json(response, 200, { ok: true, message: "Server shutting down gracefully in 500ms..." });
-        setTimeout(() => {
-          try { process.exit(0); } catch {}
-        }, 500);
+
+        if (metricsState.isDraining) {
+          return json(response, 200, { ok: true, message: "Server already in draining state." });
+        }
+
+        metricsState.isDraining = true;
+        json(response, 200, { ok: true, message: "Server draining initiated; terminating in up to 5s." });
+
+        // 5秒优雅排障计时器
+        const timer = setTimeout(() => {
+          // 未完结的 SSE 写入 incomplete
+          for (const emitter of activeSseEmitters) {
+            try {
+              emitter.response.write("event: response.incomplete\ndata: {\"error\":{\"message\":\"Server shutting down\"}}\n\n");
+              emitter.response.end();
+            } catch {}
+          }
+          activeSseEmitters.clear();
+
+          // 关闭服务器并销毁残留 socket
+          if (serverInstance) {
+            try { serverInstance.close(); } catch {}
+          }
+          for (const sock of activeSockets) {
+            try { sock.destroy(); } catch {}
+          }
+          activeSockets.clear();
+
+          if (process.env.NODE_ENV !== "test") {
+            setTimeout(() => {
+              try { process.exit(0); } catch {}
+            }, 100);
+          }
+        }, 5000);
+        if (timer.unref) timer.unref();
+
         return;
       }
+
+      // 3. internal metrics
       if (request.method === "GET" && pathname === "/internal/metrics") {
         const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
         const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
         if (!isLocal || (settings.localToken && headerToken !== settings.localToken)) {
           return json(response, 403, { error: "Forbidden: metrics are restricted to authenticated loopback clients." });
         }
-        const mem = process.memoryUsage();
-        if (mem.rss > metricsState.maxRssBytes) metricsState.maxRssBytes = mem.rss;
+
+        const curMem = process.memoryUsage();
+        if (curMem.rss > metricsState.maxRssBytes) metricsState.maxRssBytes = curMem.rss;
+
         return json(response, 200, {
           ok: true,
           uptimeSeconds: Math.floor((Date.now() - metricsState.startedAt) / 1000),
+          resetTime: metricsState.resetTime,
+          isDraining: metricsState.isDraining,
           requests: {
             total: metricsState.requestsTotal,
             success: metricsState.requestsSuccess,
@@ -1577,37 +1720,59 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
           ttfbMs: {
             p50: calculatePercentile(metricsState.ttfbHistory, 0.5),
             p95: calculatePercentile(metricsState.ttfbHistory, 0.95),
+            p99: calculatePercentile(metricsState.ttfbHistory, 0.99),
             samples: metricsState.ttfbHistory.length,
           },
           memory: {
-            rssBytes: mem.rss,
-            heapUsedBytes: mem.heapUsed,
-            heapTotalBytes: mem.heapTotal,
+            rssBytes: curMem.rss,
+            heapUsedBytes: curMem.heapUsed,
+            heapTotalBytes: curMem.heapTotal,
+            externalBytes: curMem.external,
+            arrayBuffersBytes: curMem.arrayBuffers,
             maxRssBytes: metricsState.maxRssBytes,
+          },
+          features: {
+            dnsCache: { supported: false },
+            connectionPooling: { supported: true, backend: "node-native-fetch" },
           },
           version: getCurrentVersion(),
         });
       }
+
+      // 4. draining 期间拒绝任何新业务请求
+      if (metricsState.isDraining) {
+        finalStatus = 503;
+        logRequest({ method: request.method, url: pathname, status: 503, elapsedMs: Date.now() - t0, error: "Server is draining", ip: remoteIp });
+        return json(response, 503, { error: { message: "Server is draining for shutdown, please retry later.", type: "server_draining" } }, { "Retry-After": "5" });
+      }
+
+      // 5. 鉴权校验
       if (!authorized(request, settings)) {
         finalStatus = 401;
         logRequest({ method: request.method, url: pathname, status: 401, elapsedMs: Date.now() - t0, error: "Unauthorized", ip: remoteIp });
         return json(response, 401, { error: { message: "Invalid local MOMO Switch token.", type: "authentication_error" } });
       }
+
+      // 6. models
       if (request.method === "GET" && (pathname === "/v1/models" || pathname === "/models")) {
         const upstream = await fetchImpl(settings.endpoint + "/v1/models", { headers: upstreamHeaders(settings), signal: abortController.signal });
         finalStatus = upstream.status;
         logRequest({ method: "GET", url: pathname, status: finalStatus, elapsedMs: Date.now() - t0, ip: remoteIp });
         return json(response, upstream.status, await upstream.json());
       }
+
+      // 7. chat completions
       if (request.method === "POST" && (pathname === "/v1/chat/completions" || pathname === "/chat/completions")) {
-        const payload = await bodyOf(request);
+        const payload = await bodyOf(request, settings);
         requestedModel = payload.model;
         await forwardChatCompletions(request, response, settings, payload, fetchImpl, abortController.signal);
         logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp });
         return;
       }
+
+      // 8. responses
       if (request.method === "POST" && (pathname === "/v1/responses" || pathname === "/responses")) {
-        const payload = await bodyOf(request);
+        const payload = await bodyOf(request, settings);
         requestedModel = payload.model;
         if (!payload.model) {
           finalStatus = 400;
@@ -1616,7 +1781,14 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
         }
         const { targetModel, protocol } = resolveTargetModel(payload.model);
         const routedPayload = { ...payload, model: targetModel };
-        
+
+        isSse = true;
+        metricsState.activeSse++;
+        const sseHandle = { response };
+        activeSseEmitters.add(sseHandle);
+        response.on("finish", () => activeSseEmitters.delete(sseHandle));
+        response.on("close", () => activeSseEmitters.delete(sseHandle));
+
         let handlerPromise;
         if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, fetchImpl, abortController.signal);
         else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(response, settings, routedPayload, fetchImpl, abortController.signal);
@@ -1627,6 +1799,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
         logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp });
         return;
       }
+
       finalStatus = 404;
       logRequest({ method: request.method, url: pathname, status: 404, elapsedMs: Date.now() - t0, ip: remoteIp });
       return json(response, 404, { error: { message: "Not found", type: "invalid_request_error" } });
@@ -1634,6 +1807,17 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
       if (abortController.signal.aborted) return;
       const rawUrl = request.url || "/";
       const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+
+      if (error.statusCode === 413) {
+        logRequest({ method: request.method, url: pathname, status: 413, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+        return json(response, 413, { error: { message: error.message, type: "payload_too_large", code: "payload_too_large" } });
+      }
+
+      if (error.statusCode === 400) {
+        logRequest({ method: request.method, url: pathname, status: 400, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+        return json(response, 400, { error: { message: error.message, type: "invalid_request_error", code: "invalid_json" } });
+      }
+
       logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
       if (pathname === "/v1/responses" || pathname === "/responses") {
         if (!response.headersSent) initSseResponse(response);
@@ -1649,6 +1833,15 @@ export function createMomoSwitch(settings, { fetchImpl = fetch } = {}) {
       return json(response, 502, { error: { message: error.message, type: "server_error" } });
     }
   });
+
+  serverInstance = server;
+
+  server.on("connection", (socket) => {
+    activeSockets.add(socket);
+    socket.on("close", () => activeSockets.delete(socket));
+  });
+
+  return server;
 }
 
 export const createMomoBridge = createMomoSwitch;
