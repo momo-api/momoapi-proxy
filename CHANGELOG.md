@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3 - 2026-09-07
+
+- Normalized Claude legacy `tools.exec_command("...")` and `{ command: ... }` calls to the unified `{ cmd: ... }` executor contract.
+- Added stable opaque `x-opencode-session` affinity for DeepSeek/OpenCode Go chat routes and tool-result turns.
+- Added live Claude/DeepSeek tool-roundtrip verification plus regression coverage for both compatibility boundaries.
+
 ## 0.9.9 - 2026-09-07
 
 - Fixed Windows System Tray daemon launcher: prioritized full script path execution and guarded against invoking raw Node.js binary copies.

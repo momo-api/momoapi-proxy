@@ -74,6 +74,109 @@ test("bridges Claude streamed input_json_delta tool arguments", async () => {
   assert.equal(claudeBody.tools[0].name, "shell_command");
 });
 
+test("normalizes Claude legacy exec_command string input to the unified exec object contract", async () => {
+  const fakeFetch = async () => {
+    const sse = [
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "toolu_exec", name: "exec", input: {} } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: JSON.stringify({ input: 'await tools.exec_command("echo claude-ok")' }) } },
+      { type: "content_block_stop", index: 0 },
+    ].map((event) => "data: " + JSON.stringify(event) + "\n\n").join("");
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-opus-4-6-thinking",
+        stream: true,
+        input: [{ role: "user", content: [{ type: "input_text", text: "Run echo" }] }],
+        tools: [{ type: "custom", name: "exec" }],
+      }),
+    });
+    const body = await response.text();
+    const event = body.split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)))
+      .find((item) => item.type === "response.output_item.done" && item.item?.type === "custom_tool_call");
+    assert.ok(event);
+    assert.equal(event.item.input, 'await tools.exec_command({ cmd: "echo claude-ok" });');
+    let invokedArgs;
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+    await new AsyncFunction("tools", event.item.input)({ exec_command: async (args) => { invokedArgs = args; } });
+    assert.deepEqual(invokedArgs, { cmd: "echo claude-ok" });
+  });
+});
+
+test("adds a stable opaque OpenCode session header across DeepSeek tool roundtrips", async () => {
+  const seenHeaders = [];
+  let invocation = 0;
+  const fakeFetch = async (_url, init) => {
+    invocation += 1;
+    seenHeaders.push(new Headers(init.headers));
+    const body = invocation === 1
+      ? { choices: [{ delta: { tool_calls: [{ index: 0, id: "call_ds_exec", function: { name: "exec", arguments: JSON.stringify({ input: "echo deepseek-ok" }) } }] } }] }
+      : { choices: [{ delta: { content: "TOOL_ROUNDTRIP_OK" } }] };
+    return new Response("data: " + JSON.stringify(body) + "\n\ndata: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
+    const first = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "deepseek-v4-flash-vision-exp",
+        stream: true,
+        input: [{ role: "user", content: [{ type: "input_text", text: "Run echo" }] }],
+        tools: [{ type: "custom", name: "exec" }],
+      }),
+    });
+    const firstBody = await first.text();
+    const call = firstBody.split("\n")
+      .filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)))
+      .find((item) => item.type === "response.output_item.done" && item.item?.type === "custom_tool_call")?.item;
+    assert.ok(call);
+    assert.equal(call.input, 'await tools.exec_command({ cmd: "echo deepseek-ok" });');
+
+    const second = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "deepseek-v4-flash-vision-exp",
+        stream: true,
+        input: [{ type: "custom_tool_call_output", call_id: call.call_id, output: "deepseek-ok" }],
+        tools: [{ type: "custom", name: "exec" }],
+      }),
+    });
+    assert.match(await second.text(), /TOOL_ROUNDTRIP_OK/);
+  });
+
+  assert.equal(seenHeaders.length, 2);
+  const firstSession = seenHeaders[0].get("x-opencode-session");
+  const secondSession = seenHeaders[1].get("x-opencode-session");
+  assert.match(firstSession, /^ocx_[0-9a-f]{32}$/);
+  assert.equal(secondSession, firstSession);
+});
+
+test("preserves an explicit x-opencode-session header for DeepSeek", async () => {
+  let captured;
+  const fakeFetch = async (_url, init) => {
+    captured = new Headers(init.headers);
+    return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json", "x-opencode-session": "operator-session" },
+      body: JSON.stringify({ model: "deepseek-v4-pro", input: [{ role: "user", content: [{ type: "input_text", text: "hi" }] }] }),
+    });
+  });
+  assert.equal(captured.get("x-opencode-session"), "operator-session");
+});
+
 test("bridges a Codex custom tool as a custom_tool_call", async () => {
   let claudeBody;
   const fakeFetch = async (_url, init) => {
