@@ -6,11 +6,14 @@ function safeName(value) {
   return String(value || "").replace(/[^A-Za-z0-9_-]/g, "_");
 }
 
+export const BUILTIN_FUNCTIONS_NAMESPACE = "functions";
+
 function toFunction(tool, namespace) {
   if (!tool || typeof tool !== "object") return null;
   const rawName = tool.name || tool.function?.name;
   if (!rawName) return null;
-  const name = namespace ? `${safeName(namespace)}__${safeName(rawName)}` : safeName(rawName);
+  const effectiveNamespace = (!namespace || namespace === BUILTIN_FUNCTIONS_NAMESPACE) ? null : namespace;
+  const name = effectiveNamespace ? `${safeName(effectiveNamespace)}__${safeName(rawName)}` : safeName(rawName);
   const custom = tool.type === "custom" || rawName === "exec" || rawName === "apply_patch";
   const inputDescription = rawName === "exec"
     ? "JavaScript source for unified exec. Use await tools.exec_command(...) for shell commands and text(...) to return textual output; do not provide a bare shell command."
@@ -30,7 +33,7 @@ function toFunction(tool, namespace) {
   return {
     name,
     originalName: String(rawName),
-    namespace: namespace || null,
+    namespace: effectiveNamespace || null,
     kind: custom ? "custom" : "function",
     description: custom
       ? `${tool.description || "Codex custom tool"}\n${inputDescription}`
@@ -44,7 +47,9 @@ export function extractFunctions(request) {
   const visit = (tool, namespace = null) => {
     if (!tool || typeof tool !== "object") return;
     if (tool.type === "namespace") {
-      for (const child of asArray(tool.tools)) visit(child, tool.namespace || tool.name || namespace);
+      const ns = tool.namespace || tool.name || namespace;
+      const effectiveNs = (!ns || ns === BUILTIN_FUNCTIONS_NAMESPACE) ? null : ns;
+      for (const child of asArray(tool.tools)) visit(child, effectiveNs);
       return;
     }
     if (tool.type === "additional_tools") {
@@ -79,7 +84,35 @@ export function extractFunctions(request) {
 }
 
 export function restoreToolName(name, functions) {
-  return functions.find((tool) => tool.name === name) || { name, originalName: name, namespace: null };
+  if (!name || typeof name !== "string") return { name, originalName: name, namespace: null };
+  const toolList = asArray(functions);
+
+  // 1. 精确匹配 wire name
+  const exact = toolList.find((tool) => tool.name === name);
+  if (exact) return exact;
+
+  // 2. 如果包含了 functions__ 或 functions/ 前缀，尝试去掉前缀匹配
+  if (name.startsWith("functions__") || name.startsWith("functions/")) {
+    const stripped = name.replace(/^functions[__/]/, "");
+    const byStripped = toolList.find((tool) => tool.name === stripped || tool.originalName === stripped);
+    if (byStripped) return byStripped;
+  }
+
+  // 3. 按 originalName 反向匹配 (例如 Gemini 返回了裸 exec，而声明的是 custom__exec 或 exec)
+  const byOriginal = toolList.find((tool) => tool.originalName === name);
+  if (byOriginal) return byOriginal;
+
+  // 4. 按后缀名称反向匹配 (例如模型返回了裸名称，而声明的是 namespace__name)
+  const bySuffix = toolList.find((tool) => tool.name && tool.name.endsWith(`__${name}`));
+  if (bySuffix) return bySuffix;
+
+  // 5. 特殊兼容: 如果声明了 custom exec / apply_patch，但模型返回了裸名或变体
+  if (name === "exec" || name.endsWith("__exec") || name.endsWith("/exec")) {
+    const customExec = toolList.find((tool) => tool.kind === "custom" && (tool.originalName === "exec" || tool.name === "exec" || tool.name.endsWith("__exec")));
+    if (customExec) return customExec;
+  }
+
+  return { name, originalName: name, namespace: null };
 }
 
 export function parseDsmlCalls(text) {

@@ -156,12 +156,22 @@ export function resolveTargetModel(model) {
 
 function customInput(value) {
   let raw = "";
-  if (typeof value === "string") raw = value;
-  else if (typeof value?.input === "string") raw = value.input;
-  else if (typeof value?.command === "string") raw = value.command;
-  else if (typeof value?.cmd === "string") raw = value.cmd;
-  else if (typeof value?.patch === "string") return value.patch;
-  else raw = typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "");
+  if (typeof value === "string") {
+    raw = value;
+  } else if (value && typeof value === "object") {
+    if (typeof value.patch === "string") return value.patch;
+    if (typeof value.input === "string") raw = value.input;
+    else if (typeof value.raw === "string") raw = value.raw;
+    else if (typeof value.command === "string") raw = value.command;
+    else if (typeof value.cmd === "string") raw = value.cmd;
+    else if (value.input !== undefined) raw = typeof value.input === "object" ? JSON.stringify(value.input) : String(value.input);
+    else if (value.raw !== undefined) raw = typeof value.raw === "object" ? JSON.stringify(value.raw) : String(value.raw);
+    else if (value.command !== undefined) raw = typeof value.command === "object" ? JSON.stringify(value.command) : String(value.command);
+    else if (value.cmd !== undefined) raw = typeof value.cmd === "object" ? JSON.stringify(value.cmd) : String(value.cmd);
+    else raw = JSON.stringify(value);
+  } else {
+    raw = String(value ?? "");
+  }
 
   raw = raw.trim();
   if (raw.startsWith("*** Begin Patch")) return raw;
@@ -1166,7 +1176,7 @@ export function buildOpenAIChatMessages(input, instructions) {
 export async function bridgeChatCompletionsToResponses(response, settings, payload, fetchImpl, signal) {
   const functions = extractFunctions(payload);
   const messages = buildOpenAIChatMessages(payload.input || [], payload.instructions);
-  
+
   const chatBody = {
     model: payload.model,
     messages,

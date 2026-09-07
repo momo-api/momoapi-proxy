@@ -255,7 +255,12 @@ function customToolInput(argumentsText) {
   if (typeof argumentsText !== "string") return "";
   try {
     const parsed = JSON.parse(argumentsText);
-    if (isPlainObject(parsed) && typeof parsed.input === "string") return parsed.input;
+    if (isPlainObject(parsed)) {
+      if (typeof parsed.input === "string") return parsed.input;
+      if (typeof parsed.raw === "string") return parsed.raw;
+      if (typeof parsed.command === "string") return parsed.command;
+      if (typeof parsed.cmd === "string") return parsed.cmd;
+    }
   } catch {}
   return argumentsText;
 }
