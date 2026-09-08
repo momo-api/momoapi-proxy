@@ -17,8 +17,8 @@ function imageContent(image) {
 
 const TOOL_DEFS = [
   { name: "image_capabilities", description: "List the MOMO image models and their supported operations.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-  { name: "image_generate", description: "Generate one or more images through the local MOMO API Proxy. The proxy owns the MOMO API key.", inputSchema: { type: "object", properties: { model: { type: "string" }, prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 4 }, aspect_ratio: { type: "string" }, resolution: { type: "string" } }, required: ["prompt"], additionalProperties: false } },
-  { name: "image_edit", description: "Edit reference images through the local MOMO API Proxy. Use data:image/...;base64 or HTTPS image URLs in reference_images.", inputSchema: { type: "object", properties: { model: { type: "string" }, prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 4 }, aspect_ratio: { type: "string" }, resolution: { type: "string" }, reference_images: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 16 } }, required: ["prompt", "reference_images"], additionalProperties: false } },
+  { name: "image_generate", description: "Generate one or more images through the local MOMO API Proxy. Call image_capabilities for model-specific limits.", inputSchema: { type: "object", properties: { model: { type: "string", enum: ["gpt-image-2-momoapi", "gpt-image-2", "gemini-3.1-flash-image"] }, prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 4 }, aspect_ratio: { type: "string", enum: ["1:1", "3:2", "2:3", "16:9", "9:16"] }, resolution: { type: "string", enum: ["1k", "2k", "4k"] } }, required: ["prompt"], additionalProperties: false } },
+  { name: "image_edit", description: "Edit reference images through the local MOMO API Proxy. Use data:image/...;base64 or HTTPS image URLs; model-specific limits are returned by image_capabilities.", inputSchema: { type: "object", properties: { model: { type: "string", enum: ["gpt-image-2-momoapi", "gpt-image-2", "gemini-3.1-flash-image"] }, prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 4 }, aspect_ratio: { type: "string", enum: ["1:1", "3:2", "2:3", "16:9", "9:16"] }, resolution: { type: "string", enum: ["1k", "2k", "4k"] }, reference_images: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4 } }, required: ["prompt", "reference_images"], additionalProperties: false } },
   { name: "image_task_status", description: "Check an asynchronous MOMO image task.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false } },
 ];
 
@@ -42,7 +42,7 @@ async function callProxy(path, method = "GET", body) {
 }
 
 function toolResult(payload) {
-  const content = [text({ task_id: payload.task_id || null, images: payload.images?.map((image) => ({ url: image.url, mime_type: image.mime_type })) || [], status: payload.raw_status || null })];
+  const content = [text({ task_id: payload.task_id || null, images: payload.images?.map((image) => ({ url: image.url, mime_type: image.mime_type })) || [], status: payload.raw_status || null, terminal: Boolean(payload.terminal), ...(payload.error ? { error: payload.error } : {}) })];
   for (const image of payload.images || []) {
     const block = imageContent(image);
     if (block) content.push(block);
@@ -58,7 +58,7 @@ export async function runImageMcp() {
     try { request = JSON.parse(line); } catch { continue; }
     if (request.method === "notifications/initialized" || request.method === "notifications/cancelled") continue;
     if (request.method === "initialize") {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.1.0" } } }) + "\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.2.0" } } }) + "\n");
       continue;
     }
     try {
