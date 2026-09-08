@@ -45,6 +45,11 @@ function fail(message, statusCode = 400, code = "invalid_request_error") {
   return error;
 }
 
+function imageSignal(parentSignal, timeoutMs = 300000) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  return parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal;
+}
+
 function asDataUrl(value) {
   if (typeof value !== "string") return null;
   if (/^data:image\/[A-Za-z0-9.+-]+;base64,/i.test(value)) return value;
@@ -95,7 +100,7 @@ export function normalizeImageRequest(input, operation = "generate") {
 }
 
 function upstreamJsonBody(request) {
-  const body = { model: request.model, prompt: request.prompt, n: request.n };
+  const body = { model: request.model, prompt: request.prompt, n: request.n, response_format: "b64_json" };
   if (request.model === "gemini-3.1-flash-image") {
     body.aspectRatio = request.aspect_ratio;
     body.imageSize = request.resolution.toUpperCase();
@@ -132,6 +137,7 @@ async function imageFormData(request, fetchImpl) {
   form.set("model", request.model);
   form.set("prompt", request.prompt);
   form.set("n", String(request.n));
+  form.set("response_format", "b64_json");
   if (request.model === "gemini-3.1-flash-image") {
     form.set("aspectRatio", request.aspect_ratio);
     form.set("imageSize", request.resolution.toUpperCase());
@@ -166,7 +172,9 @@ export function extractImageResults(payload) {
     if (seen.has(value)) return;
     seen.add(value);
     const url = [value.url, value.image_url, value.result_url].find((item) => typeof item === "string" && /^https?:\/\//i.test(item));
-    const b64_json = [value.b64_json, value.base64, value.image_base64, value.partial_image_b64].find((item) => typeof item === "string" && item.length > 0);
+    const directBase64 = [value.b64_json, value.base64, value.image_base64, value.partial_image_b64].find((item) => typeof item === "string" && item.length > 0);
+    const resultBase64 = typeof value.result === "string" && value.result.length > 256 && /^[A-Za-z0-9+/=\r\n]+$/.test(value.result) ? value.result : null;
+    const b64_json = directBase64 || resultBase64;
     if (url || b64_json) images.push({ ...(url ? { url } : {}), ...(b64_json ? { b64_json } : {}) });
     if (typeof value.task_id === "string") taskIds.push(value.task_id);
     for (const child of Array.isArray(value) ? value : Object.values(value)) visit(child, depth + 1);
@@ -196,7 +204,7 @@ async function materializeImages(result, fetchImpl) {
 export async function generateImage({ settings, request, fetchImpl = fetch, signal, operation = "generate" }) {
   const normalized = normalizeImageRequest(request, operation);
   const isEdit = operation === "edit";
-  const init = { method: "POST", headers: { authorization: `Bearer ${settings.apiKey}` }, signal };
+  const init = { method: "POST", headers: { authorization: "Bearer " + settings.apiKey }, signal: imageSignal(signal) };
   if (isEdit) init.body = await imageFormData(normalized, fetchImpl);
   else { init.headers["content-type"] = "application/json"; init.body = JSON.stringify(upstreamJsonBody(normalized)); }
   const endpoint = settings.endpoint + (isEdit ? "/v1/images/edits" : "/v1/images/generations");
@@ -213,7 +221,7 @@ export async function generateImage({ settings, request, fetchImpl = fetch, sign
 
 export async function getImageTask({ settings, taskId, fetchImpl = fetch, signal }) {
   if (!/^[A-Za-z0-9._:-]{1,256}$/.test(taskId || "")) throw fail("Invalid task_id.");
-  const upstream = await fetchImpl(`${settings.endpoint}/v1/images/generations/${encodeURIComponent(taskId)}`, { headers: { authorization: `Bearer ${settings.apiKey}` }, signal });
+  const upstream = await fetchImpl(settings.endpoint + "/v1/images/generations/" + encodeURIComponent(taskId), { headers: { authorization: "Bearer " + settings.apiKey }, signal: imageSignal(signal, 60000) });
   const text = await upstream.text();
   let payload;
   try { payload = JSON.parse(text); } catch { payload = { error: { message: text } }; }

@@ -15,6 +15,7 @@ test("normalizes image requests and maps Gemini controls", async () => {
   assert.equal(calls[0].url, "https://gateway.example/v1/images/generations");
   assert.equal(JSON.parse(calls[0].init.body).aspectRatio, "16:9");
   assert.equal(JSON.parse(calls[0].init.body).imageSize, "2K");
+  assert.equal(JSON.parse(calls[0].init.body).response_format, "b64_json");
   assert.equal(result.images[0].b64_json, "aGVsbG8=");
 });
 
@@ -27,6 +28,7 @@ test("extracts direct, nested, and async image response shapes", () => {
   assert.deepEqual(extractImageResults({ url: "https://example.com/a.png" }), { images: [{ url: "https://example.com/a.png" }], task_id: null, raw_status: null });
   assert.deepEqual(extractImageResults({ data: [{ task_id: "task-1" }] }).task_id, "task-1");
   assert.equal(extractImageResults({ item: { result: "ignored" }, response: { output: [{ image_url: "https://example.com/b.png" }] } }).images[0].url, "https://example.com/b.png");
+  assert.equal(extractImageResults({ item: { result: "a".repeat(300) } }).images[0].b64_json.length, 300);
 });
 
 test("turns HTTPS references into multipart files and blocks obvious SSRF targets", async () => {
