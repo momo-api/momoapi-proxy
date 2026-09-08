@@ -1265,9 +1265,32 @@ export function buildOpenAIChatMessages(input, instructions) {
   return messages.length > 0 ? messages : [{ role: "user", content: "Continue." }];
 }
 
+// Some Qwen upstreams reject "System message must be at the beginning". Codex may
+// inject developer/system items mid-history (e.g. collaboration-mode notes),
+// so consolidate all system messages at the front for Qwen models only.
+export function normalizeQwenSystemMessages(messages) {
+  const systemParts = [];
+  const remaining = [];
+
+  for (const message of asArray(messages)) {
+    if (message?.role === "system") {
+      const content = String(message.content || "").trim();
+      if (content) systemParts.push(content);
+      continue;
+    }
+    remaining.push(message);
+  }
+
+  if (systemParts.length === 0) return remaining;
+  return [{ role: "system", content: systemParts.join("\n\n") }, ...remaining];
+}
+
 export async function bridgeChatCompletionsToResponses(request, response, settings, payload, calls, fetchImpl, signal) {
   const functions = extractFunctions(payload);
-  const messages = buildOpenAIChatMessages(payload.input || [], payload.instructions);
+  const builtMessages = buildOpenAIChatMessages(payload.input || [], payload.instructions);
+  const messages = String(payload.model || "").toLowerCase().includes("qwen")
+    ? normalizeQwenSystemMessages(builtMessages)
+    : builtMessages;
 
   const chatBody = {
     model: payload.model,

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.5 - 2026-09-08
+
+- Normalized Qwen requests to a single leading system message before forwarding them upstream.
+- Merged Responses `instructions`, developer messages, and system messages without changing tool-call order.
+- Kept all non-Qwen model request behavior unchanged and added regression coverage for both paths.
+
 ## 0.10.4 - 2026-09-07
 
 - Made the installed `settings.json` API key authoritative over stale process-level environment variables.

@@ -19,6 +19,102 @@ test("rejects access with an invalid local admission token", async () => {
   });
 });
 
+test("Qwen chat bridge merges instructions and developer messages into one leading system message", async () => {
+  let capturedBody = null;
+  const fakeFetch = async (url, init) => {
+    assert.equal(url, "https://gateway.example/v1/chat/completions");
+    capturedBody = JSON.parse(init.body);
+    const sse = "data: " + JSON.stringify({ choices: [{ delta: { content: "QWEN_OK" } }] }) + "\n\n";
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "Qwen3.8-27B-Uncensored",
+        instructions: "Base instructions",
+        input: [
+          { type: "message", role: "developer", content: [{ type: "input_text", text: "Developer rule one" }] },
+          { type: "message", role: "developer", content: [{ type: "input_text", text: "Developer rule two" }] },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] },
+        ],
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /QWEN_OK/);
+  });
+
+  assert.deepEqual(capturedBody.messages, [
+    { role: "system", content: "Base instructions\n\nDeveloper rule one\n\nDeveloper rule two" },
+    { role: "user", content: "Hello" },
+  ]);
+});
+
+test("Qwen system merge preserves multi-turn tool-call ordering", async () => {
+  let capturedBody = null;
+  const fakeFetch = async (_url, init) => {
+    capturedBody = JSON.parse(init.body);
+    const sse = "data: " + JSON.stringify({ choices: [{ delta: { content: "DONE" } }] }) + "\n\n";
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "vendor/Qwen3.8-27B-Uncensored",
+        instructions: "Base instructions",
+        input: [
+          { type: "message", role: "developer", content: [{ type: "input_text", text: "Use tools when needed" }] },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "List files" }] },
+          { type: "function_call", call_id: "call_qwen_ls", name: "exec", arguments: { cmd: "dir" } },
+          { type: "function_call_output", call_id: "call_qwen_ls", output: "file1.txt" },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "Continue" }] },
+        ],
+      }),
+    });
+    assert.equal(response.status, 200);
+  });
+
+  assert.deepEqual(capturedBody.messages.map((message) => message.role), ["system", "user", "assistant", "tool", "user"]);
+  assert.equal(capturedBody.messages.filter((message) => message.role === "system").length, 1);
+  assert.equal(capturedBody.messages[2].tool_calls[0].id, "call_qwen_ls");
+  assert.equal(capturedBody.messages[3].tool_call_id, "call_qwen_ls");
+  assert.equal(capturedBody.messages[3].content, "file1.txt");
+});
+
+test("non-Qwen chat bridge keeps existing separate system messages", async () => {
+  let capturedBody = null;
+  const fakeFetch = async (_url, init) => {
+    capturedBody = JSON.parse(init.body);
+    const sse = "data: " + JSON.stringify({ choices: [{ delta: { content: "OK" } }] }) + "\n\n";
+    return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        instructions: "Base instructions",
+        input: [
+          { type: "message", role: "developer", content: [{ type: "input_text", text: "Developer rule" }] },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "Hello" }] },
+        ],
+      }),
+    });
+    assert.equal(response.status, 200);
+  });
+
+  assert.deepEqual(capturedBody.messages.map((message) => message.role), ["system", "system", "user"]);
+  assert.equal(capturedBody.messages[0].content, "Base instructions");
+  assert.equal(capturedBody.messages[1].content, "Developer rule");
+});
+
 test("passes a Responses model through without leaking MOMO credentials", async () => {
   let upstreamRequest;
   const fakeFetch = async (url, init) => {
