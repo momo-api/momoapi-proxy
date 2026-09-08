@@ -1,0 +1,19 @@
+{
+  "name": "momo-image",
+  "version": "0.1.0",
+  "description": "Generate and edit images through the local MOMO API Proxy without exposing API keys to Codex.",
+  "author": {
+    "name": "MOMO API"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "MOMO Image",
+    "shortDescription": "Generate and edit images with MOMO.",
+    "longDescription": "A Codex plugin for MOMO image generation and editing through the locally configured proxy.",
+    "developerName": "MOMO API",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use MOMO Image to generate or edit an image."
+  },
+  "mcpServers": "./.mcp.json"
+}
