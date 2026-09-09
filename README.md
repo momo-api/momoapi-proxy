@@ -153,7 +153,7 @@ Long-running Responses clients may use either official compact mode:
 }
 ```
 
-or `POST /v1/responses/compact`. The standalone compact route has an independent 32 MiB default budget (`MOMO_COMPACT_BODY_LIMIT_MB`, capped at 64 MiB) and safely markerizes old binary history before dispatch. If the MOMO upstream explicitly lacks compact support or rejects only the compact body as 413, the local proxy returns a fixed recoverable checkpoint. Authentication, quota and server errors are never converted into a fake compact success.
+or `POST /v1/responses/compact`. The standalone compact route has an independent 32 MiB default budget (`MOMO_COMPACT_BODY_LIMIT_MB`, capped at 64 MiB), validates the returned `response.compaction`, caps the upstream response at 32 MiB, and safely markerizes old binary history before dispatch. Codex v2 local compaction envelopes are capped at 1 MiB and fall back to the fixed checkpoint when needed. If the MOMO upstream explicitly lacks compact support or rejects only the compact body as 413, the local proxy returns a fixed recoverable checkpoint. Model, authentication, quota and server errors are never converted into a fake compact success.
 
 `previous_response_id` continuation is conservative: for native Responses routes, the proxy drops a repeated transcript only after an exact complete-prefix match crosses a recorded provider-output boundary containing a provider-issued item id. Partial or ambiguous matches, model changes, `store:false`, and non-Responses routes fail open and remain untouched. Continuation fingerprints are SHA-256 hashes, bounded, and memory-only.
 

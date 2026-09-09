@@ -72,6 +72,15 @@ test("POST /v1/responses/compact forwards the sanitized canonical request", asyn
   assert.equal(captured.body.stream, undefined);
 });
 
+test("compact rejects an upstream 200 that is not a response.compaction object", async () => {
+  const fakeFetch = async () => new Response("<html>not compact</html>", { status: 200, headers: { "content-type": "text/html" } });
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [] }) });
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).error.code, "invalid_compact_response");
+  });
+});
+
 test("compact rejects an oversized upstream response without buffering it unbounded", async () => {
   const oversized = `\"${"A".repeat(33 * 1024 * 1024)}\"`;
   const fakeFetch = async () => new Response(oversized, { status: 200, headers: { "content-type": "application/json" } });
@@ -165,6 +174,22 @@ test("compaction_trigger emits one replayable compaction item", async () => {
   assert.equal(upstreamBodies[0].url, "https://gateway.example/v1/responses/compact");
   assert.match(JSON.stringify(upstreamBodies[1].body.input), /canonical checkpoint/);
   assert.doesNotMatch(JSON.stringify(upstreamBodies[1].body.input), /momo1:/);
+});
+
+test("compaction_trigger falls back to a bounded checkpoint when upstream compact output is huge", async () => {
+  const hugeOutput = [{ id: "msg_huge", type: "message", role: "user", content: [{ type: "input_text", text: "A".repeat(2 * 1024 * 1024) }] }];
+  const fakeFetch = async () => Response.json({ id: "cmp_huge", object: "response.compaction", output: hugeOutput });
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "retain this request" }, { type: "compaction_trigger" }] }) });
+    assert.equal(response.status, 200);
+    const events = (await response.text()).split("\n").filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6)));
+    const item = events.find((event) => event.type === "response.output_item.done")?.item;
+    const recovered = decodeLocalCompaction(item.encrypted_content);
+    assert.ok(item.encrypted_content.length < 2 * 1024 * 1024);
+    assert.match(JSON.stringify(recovered), /retain this request/);
+    assert.doesNotMatch(JSON.stringify(recovered), /A{1000}/);
+  });
 });
 
 test("context_management compaction strips old inline media before ordinary admission", async () => {

@@ -30,7 +30,8 @@
 
 - 实现标准 `POST /v1/responses/compact` 透传。compact 使用独立 32 MiB 准入，先 marker 化历史图片、内嵌附件和超大工具输出，避免压缩请求被普通 18 MiB hard limit 锁死。
 - 支持 Responses `context_management: [{ type: "compaction", compact_threshold }]`，先治理旧二进制历史，再保留该字段交给上游 server-side compaction。
-- 支持 Codex remote-compaction v2 的 `compaction_trigger`，并只返回一个可重放的 `compaction` item。
+- 支持 Codex remote-compaction v2 的 `compaction_trigger`，并只返回一个可重放的 `compaction` item；本地 envelope 上限 1 MiB，超限回退固定 checkpoint。
+- 验证上游 standalone compact 响应必须是 `response.compaction`，并以 32 MiB 上限有界读取，防止异常 HTML/超大成功响应进入内存。
 - 上游 compact 明确不可用或因请求体返回 413 时，返回固定结构的本地恢复 checkpoint；鉴权、限流和 5xx 保留真实错误。
 - 对同一 `thread-id`、session header 或 `previous_response_id` 的 compact 请求执行互斥，重复请求返回 `409 compaction_in_progress`。
 - 实现基于 provider output 边界的 `previous_response_id` 历史去重：只有完整前缀匹配、跨越已记录 provider output 边界、且该输出含 provider-issued `id` 时才跳过；大项、深嵌套、部分前缀和未知 ID 全部 fail-open。

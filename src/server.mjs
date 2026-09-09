@@ -1057,6 +1057,32 @@ async function readCompactResponseText(upstream) {
   return Buffer.concat(chunks, total).toString("utf8");
 }
 
+function parseCompactResponseText(text) {
+  let payload;
+  try { payload = JSON.parse(text); } catch {
+    const error = new Error("Compact endpoint returned invalid JSON.");
+    error.statusCode = 502;
+    error.code = "invalid_compact_response";
+    throw error;
+  }
+  if (!payload || payload.object !== "response.compaction" || !Array.isArray(payload.output)) {
+    const error = new Error("Compact endpoint returned an invalid response.compaction object.");
+    error.statusCode = 502;
+    error.code = "invalid_compact_response";
+    throw error;
+  }
+  return payload;
+}
+
+function encodeRecoverableCompaction(model, input, output) {
+  try {
+    return encodeLocalCompaction(output);
+  } catch (error) {
+    if (error?.code !== "local_compaction_envelope_too_large") throw error;
+    return encodeLocalCompaction(buildLocalCompactResponse(model, input).output);
+  }
+}
+
 async function forwardCompact(request, response, settings, payload, fetchImpl, signal, compactLocks) {
   const key = compactLockKey(request, payload);
   if (key && compactLocks.has(key)) {
@@ -1078,10 +1104,7 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
 
     if (upstream.ok) {
       const text = await readCompactResponseText(upstream);
-      const contentType = upstream.headers.get("content-type") || "application/json";
-      response.writeHead(upstream.status, { "content-type": contentType });
-      response.end(text);
-      return;
+      return compactJson(response, upstream.status, parseCompactResponseText(text));
     }
 
     const message = await upstreamErrorMessage(upstream);
@@ -1124,12 +1147,7 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
     let compacted;
     if (upstream.ok) {
       const compactText = await readCompactResponseText(upstream);
-      try { compacted = JSON.parse(compactText); } catch {
-        const error = new Error("Compact endpoint returned invalid JSON.");
-        error.statusCode = 502;
-        error.code = "invalid_compact_response";
-        throw error;
-      }
+      compacted = parseCompactResponseText(compactText);
     } else {
       const message = await upstreamErrorMessage(upstream);
       if (!shouldUseLocalCompact(upstream.status, message)) {
@@ -1139,10 +1157,11 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
       compacted = buildLocalCompactResponse(payload.model, prepared.payload.input);
     }
     const output = Array.isArray(compacted?.output) ? compacted.output : [];
+    const encryptedContent = encodeRecoverableCompaction(payload.model, prepared.payload.input, output);
     initSseResponse(response);
     const emitter = new ResponseStreamEmitter(response, payload.model);
     emitter.start();
-    const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encodeLocalCompaction(output) };
+    const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
     const index = emitter.outputIndex++;
     emitter.outputItems.push(item);
     response.write(`event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item })}\n\n`);
@@ -1151,10 +1170,11 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
     if (error?.code === "compact_budget_exceeded") {
       const checkpoint = buildLocalCompactResponse(payload.model, error.localCheckpointInput || compactPayload.input);
       const output = Array.isArray(checkpoint.output) ? checkpoint.output : [];
+      const encryptedContent = encodeRecoverableCompaction(payload.model, compactPayload.input, output);
       initSseResponse(response);
       const emitter = new ResponseStreamEmitter(response, payload.model);
       emitter.start();
-      const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encodeLocalCompaction(output) };
+      const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
       const index = emitter.outputIndex++;
       emitter.outputItems.push(item);
       response.write(`event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item })}\n\n`);

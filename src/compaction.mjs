@@ -8,11 +8,18 @@ const MAX_COMPACT_LIMIT_BYTES = 64 * MIB;
 const DEFAULT_RETAINED_USER_CHARS = 20_000 * 4;
 const LOCAL_COMPACTION_PREFIX = "momo1:";
 const MAX_LOCAL_COMPACTION_ENVELOPE_CHARS = 2 * MIB;
+const MAX_LOCAL_COMPACTION_JSON_BYTES = 1024 * 1024;
 
 export const SUMMARY_PREFIX = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
 
 export function encodeLocalCompaction(output) {
-  return LOCAL_COMPACTION_PREFIX + Buffer.from(JSON.stringify(Array.isArray(output) ? output : []), "utf8").toString("base64");
+  const serialized = JSON.stringify(Array.isArray(output) ? output : []);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_LOCAL_COMPACTION_JSON_BYTES) {
+    const error = new Error("Local compaction envelope exceeded the 1 MiB safety limit.");
+    error.code = "local_compaction_envelope_too_large";
+    throw error;
+  }
+  return LOCAL_COMPACTION_PREFIX + Buffer.from(serialized, "utf8").toString("base64");
 }
 
 export function decodeLocalCompaction(value) {
@@ -209,7 +216,7 @@ function fixedCheckpoint(input) {
   ].join("\n");
 }
 
-export function buildLocalCompactResponse(model, input) {
+export function buildLocalCompactResponse(_model, input) {
   const users = extractCompactUserMessages(input);
   const selected = [];
   let remaining = DEFAULT_RETAINED_USER_CHARS;
@@ -227,7 +234,6 @@ export function buildLocalCompactResponse(model, input) {
     id: `resp_compact_${randomUUID()}`,
     object: "response.compaction",
     created_at: Math.floor(Date.now() / 1000),
-    model,
     output,
   };
 }
