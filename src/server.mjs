@@ -8,9 +8,10 @@ import {
   restoreAllRoutedCallsInJson,
   createRoutedCustomToolRestoreBlockRewrite,
 } from "./responses-compat.mjs";
-import { ResponseStreamEmitter, completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
+import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, parseSse, responseCreated, sseError } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
 import { getCurrentVersion } from "./updater.mjs";
+import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
@@ -56,6 +57,16 @@ export const metricsState = {
   ttfbHistory: [],
   maxRssBytes: 0,
   isDraining: false,
+  contextRequestsAdmitted: 0,
+  contextRequestsRejected: 0,
+  inboundBodyRejects: 0,
+  outboundBodySoftLimitHits: 0,
+  outboundBodyHardLimitRejects: 0,
+  imageBytesRemoved: 0,
+  imageBytesForwarded: 0,
+  imageDedupHits: 0,
+  historicalImagesRemoved: 0,
+  maxSerializedBodyBytes: 0,
 };
 
 export function recordTtfb(ms) {
@@ -81,6 +92,16 @@ export function resetMetrics() {
   metricsState.ttfbHistory = [];
   metricsState.maxRssBytes = 0;
   metricsState.isDraining = false;
+  metricsState.contextRequestsAdmitted = 0;
+  metricsState.contextRequestsRejected = 0;
+  metricsState.inboundBodyRejects = 0;
+  metricsState.outboundBodySoftLimitHits = 0;
+  metricsState.outboundBodyHardLimitRejects = 0;
+  metricsState.imageBytesRemoved = 0;
+  metricsState.imageBytesForwarded = 0;
+  metricsState.imageDedupHits = 0;
+  metricsState.historicalImagesRemoved = 0;
+  metricsState.maxSerializedBodyBytes = 0;
 }
 
 function asArray(value) {
@@ -107,6 +128,7 @@ export async function bodyOf(request, settings = {}) {
 
   for await (const chunk of request) {
     totalLength += chunk.length;
+    request.momoRequestBodyBytes = totalLength;
     if (totalLength > maxBytes) {
       const err = new Error("Payload Too Large: request body exceeds limit of " + (maxBytes / (1024 * 1024)) + "MB.");
       err.statusCode = 413;
@@ -118,7 +140,9 @@ export async function bodyOf(request, settings = {}) {
 
   const raw = Buffer.concat(chunks, totalLength).toString("utf8");
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    request.momoRequestBodyBytes = totalLength;
+    return parsed;
   } catch {
     const err = new Error("Request body must be valid JSON.");
     err.statusCode = 400;
@@ -896,13 +920,64 @@ async function* streamSseLines(body) {
   }
 }
 
-function initSseResponse(response) {
-  response.writeHead(200, {
+function initSseResponse(response, status = 200) {
+  response.writeHead(status, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache",
     "connection": "keep-alive",
     "x-accel-buffering": "no"
   });
+}
+
+function recordContextTrace(response, trace, admitted = true) {
+  if (!trace) return;
+  response.momoContextTrace = trace;
+  if (trace.metricsRecorded) return;
+  trace.metricsRecorded = true;
+  if (admitted) metricsState.contextRequestsAdmitted++;
+  else metricsState.contextRequestsRejected++;
+  if (trace.softLimitHit) metricsState.outboundBodySoftLimitHits++;
+  if (trace.hardLimitRejected) metricsState.outboundBodyHardLimitRejects++;
+  metricsState.imageBytesRemoved += trace.imageBytesRemoved || 0;
+  metricsState.imageBytesForwarded += trace.imageBytesForwarded || 0;
+  metricsState.imageDedupHits += trace.imageDedupHits || 0;
+  metricsState.historicalImagesRemoved += trace.historicalImagesRemoved || 0;
+  metricsState.maxSerializedBodyBytes = Math.max(metricsState.maxSerializedBodyBytes, trace.maxOutboundBytes || trace.outboundBytes || 0);
+}
+
+function contextLogFields(response, request) {
+  const trace = response.momoContextTrace;
+  return {
+    requestBytes: trace?.requestBytes || request.momoRequestBodyBytes,
+    outboundBytes: trace?.outboundBytes,
+    imageCount: trace?.imageCount,
+    imageBytes: trace?.imageBytes,
+    policyAction: trace?.policyActions?.join(",") || (trace?.hardLimitRejected ? "hard_limit_rejected" : undefined),
+  };
+}
+
+async function upstreamErrorMessage(upstream) {
+  const errText = await upstream.text();
+  let message;
+  try {
+    const parsed = JSON.parse(errText);
+    message = parsed.error?.message || parsed.message || errText;
+  } catch {
+    message = errText || `Upstream HTTP ${upstream.status}`;
+  }
+  return String(message)
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [redacted]")
+    .replace(/data:[^;,\s]+(?:;[^,\s]*)?;base64,[A-Za-z0-9+/=\r\n]+/gi, "[inline data redacted]")
+    .slice(0, 4000);
+}
+
+function writeResponsesFailure(response, model, status, message, code = `http_${status}`) {
+  if (!response.headersSent) initSseResponse(response, status);
+  const respId = "resp_err_" + randomUUID();
+  response.write(responseCreated(model, respId).data);
+  response.write(failed(respId, model, message, code));
+  response.write(sseError(message, code));
+  response.end();
 }
 
 export function normalizeResponsesPayload(payload) {
@@ -1286,15 +1361,17 @@ export function normalizeQwenSystemMessages(messages) {
   return [{ role: "system", content: systemParts.join("\n\n") }, ...remaining];
 }
 
-export async function bridgeChatCompletionsToResponses(request, response, settings, payload, calls, fetchImpl, signal) {
-  const functions = extractFunctions(payload);
-  const builtMessages = buildOpenAIChatMessages(payload.input || [], payload.instructions);
+export async function bridgeChatCompletionsToResponses(request, response, settings, payload, calls, fetchImpl, signal, existingAdmission = null) {
+  const prepared = existingAdmission || prepareMediaPayload(payload, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
+  const safePayload = prepared.payload;
+  const functions = extractFunctions(safePayload);
+  const builtMessages = buildOpenAIChatMessages(safePayload.input || [], safePayload.instructions);
   const messages = String(payload.model || "").toLowerCase().includes("qwen")
     ? normalizeQwenSystemMessages(builtMessages)
     : builtMessages;
 
   const chatBody = {
-    model: payload.model,
+    model: safePayload.model,
     messages,
     stream: true,
   };
@@ -1308,37 +1385,26 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
         parameters: f.parameters,
       },
     }));
-    chatBody.tool_choice = payload.tool_choice || "auto";
+    chatBody.tool_choice = safePayload.tool_choice || "auto";
   }
 
-  const rawEffort = payload.reasoning_effort || payload.model_reasoning_effort || payload.reasoning?.effort;
+  const rawEffort = safePayload.reasoning_effort || safePayload.model_reasoning_effort || safePayload.reasoning?.effort;
   if (rawEffort) {
     chatBody.reasoning_effort = String(rawEffort).toLowerCase();
   }
 
+  const serializedBody = serializeOutboundBody(chatBody, settings, prepared.trace);
+  recordContextTrace(response, prepared.trace, true);
   const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
     method: "POST",
     headers: openCodeUpstreamHeaders(settings, request, payload, calls),
-    body: JSON.stringify(chatBody),
+    body: serializedBody,
     signal,
   });
 
   if (!upstream.ok) {
-    const errText = await upstream.text();
-    let errMessage = errText;
-    try {
-      const parsed = JSON.parse(errText);
-      errMessage = parsed.error?.message || parsed.message || errText;
-    } catch {}
-    initSseResponse(response);
-    const respId = "resp_err_" + randomUUID();
-    response.write(responseCreated(payload.model, respId).data);
-    for (const ev of textEvents(respId, 0, "\n\n[MOMO API Error " + upstream.status + "]: " + errMessage)) {
-      response.write(ev);
-    }
-    response.write(sseError(errMessage, "http_" + upstream.status));
-    response.write(completed(respId, payload.model, []));
-    return response.end();
+    const errMessage = await upstreamErrorMessage(upstream);
+    return writeResponsesFailure(response, safePayload.model, upstream.status, errMessage);
   }
 
   initSseResponse(response);
@@ -1426,11 +1492,25 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   const { body: nsBody, aliases: nsAliases } = rewriteRoutedNamespaceToolsForUpstream(customBody);
   // 4. Normalize schema for upstream OpenAI Responses endpoint
   const cleanPayload = normalizeResponsesPayload(nsBody);
-  const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify({ ...cleanPayload, stream: true }), signal });
+  const prepared = prepareMediaPayload({ ...cleanPayload, stream: true }, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
+  const outboundBody = serializeOutboundBody(prepared.payload, settings, prepared.trace);
+  // Attach trace for network-error logging, but defer metric finalization until
+  // a possible Responses -> Chat fallback has passed its own final admission.
+  response.momoContextTrace = prepared.trace;
+  const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: outboundBody, signal });
   if (!upstream.ok) {
-    // Seamless fallback to /v1/chat/completions if upstream /v1/responses returns 400/404/500
-    return bridgeChatCompletionsToResponses(request, response, settings, cleanPayload, calls, fetchImpl, signal);
+    const errMessage = await upstreamErrorMessage(upstream);
+    // Only an explicit endpoint/protocol capability mismatch may be replayed once.
+    // Payload, auth, throttling and server failures must preserve their status and never double-send.
+    if (shouldFallbackResponses(upstream.status, errMessage)) {
+      prepared.trace.fallbackProtocol = "chat";
+      if (!prepared.trace.policyActions.includes("responses_to_chat_fallback")) prepared.trace.policyActions.push("responses_to_chat_fallback");
+      return bridgeChatCompletionsToResponses(request, response, settings, prepared.payload, calls, fetchImpl, signal, prepared);
+    }
+    recordContextTrace(response, prepared.trace, true);
+    return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
   }
+  recordContextTrace(response, prepared.trace, true);
   initSseResponse(response);
   if (!upstream.body) return response.end();
 
@@ -1528,25 +1608,15 @@ async function forwardResponses(request, response, settings, payload, calls, fet
 }
 
 async function bridgeGemini(response, settings, payload, calls, fetchImpl, signal) {
-  const { body, functions } = geminiRequest(payload, payload.model, calls);
+  const prepared = prepareMediaPayload(payload, settings, { kind: "responses" });
+  const { body, functions } = geminiRequest(prepared.payload, prepared.payload.model, calls);
   const endpoint = settings.endpoint + "/v1beta/models/" + encodeURIComponent(payload.model) + ":streamGenerateContent?alt=sse";
-  const upstream = await fetchImpl(endpoint, { method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify(body), signal });
+  const outboundBody = serializeOutboundBody(body, settings, prepared.trace);
+  recordContextTrace(response, prepared.trace, true);
+  const upstream = await fetchImpl(endpoint, { method: "POST", headers: upstreamHeaders(settings), body: outboundBody, signal });
   if (!upstream.ok) {
-    const errText = await upstream.text();
-    let errMessage = errText;
-    try {
-      const parsed = JSON.parse(errText);
-      errMessage = parsed.error?.message || parsed.message || errText;
-    } catch {}
-    initSseResponse(response);
-    const respId = "resp_err_" + randomUUID();
-    response.write(responseCreated(payload.model, respId).data);
-    for (const ev of textEvents(respId, 0, "\n\n[MOMO Gemini Error " + upstream.status + "]: " + errMessage)) {
-      response.write(ev);
-    }
-    response.write(sseError(errMessage, "http_" + upstream.status));
-    response.write(completed(respId, payload.model, []));
-    return response.end();
+    const errMessage = await upstreamErrorMessage(upstream);
+    return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
   }
   initSseResponse(response);
   const emitter = new ResponseStreamEmitter(response, payload.model);
@@ -1584,24 +1654,14 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
 }
 
 async function bridgeClaude(response, settings, payload, calls, fetchImpl, signal) {
-  const { body, functions } = claudeRequest(payload, payload.model, calls);
-  const upstream = await fetchImpl(settings.endpoint + "/v1/messages", { method: "POST", headers: { ...upstreamHeaders(settings), "anthropic-version": "2023-06-01" }, body: JSON.stringify(body), signal });
+  const prepared = prepareMediaPayload(payload, settings, { kind: "responses" });
+  const { body, functions } = claudeRequest(prepared.payload, prepared.payload.model, calls);
+  const outboundBody = serializeOutboundBody(body, settings, prepared.trace);
+  recordContextTrace(response, prepared.trace, true);
+  const upstream = await fetchImpl(settings.endpoint + "/v1/messages", { method: "POST", headers: { ...upstreamHeaders(settings), "anthropic-version": "2023-06-01" }, body: outboundBody, signal });
   if (!upstream.ok) {
-    const errText = await upstream.text();
-    let errMessage = errText;
-    try {
-      const parsed = JSON.parse(errText);
-      errMessage = parsed.error?.message || parsed.message || errText;
-    } catch {}
-    initSseResponse(response);
-    const respId = "resp_err_" + randomUUID();
-    response.write(responseCreated(payload.model, respId).data);
-    for (const ev of textEvents(respId, 0, "\n\n[MOMO Claude Error " + upstream.status + "]: " + errMessage)) {
-      response.write(ev);
-    }
-    response.write(sseError(errMessage, "http_" + upstream.status));
-    response.write(completed(respId, payload.model, []));
-    return response.end();
+    const errMessage = await upstreamErrorMessage(upstream);
+    return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
   }
   initSseResponse(response);
   const emitter = new ResponseStreamEmitter(response, payload.model);
@@ -1644,10 +1704,13 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
 }
 
 async function forwardChatCompletions(request, response, settings, payload, fetchImpl, signal) {
+  const prepared = prepareMediaPayload(payload, settings, { kind: "chat", requestBytes: request.momoRequestBodyBytes || 0 });
+  const outboundBody = serializeOutboundBody(prepared.payload, settings, prepared.trace);
+  recordContextTrace(response, prepared.trace, true);
   const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
     method: "POST",
     headers: openCodeUpstreamHeaders(settings, request, payload, null),
-    body: JSON.stringify(payload),
+    body: outboundBody,
     signal,
   });
 
@@ -1900,6 +1963,18 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             active: metricsState.activeRequests,
             activeSse: metricsState.activeSse,
           },
+          context: {
+            requestsAdmitted: metricsState.contextRequestsAdmitted,
+            requestsRejected: metricsState.contextRequestsRejected,
+            inboundBodyRejects: metricsState.inboundBodyRejects,
+            softLimitRewrites: metricsState.outboundBodySoftLimitHits,
+            hardLimitRejections: metricsState.outboundBodyHardLimitRejects,
+            imageBytesRemoved: metricsState.imageBytesRemoved,
+            imageBytesForwarded: metricsState.imageBytesForwarded,
+            imageDedupHits: metricsState.imageDedupHits,
+            historicalImagesRemoved: metricsState.historicalImagesRemoved,
+            maxSerializedBodyBytes: metricsState.maxSerializedBodyBytes,
+          },
           ttfbMs: {
             p50: calculatePercentile(metricsState.ttfbHistory, 0.5),
             p95: calculatePercentile(metricsState.ttfbHistory, 0.95),
@@ -1974,7 +2049,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         const payload = await bodyOf(request, settings);
         requestedModel = payload.model;
         await forwardChatCompletions(request, response, settings, payload, fetchImpl, abortController.signal);
-        logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp });
+        logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp, ...contextLogFields(response, request) });
         return;
       }
 
@@ -2004,7 +2079,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
 
         await handlerPromise;
-        logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp });
+        logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp, ...contextLogFields(response, request) });
         return;
       }
 
@@ -2023,8 +2098,20 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       }
 
       if (error.statusCode === 413) {
-        logRequest({ method: request.method, url: pathname, status: 413, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
-        return json(response, 413, { error: { message: error.message, type: "payload_too_large", code: "payload_too_large" } });
+        const trace = error.contextTrace;
+        if (trace) {
+          recordContextTrace(response, trace, false);
+        } else {
+          metricsState.inboundBodyRejects++;
+          metricsState.contextRequestsRejected++;
+        }
+        const code = error.code || "payload_too_large";
+        logRequest({ method: request.method, url: pathname, model: requestedModel, status: 413, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp, ...contextLogFields(response, request) });
+        const body = { error: { message: error.message, type: "payload_too_large", code, ...(error.details ? { details: error.details } : {}) } };
+        if ((pathname === "/v1/responses" || pathname === "/responses") && request.momoRequestBodyBytes) {
+          return writeResponsesFailure(response, requestedModel || "unknown", 413, error.message, code);
+        }
+        return json(response, 413, body);
       }
 
       if (error.statusCode === 400) {
@@ -2032,17 +2119,9 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         return json(response, 400, { error: { message: error.message, type: "invalid_request_error", code: "invalid_json" } });
       }
 
-      logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+      logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp, ...contextLogFields(response, request) });
       if (pathname === "/v1/responses" || pathname === "/responses") {
-        if (!response.headersSent) initSseResponse(response);
-        const respId = "resp_err_" + randomUUID();
-        response.write(responseCreated(requestedModel || "unknown", respId).data);
-        for (const ev of textEvents(respId, 0, "\n\n[MOMO Proxy Error]: " + error.message)) {
-          response.write(ev);
-        }
-        response.write(sseError(error.message));
-        response.write(completed(respId, requestedModel || "unknown", []));
-        return response.end();
+        return writeResponsesFailure(response, requestedModel || "unknown", 502, error.message);
       }
       return json(response, 502, { error: { message: error.message, type: "server_error" } });
     }

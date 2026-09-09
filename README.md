@@ -17,6 +17,8 @@ It implements a focused subset of OpenCodex-inspired protocol compatibility; it 
 - **Desktop App Picker Compatibility**: Maps slots for Desktop (`gpt-5.6-sol` -> DeepSeek V4 Pro, `gpt-5.6-terra` -> Claude Opus 4.6 Thinking, `gpt-5.6-luna` -> Gemini 3.7 Flash).
 - **Thinking / Reasoning Mapping**: Maps per-model reasoning efforts to native upstream parameters (`thinkingConfig.thinkingLevel`, `adaptive` thinking, or `reasoning.effort`).
 - **Multimodal Tool Results**: Keeps tool-returned images in native Gemini, Claude, and OpenAI-compatible image fields instead of serializing base64 image data as text.
+- **Context / Media Admission**: Deduplicates and expires historical inline images, protects current-turn media, and enforces a 16 MiB soft / 18 MiB hard final upstream body envelope.
+- **Accurate Failure Semantics**: Preserves upstream 413/429/5xx status, emits `response.failed`, and never replays those failures through another billable endpoint.
 - **Gemini Usage Accounting**: Returns Gemini token usage in Responses events so Codex can track its context budget.
 - **Hourly Model Sync**: Background worker periodically pulls rich model capabilities from `https://momoapi.us/agent/catalog` (fallback to `/v1/models`).
 - **Autostart Support**: Configures login autostart on Windows, macOS launchd, and Linux systemd.
@@ -119,6 +121,27 @@ node .\scripts\codex-cli-smoke.mjs --claude
 - It supports standard function tools. Image generation and editing are available through the optional MOMO Image plugin; Codex-hosted services such as `codex-auto-review`, browser/computer use, video generation, and every third-party MCP shape are not marked universally compatible.
 - It does not currently implement OpenCodex's complete `/v1/responses/compact` subsystem; compatibility claims are limited to the paths covered by this repository's tests.
 - The installer is a developer command today; a signed one-line PowerShell/Bash installer and background process manager belong to the release work.
+
+## Context and media limits
+
+The proxy evaluates the final UTF-8 body after protocol conversion, not just the incoming `Content-Length`. By default it begins historical-image cleanup above 16 MiB and rejects any final upstream body above 18 MiB, leaving headroom below MOMO's 20 MiB edge limit. Historical images are SHA-256 deduplicated and old tool screenshots are removed first. Current-turn images are never silently deleted; an oversized current image returns `media_budget_exceeded`.
+
+Advanced users may override the non-secret defaults in `settings.json`:
+
+```json
+{
+  "contextPolicy": {
+    "outboundBodySoftLimitMb": 16,
+    "outboundBodyHardLimitMb": 18,
+    "maxHistoricalImages": 8,
+    "maxHistoricalImageBytesMb": 4,
+    "maxCurrentTurnImageBytesMb": 8,
+    "maxSingleImageBytesMb": 2
+  }
+}
+```
+
+The hard limit is deliberately capped at 18 MiB in the proxy. Raising nginx alone is not a supported fix for repeated image history. Local authenticated metrics at `/internal/metrics` expose admission, rewrite, rejection, and image-byte counters without logging prompts or Base64.
 
 ## Test evidence
 

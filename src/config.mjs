@@ -65,5 +65,6 @@ export function resolveSettings(env = process.env) {
     lastSyncStatus: saved.lastSyncStatus || null,
     lastError: saved.lastError || null,
     maxRequestBodyMb: saved.maxRequestBodyMb ? Number(saved.maxRequestBodyMb) : 64,
+    contextPolicy: saved.contextPolicy && typeof saved.contextPolicy === "object" ? saved.contextPolicy : {},
   };
 }

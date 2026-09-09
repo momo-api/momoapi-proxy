@@ -18,6 +18,15 @@ function writeLog(line, env = process.env) {
   } catch {}
 }
 
+function safeLogValue(value) {
+  return String(value || "")
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [redacted]")
+    .replace(/data:[^;,\s]+(?:;[^,\s]*)?;base64,[A-Za-z0-9+/=\r\n]+/gi, "[inline data redacted]")
+    .replace(/(?:sk|momo)[-_][A-Za-z0-9_-]{16,}/gi, "[credential redacted]")
+    .replace(/[A-Za-z0-9+/]{512,}={0,2}/g, "[large opaque data redacted]")
+    .slice(0, 1000);
+}
+
 export function logInfo(message, meta = null, env = process.env) {
   const timestamp = new Date().toISOString();
   const metaStr = meta ? " " + JSON.stringify(meta) : "";
@@ -26,22 +35,28 @@ export function logInfo(message, meta = null, env = process.env) {
 
 export function logError(title, error, env = process.env) {
   const timestamp = new Date().toISOString();
-  const errMsg = error?.stack || error?.message || String(error || "");
+  const errMsg = safeLogValue(error?.stack || error?.message || error);
   writeLog(`[${timestamp}] [ERROR] ${title}: ${errMsg}`, env);
 }
 
-export function logRequest({ method, url, model, status, elapsedMs, error, ip, toolsCount, toolCalls }, env = process.env) {
+export function logRequest({ method, url, model, status, elapsedMs, error, ip, toolsCount, toolCalls, requestBytes, outboundBytes, imageCount, imageBytes, policyAction }, env = process.env) {
   const timestamp = new Date().toISOString();
-  const modelTag = model ? ` [${model}]` : "";
+  const modelTag = model ? ` [${safeLogValue(model)}]` : "";
   const statusTag = status != null ? ` -> HTTP ${status}` : "";
   const timeTag = elapsedMs != null ? ` (${elapsedMs}ms)` : "";
-  const errorTag = error ? ` [ERROR: ${error}]` : "";
+  const errorTag = error ? ` [ERROR: ${safeLogValue(error)}]` : "";
   const ipTag = ip ? ` [${ip}]` : "";
   const toolsTag = toolsCount != null ? ` [tools:${toolsCount}]` : "";
   const callsTag = Array.isArray(toolCalls) && toolCalls.length > 0
     ? ` [executed:${toolCalls.map((c) => c.name || c).join(",")}]`
     : "";
-  const line = `[${timestamp}]${ipTag} ${method} ${url}${modelTag}${toolsTag}${callsTag}${statusTag}${timeTag}${errorTag}`;
+  const requestBytesTag = Number.isFinite(requestBytes) ? ` [request-bytes:${requestBytes}]` : "";
+  const outboundBytesTag = Number.isFinite(outboundBytes) ? ` [outbound-bytes:${outboundBytes}]` : "";
+  const mediaTag = Number.isFinite(imageCount) || Number.isFinite(imageBytes)
+    ? ` [images:${Number.isFinite(imageCount) ? imageCount : 0}/${Number.isFinite(imageBytes) ? imageBytes : 0}B]`
+    : "";
+  const policyTag = policyAction ? ` [policy:${String(policyAction).slice(0, 160)}]` : "";
+  const line = `[${timestamp}]${ipTag} ${method} ${url}${modelTag}${toolsTag}${callsTag}${requestBytesTag}${outboundBytesTag}${mediaTag}${policyTag}${statusTag}${timeTag}${errorTag}`;
   writeLog(line, env);
 }
 
