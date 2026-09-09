@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { IMAGE_CAPABILITIES, extractImageResults, generateImage, normalizeImageRequest } from "../src/image-service.mjs";
+import { IMAGE_CAPABILITIES, extractImageResults, generateImage, normalizeImageRequest, resolveImageCapabilities } from "../src/image-service.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "test-key-not-real" };
 const tinyPng = "data:image/png;base64,iVBORw0KGgo=";
@@ -8,7 +8,7 @@ const publicLookup = async () => [{ address: "203.0.113.10", family: 4 }];
 
 test("advertises the verified model-specific capability matrix", () => {
   const byId = Object.fromEntries(IMAGE_CAPABILITIES.models.map((model) => [model.id, model]));
-  assert.equal(IMAGE_CAPABILITIES.version, 2);
+  assert.equal(IMAGE_CAPABILITIES.version, 3);
   assert.equal(byId["gpt-image-2"].limits.max_reference_images, 1);
   assert.equal(byId["gpt-image-2"].transports.edit, "images-generations-reference");
   assert.equal(byId["gpt-image-2-momoapi"].limits.max_reference_images, 4);
@@ -16,6 +16,107 @@ test("advertises the verified model-specific capability matrix", () => {
   assert.deepEqual(byId["gemini-3.1-flash-image"].operations, ["generate", "edit"]);
   assert.equal(byId["gemini-3.1-flash-image"].transports.edit, "chat-completions-multimodal");
   assert.equal(byId["gemini-3.1-flash-image"].mask_edits, false);
+  assert.equal(byId["gpt-image-2.5-sunburst"].limits.max_reference_images, 16);
+  assert.equal(byId["gpt-image-2.5-sunburst"].limits.max_n, 10);
+  assert.equal(byId["gpt-image-2.5-sunburst"].mask_edits, true);
+  assert.equal(byId["gpt-image-2.5-sunburst"].available, false);
+  assert.equal(byId["gpt-image-2.5-flare"].transports.edit, "images-edits-multipart");
+});
+
+test("enables GPT Image 2.5 only when the authenticated model catalog contains it", async () => {
+  const capabilities = await resolveImageCapabilities({
+    settings,
+    fetchImpl: async () => new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-sunburst" }] }), { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  const byId = Object.fromEntries(capabilities.models.map((model) => [model.id, model]));
+  assert.equal(byId["gpt-image-2.5-sunburst"].available, true);
+  assert.equal(byId["gpt-image-2.5-flare"].available, false);
+  assert.equal(capabilities.catalog_status, "available");
+});
+
+test("validates GPT Image 2.5 native controls and 16 references", () => {
+  const references = Array.from({ length: 16 }, () => tinyPng);
+  const request = normalizeImageRequest({
+    model: "gpt-image-2.5-sunburst", prompt: "x", n: 10, size: "1536x864", quality: "max",
+    reference_images: references, mask: tinyPng, input_fidelity: "high", output_format: "webp",
+    output_compression: 70, background: "transparent", moderation: "low", stream: true, partial_images: 3,
+  }, "edit");
+  assert.equal(request.reference_images.length, 16);
+  assert.equal(request.size, "1536x864");
+  assert.equal(request.quality, "max");
+  assert.equal(request.input_fidelity, "high");
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", size: "1025x1024" }), /multiples of 16/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", background: "transparent", output_format: "jpeg" }), /requires png or webp/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", partial_images: 1 }), /requires stream=true/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", reference_images: [...references, tinyPng] }, "edit"), /at most 16/);
+});
+
+test("routes GPT Image 2.5 generation with all native JSON controls", async () => {
+  const calls = [];
+  const result = await generateImage({
+    settings,
+    request: { model: "gpt-image-2.5-flare", prompt: "a tree", n: 2, size: "1536x864", quality: "xhigh", output_format: "jpeg", output_compression: 55, background: "opaque", moderation: "low", stream: true, partial_images: 2 },
+    fetchImpl: async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-flare" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response([
+        "data: " + JSON.stringify({ type: "image_generation.partial_image", partial_image_b64: "cGFydGlhbA==" }),
+        "", "data: " + JSON.stringify({ type: "image_generation.completed", b64_json: "ZmluYWw=" }), "", "data: [DONE]", "",
+      ].join("\n"), { status: 200, headers: { "content-type": "text/event-stream" } });
+    },
+  });
+  assert.equal(calls[1].url, "https://gateway.example/v1/images/generations");
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    model: "gpt-image-2.5-flare", prompt: "a tree", n: 2, size: "1536x864", quality: "xhigh",
+    output_format: "jpeg", background: "opaque", moderation: "low", stream: true, output_compression: 55, partial_images: 2,
+  });
+  assert.equal(result.images.length, 2);
+  assert.equal(result.images[0].mime_type, "image/jpeg");
+});
+
+test("routes GPT Image 2.5 editing as multipart with 16 images and mask", async () => {
+  const references = Array.from({ length: 16 }, () => tinyPng);
+  let call;
+  await generateImage({
+    settings, operation: "edit",
+    request: { model: "gpt-image-2.5-sunburst", prompt: "preserve the subject", reference_images: references, mask: tinyPng, input_fidelity: "high", size: "1024x1024", quality: "max", output_format: "png" },
+    fetchImpl: async (url, init = {}) => {
+      if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-sunburst" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      call = { url: String(url), init };
+      return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(call.url, "https://gateway.example/v1/images/edits");
+  assert.equal(call.init.headers["content-type"], undefined);
+  assert.equal(call.init.body.getAll("image[]").length, 16);
+  assert.equal(call.init.body.get("model"), "gpt-image-2.5-sunburst");
+  assert.equal(call.init.body.get("mask") instanceof Blob, true);
+  assert.equal(call.init.body.get("input_fidelity"), "high");
+  assert.equal(call.init.body.get("quality"), "max");
+});
+
+test("uses the singular multipart image field for one GPT Image 2.5 reference", async () => {
+  let form;
+  await generateImage({
+    settings, operation: "edit",
+    request: { model: "gpt-image-2.5-flare", prompt: "edit", reference_images: [tinyPng] },
+    fetchImpl: async (url, init = {}) => {
+      if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-flare" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      form = init.body;
+      return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(form.getAll("image").length, 1);
+  assert.equal(form.getAll("image[]").length, 0);
+});
+
+test("returns model_unavailable before calling a hidden GPT Image 2.5 route", async () => {
+  let calls = 0;
+  await assert.rejects(() => generateImage({
+    settings, request: { model: "gpt-image-2.5-flare", prompt: "x" },
+    fetchImpl: async () => { calls += 1; return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }); },
+  }), (error) => error.code === "model_unavailable" && error.statusCode === 503);
+  assert.equal(calls, 1);
 });
 
 test("maps Gemini generation controls to NewAPI Images fields", async () => {
@@ -56,6 +157,7 @@ test("validates each model's n and reference-image limits", () => {
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2", prompt: "x", reference_images: [tinyPng, tinyPng] }, "edit"), /at most 1/);
   assert.doesNotThrow(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "x", reference_images: [tinyPng, tinyPng, tinyPng, tinyPng] }, "edit"));
   assert.throws(() => normalizeImageRequest({ model: "gemini-3.1-flash-image", prompt: "x", reference_images: [tinyPng, tinyPng] }, "edit"), /at most 1/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "x", quality: "max" }), /only for GPT Image 2.5/);
 });
 
 test("routes gpt-image-2 reference editing through images/generations image_urls", async () => {

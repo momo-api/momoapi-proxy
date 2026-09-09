@@ -1,8 +1,10 @@
 import { lookup } from "node:dns/promises";
 
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
-const IMAGE_MODELS = new Set(["gpt-image-2", "gpt-image-2-momoapi", "gemini-3.1-flash-image"]);
 const ASPECT_RATIOS = ["1:1", "3:2", "2:3", "16:9", "9:16"];
+const GPT_IMAGE_25_MODELS = new Set(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
+const GPT_IMAGE_25_QUALITY = ["auto", "low", "medium", "high", "xhigh", "max"];
+const OUTPUT_FORMATS = ["png", "jpeg", "webp"];
 
 const MODEL_RULES = {
   "gpt-image-2": {
@@ -20,33 +22,57 @@ const MODEL_RULES = {
     aspectRatios: ASPECT_RATIOS, resolutions: ["1k", "2k", "4k"],
     generateTransport: "images-generations", editTransport: "chat-completions-multimodal",
   },
+  "gpt-image-2.5-sunburst": {
+    maxN: 10, maxReferenceImages: 16, operations: ["generate", "edit"],
+    generateTransport: "images-generations", editTransport: "images-edits-multipart",
+    nativeControls: true, requiresCatalog: true, maskEdits: true,
+  },
+  "gpt-image-2.5-flare": {
+    maxN: 10, maxReferenceImages: 16, operations: ["generate", "edit"],
+    generateTransport: "images-generations", editTransport: "images-edits-multipart",
+    nativeControls: true, requiresCatalog: true, maskEdits: true,
+  },
 };
+const IMAGE_MODELS = new Set(Object.keys(MODEL_RULES));
 
 function capability(model, displayName) {
   const rules = MODEL_RULES[model];
+  const nativeParameters = [
+    "prompt", "n", "size", "quality", "reference_images", "mask", "input_fidelity",
+    "output_format", "output_compression", "background", "moderation", "stream", "partial_images",
+  ];
   return {
     id: model,
     display_name: displayName,
     operations: rules.operations,
-    parameters: ["prompt", "n", "aspect_ratio", "resolution", "reference_images"],
+    parameters: rules.nativeControls ? nativeParameters : ["prompt", "n", "aspect_ratio", "resolution", "reference_images"],
     transports: { generate: rules.generateTransport, edit: rules.editTransport },
     limits: {
       max_n: rules.maxN,
       max_reference_images: rules.maxReferenceImages,
-      aspect_ratios: rules.aspectRatios,
-      resolutions: rules.resolutions,
+      ...(rules.aspectRatios ? { aspect_ratios: rules.aspectRatios } : {}),
+      ...(rules.resolutions ? { resolutions: rules.resolutions } : {}),
+      ...(rules.nativeControls ? {
+        sizes: { arbitrary: true, multiple_of: 16, aspect_ratio_range: "1:3 to 3:1", max_edge: 3840, min_pixels: 655360, max_pixels: 8294400 },
+        qualities: GPT_IMAGE_25_QUALITY, output_formats: OUTPUT_FORMATS, partial_images: { min: 0, max: 3 },
+      } : {}),
       max_reference_bytes_each: MAX_REFERENCE_BYTES,
     },
-    mask_edits: false,
+    mask_edits: Boolean(rules.maskEdits),
+    available: !rules.requiresCatalog,
+    availability: rules.requiresCatalog ? "requires_upstream_model_catalog" : "verified",
+    protocol_status: rules.requiresCatalog ? "implemented_not_live_verified" : "verified",
   };
 }
 
 export const IMAGE_CAPABILITIES = {
-  version: 2,
+  version: 3,
   models: [
     capability("gpt-image-2", "GPT Image 2"),
     capability("gpt-image-2-momoapi", "GPT Image 2 MOMO"),
     capability("gemini-3.1-flash-image", "Gemini 3.1 Flash Image"),
+    capability("gpt-image-2.5-sunburst", "GPT Image 2.5 Sunburst"),
+    capability("gpt-image-2.5-flare", "GPT Image 2.5 Flare"),
   ],
   defaults: { model: "gpt-image-2-momoapi", n: 1, aspect_ratio: "1:1", resolution: "1k" },
   notes: {
@@ -57,8 +83,37 @@ export const IMAGE_CAPABILITIES = {
     gpt_resolution: "1k/2k/4k map to low/medium/high quality hints; they are not guaranteed output pixel dimensions.",
     gemini_resolution: "1k/2k/4k are sent as 1K/2K/4K image_size controls.",
     mask_edits: "Not exposed until the public route is verified end to end.",
+    gpt_image_2_5: "Sunburst and Flare are advertised to tools only after the authenticated MOMO model catalog reports them.",
   },
 };
+
+function catalogModelIds(payload) {
+  const rows = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload?.models) ? payload.models : []);
+  return new Set(rows.map((item) => typeof item === "string" ? item : item?.id).filter((id) => typeof id === "string"));
+}
+
+export async function resolveImageCapabilities({ settings, fetchImpl = fetch, signal } = {}) {
+  const capability = structuredClone(IMAGE_CAPABILITIES);
+  const gated = capability.models.filter((model) => MODEL_RULES[model.id]?.requiresCatalog);
+  if (!settings || gated.length === 0) return capability;
+  try {
+    const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
+    const response = await fetchImpl(endpoint + "/v1/models", {
+      headers: { authorization: "Bearer " + settings.apiKey },
+      signal: imageSignal(signal, 15000),
+    });
+    if (!response.ok) throw new Error("model catalog returned HTTP " + response.status);
+    const ids = catalogModelIds(await response.json());
+    for (const model of gated) {
+      model.available = ids.has(model.id);
+      model.availability = model.available ? "upstream_catalog" : "not_in_upstream_catalog";
+    }
+    capability.catalog_status = "available";
+  } catch {
+    capability.catalog_status = "unavailable";
+  }
+  return capability;
+}
 
 function fail(message, statusCode = 400, code = "invalid_request_error") {
   const error = new Error(message);
@@ -92,6 +147,28 @@ function gptQualityFrom(resolution) {
   return "medium";
 }
 
+function nativeSize(value) {
+  const size = String(value || "auto").toLowerCase();
+  if (size === "auto") return size;
+  const match = /^(\d+)x(\d+)$/.exec(size);
+  if (!match) throw fail("size must be auto or WIDTHxHEIGHT.");
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  const pixels = width * height;
+  if (width % 16 !== 0 || height % 16 !== 0) throw fail("size width and height must be multiples of 16.");
+  if (width > 3840 || height > 3840) throw fail("size edges must not exceed 3840 pixels.");
+  if (Math.max(width, height) / Math.min(width, height) > 3) throw fail("size aspect ratio must be between 1:3 and 3:1.");
+  if (pixels < 655360 || pixels > 8294400) throw fail("size total pixels must be between 655360 and 8294400.");
+  return `${width}x${height}`;
+}
+
+function optionalEnum(input, key, values, fallback) {
+  const value = input[key] === undefined ? fallback : String(input[key]).toLowerCase();
+  if (value === undefined) return undefined;
+  if (!values.includes(value)) throw fail(`Unsupported ${key}: ${input[key]}`);
+  return value;
+}
+
 export function normalizeImageRequest(input, operation = "generate") {
   if (!input || typeof input !== "object") throw fail("Image request must be a JSON object.");
   const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : IMAGE_CAPABILITIES.defaults.model;
@@ -106,13 +183,46 @@ export function normalizeImageRequest(input, operation = "generate") {
   const n = input.n === undefined ? 1 : Number(input.n);
   if (!Number.isInteger(n) || n < 1 || n > rules.maxN) throw fail("n must be an integer between 1 and " + rules.maxN + " for " + model + ".");
 
-  const aspectRatio = input.aspect_ratio || input.aspectRatio || IMAGE_CAPABILITIES.defaults.aspect_ratio;
-  if (!rules.aspectRatios.includes(aspectRatio)) throw fail("Unsupported aspect_ratio for " + model + ": " + aspectRatio);
-
-  const requestedResolution = input.resolution || input.imageSize || IMAGE_CAPABILITIES.defaults.resolution;
-  const aliases = { low: "1k", medium: "2k", high: "4k", "1K": "1k", "2K": "2k", "4K": "4k" };
-  const resolution = aliases[requestedResolution] || String(requestedResolution).toLowerCase();
-  if (!rules.resolutions.includes(resolution)) throw fail("Unsupported resolution for " + model + ": " + requestedResolution);
+  let aspectRatio;
+  let resolution;
+  let nativeControls = {};
+  if (rules.nativeControls) {
+    const legacyAspect = input.aspect_ratio || input.aspectRatio;
+    if (legacyAspect && !ASPECT_RATIOS.includes(legacyAspect)) throw fail("Unsupported aspect_ratio for " + model + ": " + legacyAspect);
+    const requestedSize = input.size ?? (legacyAspect ? gptSizeFrom(legacyAspect) : "auto");
+    const legacyResolution = input.resolution || input.imageSize;
+    const quality = optionalEnum(input, "quality", GPT_IMAGE_25_QUALITY, legacyResolution ? gptQualityFrom(String(legacyResolution).toLowerCase()) : "auto");
+    const outputFormat = optionalEnum(input, "output_format", OUTPUT_FORMATS, "png");
+    const outputCompression = input.output_compression === undefined ? undefined : Number(input.output_compression);
+    if (outputCompression !== undefined && (!Number.isInteger(outputCompression) || outputCompression < 0 || outputCompression > 100)) throw fail("output_compression must be an integer between 0 and 100.");
+    if (outputCompression !== undefined && outputFormat === "png") throw fail("output_compression is supported only for jpeg or webp output.");
+    const background = optionalEnum(input, "background", ["auto", "opaque", "transparent"], "auto");
+    if (background === "transparent" && !["png", "webp"].includes(outputFormat)) throw fail("transparent background requires png or webp output.");
+    const moderation = optionalEnum(input, "moderation", ["auto", "low"], "auto");
+    const inputFidelity = input.input_fidelity === undefined ? undefined : optionalEnum(input, "input_fidelity", ["low", "high"]);
+    if (operation !== "edit" && inputFidelity !== undefined) throw fail("input_fidelity is supported only for image_edit.");
+    const stream = input.stream === undefined ? false : input.stream;
+    if (typeof stream !== "boolean") throw fail("stream must be a boolean.");
+    const partialImages = input.partial_images === undefined ? undefined : Number(input.partial_images);
+    if (partialImages !== undefined && (!Number.isInteger(partialImages) || partialImages < 0 || partialImages > 3)) throw fail("partial_images must be an integer between 0 and 3.");
+    if (partialImages !== undefined && !stream) throw fail("partial_images requires stream=true.");
+    nativeControls = {
+      size: nativeSize(requestedSize), quality, output_format: outputFormat,
+      ...(outputCompression !== undefined ? { output_compression: outputCompression } : {}),
+      background, moderation, ...(inputFidelity ? { input_fidelity: inputFidelity } : {}), stream,
+      ...(partialImages !== undefined ? { partial_images: partialImages } : {}),
+    };
+  } else {
+    const nativeOnly = ["size", "quality", "output_format", "output_compression", "background", "moderation", "input_fidelity", "stream", "partial_images"];
+    const unsupported = nativeOnly.find((key) => input[key] !== undefined);
+    if (unsupported) throw fail(unsupported + " is supported only for GPT Image 2.5 models.");
+    aspectRatio = input.aspect_ratio || input.aspectRatio || IMAGE_CAPABILITIES.defaults.aspect_ratio;
+    if (!rules.aspectRatios.includes(aspectRatio)) throw fail("Unsupported aspect_ratio for " + model + ": " + aspectRatio);
+    const requestedResolution = input.resolution || input.imageSize || IMAGE_CAPABILITIES.defaults.resolution;
+    const aliases = { low: "1k", medium: "2k", high: "4k", "1K": "1k", "2K": "2k", "4K": "4k" };
+    resolution = aliases[requestedResolution] || String(requestedResolution).toLowerCase();
+    if (!rules.resolutions.includes(resolution)) throw fail("Unsupported resolution for " + model + ": " + requestedResolution);
+  }
 
   const references = input.reference_images || input.referenceImages || [];
   if (!Array.isArray(references)) throw fail("reference_images must be an array.");
@@ -124,7 +234,11 @@ export function normalizeImageRequest(input, operation = "generate") {
       throw fail("reference_images must contain image data URLs or HTTPS URLs.");
     }
   }
-  return { model, prompt, n, aspect_ratio: aspectRatio, resolution, reference_images: references, operation };
+  const mask = input.mask || input.mask_image || input.maskImage;
+  if (mask !== undefined && operation !== "edit") throw fail("mask is supported only for image_edit.");
+  if (mask !== undefined && !rules.maskEdits) throw fail("mask is not supported for " + model + ".");
+  if (mask !== undefined && (typeof mask !== "string" || (!asDataUrl(mask) && !/^https?:\/\//i.test(mask)))) throw fail("mask must be an image data URL or HTTPS URL.");
+  return { model, prompt, n, aspect_ratio: aspectRatio, resolution, reference_images: references, operation, ...nativeControls, ...(mask ? { mask } : {}) };
 }
 
 function decodeDataUrl(value) {
@@ -228,11 +342,48 @@ async function resolveReferenceDataUrls(request, fetchImpl, signal, lookupImpl) 
   return dataUrls;
 }
 
+function nativeImageBody(request) {
+  return {
+    model: request.model, prompt: request.prompt, n: request.n, size: request.size, quality: request.quality,
+    output_format: request.output_format, background: request.background, moderation: request.moderation,
+    stream: request.stream,
+    ...(request.output_compression !== undefined ? { output_compression: request.output_compression } : {}),
+    ...(request.partial_images !== undefined ? { partial_images: request.partial_images } : {}),
+  };
+}
+
 function generationBody(request) {
   if (request.model === "gemini-3.1-flash-image") {
     return { model: request.model, prompt: request.prompt, n: request.n, size: request.aspect_ratio, quality: request.resolution.toUpperCase() };
   }
+  if (GPT_IMAGE_25_MODELS.has(request.model)) return nativeImageBody(request);
   return { model: request.model, prompt: request.prompt, n: request.n, size: gptSizeFrom(request.aspect_ratio), quality: gptQualityFrom(request.resolution) };
+}
+
+function dataUrlFile(value, name) {
+  const decoded = decodeDataUrl(value);
+  if (!decoded) throw fail(name + " must contain valid base64 image data.");
+  const bytes = Buffer.from(decoded.dataUrl.slice(decoded.dataUrl.indexOf(",") + 1), "base64");
+  const subtype = decoded.mimeType.split("/")[1]?.replace(/[^A-Za-z0-9.+-]/g, "") || "png";
+  return { blob: new Blob([bytes], { type: decoded.mimeType }), filename: `${name}.${subtype}` };
+}
+
+function nativeEditForm(request, references, maskDataUrl) {
+  const form = new FormData();
+  const fields = nativeImageBody(request);
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) form.append(key, String(value));
+  }
+  if (request.input_fidelity) form.append("input_fidelity", request.input_fidelity);
+  references.forEach((reference, index) => {
+    const file = dataUrlFile(reference, `reference-${index + 1}`);
+    form.append(references.length === 1 ? "image" : "image[]", file.blob, file.filename);
+  });
+  if (maskDataUrl) {
+    const file = dataUrlFile(maskDataUrl, "mask");
+    form.append("mask", file.blob, file.filename);
+  }
+  return form;
 }
 
 function multimodalContent(prompt, references) {
@@ -285,7 +436,7 @@ function normalizeSsePayload(text) {
       collectText(choice?.message?.content, deltas);
     }
   }
-  return { content: deltas.join("") };
+  return { events, content: deltas.join("") };
 }
 
 export function extractImageResults(payload) {
@@ -353,25 +504,48 @@ async function readUpstreamPayload(upstream) {
 
 export async function generateImage({ settings, request, fetchImpl = fetch, lookupImpl = lookup, signal, operation = "generate" }) {
   const normalized = normalizeImageRequest(request, operation);
+  if (MODEL_RULES[normalized.model]?.requiresCatalog) {
+    const capabilities = await resolveImageCapabilities({ settings, fetchImpl, signal });
+    const model = capabilities.models.find((item) => item.id === normalized.model);
+    if (!model?.available) {
+      throw fail(
+        "Image model " + normalized.model + " is not currently available in the authenticated MOMO model catalog.",
+        503,
+        "model_unavailable",
+      );
+    }
+  }
   const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
   let path = "/v1/images/generations";
   let body;
+  let multipart = false;
   if (operation === "generate") body = generationBody(normalized);
   else {
     const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl);
-    if (normalized.model === "gpt-image-2") body = { ...generationBody(normalized), image_urls: references };
+    if (GPT_IMAGE_25_MODELS.has(normalized.model)) {
+      path = "/v1/images/edits";
+      const maskDataUrl = normalized.mask
+        ? (await resolveReferenceDataUrls({ reference_images: [normalized.mask] }, fetchImpl, signal, lookupImpl))[0]
+        : null;
+      body = nativeEditForm(normalized, references, maskDataUrl);
+      multipart = true;
+    }
+    else if (normalized.model === "gpt-image-2") body = { ...generationBody(normalized), image_urls: references };
     else if (normalized.model === "gpt-image-2-momoapi") { path = "/v1/chat/completions"; body = gptMomoEditBody(normalized, references); }
     else { path = "/v1/chat/completions"; body = geminiEditBody(normalized, references); }
   }
   const upstream = await fetchImpl(endpoint + path, {
     method: "POST",
-    headers: { authorization: "Bearer " + settings.apiKey, "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { authorization: "Bearer " + settings.apiKey, ...(!multipart ? { "content-type": "application/json" } : {}) },
+    body: multipart ? body : JSON.stringify(body),
     signal: imageSignal(signal),
   });
   const payload = await readUpstreamPayload(upstream);
   if (!upstream.ok) throw fail(payload?.error?.message || "Image upstream returned HTTP " + upstream.status, upstream.status >= 400 && upstream.status < 500 ? upstream.status : 502, "image_upstream_error");
-  return materializeImages(extractImageResults(payload), fetchImpl, signal, lookupImpl);
+  const result = await materializeImages(extractImageResults(payload), fetchImpl, signal, lookupImpl);
+  if (!GPT_IMAGE_25_MODELS.has(normalized.model)) return result;
+  const mimeType = normalized.output_format === "jpeg" ? "image/jpeg" : "image/" + normalized.output_format;
+  return { ...result, images: result.images.map((image) => image.b64_json && !image.mime_type ? { ...image, mime_type: mimeType } : image) };
 }
 
 export async function getImageTask({ settings, taskId, fetchImpl = fetch, lookupImpl = lookup, signal }) {

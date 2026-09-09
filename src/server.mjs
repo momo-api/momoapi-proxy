@@ -11,7 +11,7 @@ import {
 import { ResponseStreamEmitter, completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
 import { getCurrentVersion } from "./updater.mjs";
-import { IMAGE_CAPABILITIES, generateImage, getImageTask } from "./image-service.mjs";
+import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -1930,7 +1930,8 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
           return json(response, 403, { error: { message: "Forbidden: image endpoints require an authenticated loopback client.", type: "authentication_error" } });
         }
         if (request.method === "GET" && pathname === "/internal/images/capabilities") {
-          return json(response, 200, IMAGE_CAPABILITIES);
+          const capabilities = await resolveImageCapabilities({ settings, fetchImpl, signal: abortController.signal });
+          return json(response, 200, capabilities);
         }
         if (request.method === "POST" && (pathname === "/internal/images/generate" || pathname === "/internal/images/edit")) {
           const payload = await bodyOf(request, settings);
@@ -2014,6 +2015,12 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       if (abortController.signal.aborted) return;
       const rawUrl = request.url || "/";
       const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+
+      if (pathname.startsWith("/internal/images") && Number.isInteger(error.statusCode)) {
+        const status = error.statusCode;
+        logRequest({ method: request.method, url: pathname, status, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+        return json(response, status, { error: { message: error.message, type: error.code || "image_error", code: error.code || "image_error" } });
+      }
 
       if (error.statusCode === 413) {
         logRequest({ method: request.method, url: pathname, status: 413, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
