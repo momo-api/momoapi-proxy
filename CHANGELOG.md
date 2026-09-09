@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0 - 2026-09-09
+
+- Added the MOMO Image Codex plugin with authenticated loopback tools for image generation, editing, and asynchronous task status.
+- Added verified routing for `gpt-image-2`, `gpt-image-2-momoapi`, and `gemini-3.1-flash-image`.
+- Added catalog-gated GPT Image 2.5 Sunburst and Flare protocol adapters for generation, multipart edits, up to 16 references, masks, native size and quality controls, output formatting, and partial-image streaming.
+- Kept unavailable GPT Image 2.5 models out of the MCP enum and return `model_unavailable` until MOMO exposes a usable channel.
+- Added a Git marketplace manifest so Codex can install `momo-image` from `momo-api/momoapi-proxy`.
+
 ## 0.10.5 - 2026-09-08
 
 - Normalized Qwen requests to a single leading system message before forwarding them upstream.

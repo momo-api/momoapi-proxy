@@ -88,6 +88,17 @@ codex
 
 The setup command backs up `~/.codex/config.toml` and `~/.codex/auth.json`, writes the local provider, and generates `~/.codex/model-catalogs/momo-codex-switch.json` from the models returned by MOMO.
 
+### MOMO Image plugin
+
+After installing and configuring MOMO API Proxy, add the repository marketplace and install the image plugin:
+
+```powershell
+codex plugin marketplace add momo-api/momoapi-proxy --ref main
+codex plugin add momo-image@momo-api
+```
+
+Start a new Codex conversation after installation. The plugin uses the MOMO key already stored by the local proxy; it does not ask users to paste the key again. GPT Image 2.5 Sunburst and Flare remain hidden until the authenticated MOMO model catalog reports an available channel.
+
 Useful commands:
 
 ```powershell
@@ -105,7 +116,7 @@ node .\scripts\codex-cli-smoke.mjs --claude
 ## Deliberate limits
 
 - It is for Codex CLI first. Codex Desktop needs a separate acceptance pass per release.
-- It supports standard function tools. Codex-hosted services such as `codex-auto-review`, browser/computer use, image/video generation, and every third-party MCP shape are not marked universally compatible.
+- It supports standard function tools. Image generation and editing are available through the optional MOMO Image plugin; Codex-hosted services such as `codex-auto-review`, browser/computer use, video generation, and every third-party MCP shape are not marked universally compatible.
 - It does not currently implement OpenCodex's complete `/v1/responses/compact` subsystem; compatibility claims are limited to the paths covered by this repository's tests.
 - The installer is a developer command today; a signed one-line PowerShell/Bash installer and background process manager belong to the release work.
 

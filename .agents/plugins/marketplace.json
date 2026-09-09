@@ -1,0 +1,20 @@
+{
+  "name": "momo-api",
+  "interface": {
+    "displayName": "MOMO API"
+  },
+  "plugins": [
+    {
+      "name": "momo-image",
+      "source": {
+        "source": "local",
+        "path": "./plugins/momo-image"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
