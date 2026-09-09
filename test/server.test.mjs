@@ -790,7 +790,7 @@ test("normalizes complex multi-turn history stripping proprietary thought blocks
   assert.deepEqual(capturedBody.reasoning, { effort: "xhigh" });
 });
 
-test("emits formatted SSE error events and completes stream gracefully on upstream failure", async () => {
+test("preserves upstream status and emits response.failed without a fake completion", async () => {
   const fakeFetch = async () => {
     return new Response(JSON.stringify({ error: { message: "Quota exceeded" } }), {
       status: 429,
@@ -804,12 +804,13 @@ test("emits formatted SSE error events and completes stream gracefully on upstre
       headers,
       body: JSON.stringify({ model: "gpt-5.6-sol", input: ["hi"] }),
     });
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 429);
     const body = await response.text();
     assert.match(body, /response.created/);
     assert.match(body, /Quota exceeded/);
     assert.match(body, /event: error/);
-    assert.match(body, /response.completed/);
+    assert.match(body, /response.failed/);
+    assert.doesNotMatch(body, /response.completed/);
   });
 });
 

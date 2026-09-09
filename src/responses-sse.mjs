@@ -223,6 +223,19 @@ export function completed(responseId, model, output = []) {
   return event("response.completed", { response: { id: responseId, object: "response", status: "completed", model, output } });
 }
 
+export function failed(responseId, model, message, code = "server_error") {
+  return event("response.failed", {
+    response: {
+      id: responseId,
+      object: "response",
+      status: "failed",
+      model,
+      output: [],
+      error: { type: "error", code, message },
+    },
+  });
+}
+
 export function sseError(message, code = "server_error") {
   return event("error", { error: { type: "error", code, message } });
 }
