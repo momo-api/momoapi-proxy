@@ -12,6 +12,8 @@ import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, parseS
 import { logRequest } from "./logger.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
+import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareContextManagedPayload } from "./compaction.mjs";
+import { preparePreviousResponseReplay, rememberResponseState } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
@@ -46,6 +48,7 @@ const CLAUDE_REASONING_BUDGETS = {
   ultra: 32768,
 };
 const MAX_CACHED_CALLS = 512;
+const COMPACT_RESPONSE_MAX_BYTES = 32 * 1024 * 1024;
 export const metricsState = {
   startedAt: Date.now(),
   resetTime: new Date().toISOString(),
@@ -67,6 +70,11 @@ export const metricsState = {
   imageDedupHits: 0,
   historicalImagesRemoved: 0,
   maxSerializedBodyBytes: 0,
+  compactRequests: 0,
+  compactFailures: 0,
+  activeCompactions: 0,
+  replayDedupHits: 0,
+  replayBytesSkipped: 0,
 };
 
 export function recordTtfb(ms) {
@@ -102,6 +110,11 @@ export function resetMetrics() {
   metricsState.imageDedupHits = 0;
   metricsState.historicalImagesRemoved = 0;
   metricsState.maxSerializedBodyBytes = 0;
+  metricsState.compactRequests = 0;
+  metricsState.compactFailures = 0;
+  metricsState.activeCompactions = 0;
+  metricsState.replayDedupHits = 0;
+  metricsState.replayBytesSkipped = 0;
 }
 
 function asArray(value) {
@@ -980,6 +993,202 @@ function writeResponsesFailure(response, model, status, message, code = `http_${
   response.end();
 }
 
+function collectResponsesState(response, replay) {
+  if (!replay?.seed) return null;
+  const state = { responseId: null, output: [], terminal: false };
+  response.momoResponsesState = state;
+  return state;
+}
+
+function observeResponsesEvent(state, event) {
+  if (!state || !event || typeof event !== "object") return;
+  if (event.type === "response.created" && typeof event.response?.id === "string") {
+    state.responseId = event.response.id;
+  }
+  if (event.type === "response.output_item.done" && event.item && typeof event.item === "object") {
+    state.output.push(event.item);
+  }
+  if ((event.type === "response.completed" || event.type === "response.incomplete") && event.response) {
+    state.terminal = true;
+    if (typeof event.response.id === "string") state.responseId = event.response.id;
+    if (state.output.length === 0 && Array.isArray(event.response.output)) state.output.push(...event.response.output);
+  }
+}
+
+function observeResponsesBlock(state, block) {
+  if (!state || typeof block !== "string") return;
+  const data = block.split(/\r?\n/).find((line) => line.trim().startsWith("data:"))?.trim().slice(5).trim();
+  if (!data || data === "[DONE]") return;
+  try { observeResponsesEvent(state, JSON.parse(data)); } catch {}
+}
+
+function finalizeResponsesState(state, replay) {
+  if (!state?.terminal || !replay?.seed || !state.responseId || state.output.length === 0) return;
+  rememberResponseState(state.responseId, replay.seed, state.output);
+}
+
+function compactJson(response, status, body, headers = {}) {
+  return json(response, status, body, headers);
+}
+
+function shouldUseLocalCompact(status, message = "") {
+  if (status === 413) return true;
+  if (status === 405 || status === 501) return true;
+  if (status === 404) return !/\bmodel\b/i.test(String(message));
+  return status === 400 && /(?:compact|endpoint|route).*(?:unsupported|not supported|not found|unavailable|unknown)/i.test(String(message));
+}
+
+async function readCompactResponseText(upstream) {
+  if (!upstream.body) return "";
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of upstream.body) {
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : Buffer.from(chunk);
+    total += buffer.length;
+    if (total > COMPACT_RESPONSE_MAX_BYTES) {
+      try { await upstream.body.cancel?.(); } catch {}
+      const error = new Error("Compact response exceeded the 32 MiB safety limit.");
+      error.statusCode = 502;
+      error.code = "compact_response_too_large";
+      throw error;
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, total).toString("utf8");
+}
+
+function parseCompactResponseText(text) {
+  let payload;
+  try { payload = JSON.parse(text); } catch {
+    const error = new Error("Compact endpoint returned invalid JSON.");
+    error.statusCode = 502;
+    error.code = "invalid_compact_response";
+    throw error;
+  }
+  if (!payload || payload.object !== "response.compaction" || !Array.isArray(payload.output)) {
+    const error = new Error("Compact endpoint returned an invalid response.compaction object.");
+    error.statusCode = 502;
+    error.code = "invalid_compact_response";
+    throw error;
+  }
+  return payload;
+}
+
+function encodeRecoverableCompaction(model, input, output) {
+  try {
+    return encodeLocalCompaction(output);
+  } catch (error) {
+    if (error?.code !== "local_compaction_envelope_too_large") throw error;
+    return encodeLocalCompaction(buildLocalCompactResponse(model, input).output);
+  }
+}
+
+async function forwardCompact(request, response, settings, payload, fetchImpl, signal, compactLocks) {
+  const key = compactLockKey(request, payload);
+  if (key && compactLocks.has(key)) {
+    return compactJson(response, 409, { error: { message: "A compaction is already active for this session.", type: "conflict_error", code: "compaction_in_progress" } }, { "retry-after": "1" });
+  }
+
+  if (key) compactLocks.add(key);
+  metricsState.compactRequests += 1;
+  metricsState.activeCompactions += 1;
+  try {
+    const prepared = prepareCompactPayload(payload, settings);
+    response.momoCompactTrace = prepared.trace;
+    const upstream = await fetchImpl(settings.endpoint + "/v1/responses/compact", {
+      method: "POST",
+      headers: upstreamHeaders(settings),
+      body: JSON.stringify(prepared.payload),
+      signal,
+    });
+
+    if (upstream.ok) {
+      const text = await readCompactResponseText(upstream);
+      return compactJson(response, upstream.status, parseCompactResponseText(text));
+    }
+
+    const message = await upstreamErrorMessage(upstream);
+    if (shouldUseLocalCompact(upstream.status, message)) {
+      const checkpoint = buildLocalCompactResponse(payload.model, prepared.payload.input);
+      response.momoCompactTrace = { ...prepared.trace, policyAction: "local_compact_checkpoint" };
+      return compactJson(response, 200, checkpoint);
+    }
+
+    metricsState.compactFailures += 1;
+    return compactJson(response, upstream.status, { error: { message, type: "compact_error", code: `http_${upstream.status}` } });
+  } catch (error) {
+    if (error?.code === "compact_budget_exceeded") {
+      const checkpoint = buildLocalCompactResponse(payload.model, error.localCheckpointInput || payload.input);
+      response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
+      return compactJson(response, 200, checkpoint);
+    }
+    metricsState.compactFailures += 1;
+    throw error;
+  } finally {
+    metricsState.activeCompactions = Math.max(0, metricsState.activeCompactions - 1);
+    if (key) compactLocks.delete(key);
+  }
+}
+
+async function forwardCompactionTrigger(request, response, settings, payload, fetchImpl, signal, compactLocks) {
+  const compactPayload = { ...payload, input: asArray(payload.input).filter((item) => item?.type !== "compaction_trigger") };
+  const key = compactLockKey(request, compactPayload);
+  if (key && compactLocks.has(key)) {
+    return writeResponsesFailure(response, payload.model, 409, "A compaction is already active for this session.", "compaction_in_progress");
+  }
+  if (key) compactLocks.add(key);
+  metricsState.compactRequests += 1;
+  metricsState.activeCompactions += 1;
+  try {
+    const prepared = prepareCompactPayload(compactPayload, settings);
+    const upstream = await fetchImpl(settings.endpoint + "/v1/responses/compact", {
+      method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify(prepared.payload), signal,
+    });
+    let compacted;
+    if (upstream.ok) {
+      const compactText = await readCompactResponseText(upstream);
+      compacted = parseCompactResponseText(compactText);
+    } else {
+      const message = await upstreamErrorMessage(upstream);
+      if (!shouldUseLocalCompact(upstream.status, message)) {
+        metricsState.compactFailures += 1;
+        return writeResponsesFailure(response, payload.model, upstream.status, message);
+      }
+      compacted = buildLocalCompactResponse(payload.model, prepared.payload.input);
+    }
+    const output = Array.isArray(compacted?.output) ? compacted.output : [];
+    const encryptedContent = encodeRecoverableCompaction(payload.model, prepared.payload.input, output);
+    initSseResponse(response);
+    const emitter = new ResponseStreamEmitter(response, payload.model);
+    emitter.start();
+    const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
+    const index = emitter.outputIndex++;
+    emitter.outputItems.push(item);
+    response.write(`event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item })}\n\n`);
+    emitter.complete();
+  } catch (error) {
+    if (error?.code === "compact_budget_exceeded") {
+      const checkpoint = buildLocalCompactResponse(payload.model, error.localCheckpointInput || compactPayload.input);
+      const output = Array.isArray(checkpoint.output) ? checkpoint.output : [];
+      const encryptedContent = encodeRecoverableCompaction(payload.model, compactPayload.input, output);
+      initSseResponse(response);
+      const emitter = new ResponseStreamEmitter(response, payload.model);
+      emitter.start();
+      const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
+      const index = emitter.outputIndex++;
+      emitter.outputItems.push(item);
+      response.write(`event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item })}\n\n`);
+      emitter.complete();
+      return;
+    }
+    metricsState.compactFailures += 1;
+    throw error;
+  } finally {
+    metricsState.activeCompactions = Math.max(0, metricsState.activeCompactions - 1);
+    if (key) compactLocks.delete(key);
+  }
+}
+
 export function normalizeResponsesPayload(payload) {
   const normalized = { ...payload };
   const rawInput = Array.isArray(normalized.input) ? normalized.input : [];
@@ -1001,6 +1210,21 @@ export function normalizeResponsesPayload(payload) {
       continue;
     }
     if (typeof item !== "object") continue;
+
+    if (item.type === "compaction" && typeof item.encrypted_content === "string") {
+      const recovered = decodeLocalCompaction(item.encrypted_content);
+      if (recovered) {
+        cleanInput.push(...recovered);
+      } else {
+        cleanInput.push(item);
+      }
+      continue;
+    }
+
+    if (item.type === "compaction_trigger") {
+      cleanInput.push(item);
+      continue;
+    }
 
     if (item.type === "additional_tools") {
       if (Array.isArray(item.tools)) {
@@ -1483,7 +1707,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
   emitter.complete();
 }
 
-async function forwardResponses(request, response, settings, payload, calls, fetchImpl, signal) {
+async function forwardResponses(request, response, settings, payload, calls, fetchImpl, signal, replay = null) {
   // 1. Lower tool_search to standard function
   const { body: searchBody, names: searchNames } = rewriteRoutedToolSearchForUpstream(payload);
   // 2. Lower custom tools (exec, etc.) to standard functions
@@ -1492,7 +1716,11 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   const { body: nsBody, aliases: nsAliases } = rewriteRoutedNamespaceToolsForUpstream(customBody);
   // 4. Normalize schema for upstream OpenAI Responses endpoint
   const cleanPayload = normalizeResponsesPayload(nsBody);
-  const prepared = prepareMediaPayload({ ...cleanPayload, stream: true }, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
+  const managedPayload = Array.isArray(cleanPayload.context_management)
+    && cleanPayload.context_management.some((item) => item?.type === "compaction")
+    ? prepareContextManagedPayload(cleanPayload)
+    : cleanPayload;
+  const prepared = prepareMediaPayload({ ...managedPayload, stream: true }, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
   const outboundBody = serializeOutboundBody(prepared.payload, settings, prepared.trace);
   // Attach trace for network-error logging, but defer metric finalization until
   // a possible Responses -> Chat fallback has passed its own final admission.
@@ -1513,6 +1741,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   recordContextTrace(response, prepared.trace, true);
   initSseResponse(response);
   if (!upstream.body) return response.end();
+  const responseState = collectResponsesState(response, replay);
 
   const allCustomNames = new Set(["exec", "apply_patch", ...customNames, ...searchNames]);
   const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames);
@@ -1584,6 +1813,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
           }
           const outputBlocks = customToolBlockRewrite(transformedBlock);
           for (const outBlock of outputBlocks) {
+            observeResponsesBlock(responseState, outBlock);
             response.write(outBlock + "\n\n");
           }
           continue;
@@ -1593,6 +1823,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
       if (!hasDsml) {
         const outputBlocks = customToolBlockRewrite(block);
         for (const outBlock of outputBlocks) {
+          observeResponsesBlock(responseState, outBlock);
           response.write(outBlock + "\n\n");
         }
       }
@@ -1601,9 +1832,11 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   if (buffer.trim() && !hasDsml) {
     const outputBlocks = customToolBlockRewrite(buffer);
     for (const outBlock of outputBlocks) {
+      observeResponsesBlock(responseState, outBlock);
       response.write(outBlock);
     }
   }
+  finalizeResponsesState(responseState, replay);
   response.end();
 }
 
@@ -1752,6 +1985,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
   const activeSockets = new Set();
   const activeSseEmitters = new Set();
   const activeAbortControllers = new Set();
+  const compactLocks = new Set();
   let serverInstance = null;
   let shutdownLifecycle = null;
 
@@ -1974,6 +2208,11 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             imageDedupHits: metricsState.imageDedupHits,
             historicalImagesRemoved: metricsState.historicalImagesRemoved,
             maxSerializedBodyBytes: metricsState.maxSerializedBodyBytes,
+            compactRequests: metricsState.compactRequests,
+            compactFailures: metricsState.compactFailures,
+            activeCompactions: metricsState.activeCompactions,
+            replayDedupHits: metricsState.replayDedupHits,
+            replayBytesSkipped: metricsState.replayBytesSkipped,
           },
           ttfbMs: {
             p50: calculatePercentile(metricsState.ttfbHistory, 0.5),
@@ -2054,6 +2293,18 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       }
 
       // 8. responses
+      if (request.method === "POST" && (pathname === "/v1/responses/compact" || pathname === "/responses/compact")) {
+        const payload = await bodyOf(request, settings);
+        requestedModel = payload.model;
+        if (!payload.model) {
+          return json(response, 400, { error: { message: "model is required", type: "invalid_request_error" } });
+        }
+        await forwardCompact(request, response, settings, payload, fetchImpl, abortController.signal, compactLocks);
+        const compactTrace = response.momoCompactTrace;
+        logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp, requestBytes: request.momoRequestBodyBytes, outboundBytes: compactTrace?.compactBytes, policyAction: compactTrace?.policyAction });
+        return;
+      }
+
       if (request.method === "POST" && (pathname === "/v1/responses" || pathname === "/responses")) {
         const payload = await bodyOf(request, settings);
         requestedModel = payload.model;
@@ -2063,7 +2314,14 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
           return json(response, 400, { error: { message: "model is required", type: "invalid_request_error" } });
         }
         const { targetModel, protocol } = resolveTargetModel(payload.model);
-        const routedPayload = { ...payload, model: targetModel };
+        const replay = protocol === "responses"
+          ? preparePreviousResponseReplay({ ...payload, model: targetModel })
+          : { payload: { ...payload, model: targetModel }, seed: null, deduplicated: false, skippedBytes: 0 };
+        if (replay.deduplicated) {
+          metricsState.replayDedupHits += 1;
+          metricsState.replayBytesSkipped += replay.skippedBytes;
+        }
+        const routedPayload = replay.payload;
 
         isSse = true;
         metricsState.activeSse++;
@@ -2073,7 +2331,9 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         response.on("close", () => activeSseEmitters.delete(sseHandle));
 
         let handlerPromise;
-        if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal);
+        if (asArray(routedPayload.input).some((item) => item?.type === "compaction_trigger")) {
+          handlerPromise = forwardCompactionTrigger(request, response, settings, routedPayload, fetchImpl, abortController.signal, compactLocks);
+        } else if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal, replay);
         else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else if (protocol === "gemini") handlerPromise = bridgeGemini(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
@@ -2117,6 +2377,12 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       if (error.statusCode === 400) {
         logRequest({ method: request.method, url: pathname, status: 400, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
         return json(response, 400, { error: { message: error.message, type: "invalid_request_error", code: "invalid_json" } });
+      }
+
+      if (Number.isInteger(error.statusCode) && (pathname === "/v1/responses/compact" || pathname === "/responses/compact")) {
+        const status = error.statusCode;
+        logRequest({ method: request.method, url: pathname, model: requestedModel, status, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+        return json(response, status, { error: { message: error.message, type: "compact_error", code: error.code || `http_${status}` } });
       }
 
       logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp, ...contextLogFields(response, request) });
