@@ -33,12 +33,6 @@ function configuredCompactLimit(settings = {}) {
   return Math.min(Math.floor(valid * MIB), MAX_COMPACT_LIMIT_BYTES);
 }
 
-function clone(value) {
-  return typeof structuredClone === "function"
-    ? structuredClone(value)
-    : JSON.parse(JSON.stringify(value));
-}
-
 function inlineMarker(value) {
   if (typeof value !== "string") return null;
   const match = INLINE_DATA_URL.exec(value);
@@ -119,7 +113,9 @@ function markerForHistoricalItem(item) {
 
 /** Prepare a compact request without subjecting it to the normal 18 MiB outbound gate. */
 export function prepareCompactPayload(payload, settings = {}) {
-  const body = clone(payload && typeof payload === "object" ? payload : {});
+  // Request bodies are request-scoped. Mutate this one in place instead of cloning
+  // tens of MiB of Base64 immediately before replacing the historical copies.
+  const body = payload && typeof payload === "object" ? payload : {};
   const input = Array.isArray(body.input) ? body.input : (body.input == null ? [] : [body.input]);
   const boundary = currentTurnStart(input);
   const rewritten = input
@@ -169,7 +165,7 @@ export function prepareCompactPayload(payload, settings = {}) {
 
 /** Lightweight history rewrite for a normal Responses request that asks for server-side compaction. */
 export function prepareContextManagedPayload(payload) {
-  const body = clone(payload && typeof payload === "object" ? payload : {});
+  const body = payload && typeof payload === "object" ? payload : {};
   const input = Array.isArray(body.input) ? body.input : (body.input == null ? [] : [body.input]);
   const boundary = currentTurnStart(input);
   body.input = input.map((item, index) => index < boundary ? compactValue(item) : item);

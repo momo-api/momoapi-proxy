@@ -25,6 +25,7 @@ function canonicalize(value, state, depth = 0) {
     return value;
   }
   if (typeof value === "string") {
+    if (value.length > MAX_FINGERPRINT_BYTES) throw new RangeError("fingerprint size exceeded");
     state.bytes += Buffer.byteLength(value, "utf8") + 2;
     if (state.bytes > MAX_FINGERPRINT_BYTES) throw new RangeError("fingerprint size exceeded");
     return value;

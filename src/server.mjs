@@ -1033,7 +1033,8 @@ function compactJson(response, status, body, headers = {}) {
 
 function shouldUseLocalCompact(status, message = "") {
   if (status === 413) return true;
-  if (status === 404 || status === 405 || status === 501) return true;
+  if (status === 405 || status === 501) return true;
+  if (status === 404) return !/\bmodel\b/i.test(String(message));
   return status === 400 && /(?:compact|endpoint|route).*(?:unsupported|not supported|not found|unavailable|unknown)/i.test(String(message));
 }
 

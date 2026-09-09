@@ -97,6 +97,15 @@ test("compact endpoint returns a recoverable local checkpoint when upstream lack
   });
 });
 
+test("compact preserves a model-not-found 404 instead of fabricating a checkpoint", async () => {
+  const fakeFetch = async () => Response.json({ error: { message: "model gpt-missing not found" } }, { status: 404 });
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-missing", input: [] }) });
+    assert.equal(response.status, 404);
+    assert.match((await response.json()).error.message, /model gpt-missing not found/);
+  });
+});
+
 test("same-session compactions are mutually exclusive", async () => {
   let releaseFirst;
   let enteredFirst;
