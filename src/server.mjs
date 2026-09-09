@@ -11,6 +11,7 @@ import {
 import { ResponseStreamEmitter, completed, customToolEvents, functionEvents, parseSse, responseCreated, sseError, textEvents } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
 import { getCurrentVersion } from "./updater.mjs";
+import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -1921,6 +1922,31 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         });
       }
 
+      // Image plugin endpoints are loopback-only and require the proxy local token.
+      if (pathname.startsWith("/internal/images")) {
+        const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
+        const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
+        if (!isLocal || headerToken !== settings.localToken) {
+          return json(response, 403, { error: { message: "Forbidden: image endpoints require an authenticated loopback client.", type: "authentication_error" } });
+        }
+        if (request.method === "GET" && pathname === "/internal/images/capabilities") {
+          const capabilities = await resolveImageCapabilities({ settings, fetchImpl, signal: abortController.signal });
+          return json(response, 200, capabilities);
+        }
+        if (request.method === "POST" && (pathname === "/internal/images/generate" || pathname === "/internal/images/edit")) {
+          const payload = await bodyOf(request, settings);
+          const operation = pathname.endsWith("/edit") ? "edit" : "generate";
+          const result = await generateImage({ settings, request: payload, fetchImpl, signal: abortController.signal, operation });
+          return json(response, 200, result);
+        }
+        const taskMatch = /^\/internal\/images\/tasks\/([^/]+)$/.exec(pathname);
+        if (request.method === "GET" && taskMatch) {
+          const result = await getImageTask({ settings, taskId: decodeURIComponent(taskMatch[1]), fetchImpl, signal: abortController.signal });
+          return json(response, 200, result);
+        }
+        return json(response, 404, { error: { message: "Image endpoint not found.", type: "invalid_request_error" } });
+      }
+
       // 4. draining 期间拒绝任何新业务请求
       if (metricsState.isDraining) {
         finalStatus = 503;
@@ -1989,6 +2015,12 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       if (abortController.signal.aborted) return;
       const rawUrl = request.url || "/";
       const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+
+      if (pathname.startsWith("/internal/images") && Number.isInteger(error.statusCode)) {
+        const status = error.statusCode;
+        logRequest({ method: request.method, url: pathname, status, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+        return json(response, status, { error: { message: error.message, type: error.code || "image_error", code: error.code || "image_error" } });
+      }
 
       if (error.statusCode === 413) {
         logRequest({ method: request.method, url: pathname, status: 413, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });

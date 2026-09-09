@@ -14,6 +14,7 @@ import { logPath, readRecentLogs, logInfo, logError } from "../src/logger.mjs";
 import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
 import { installWindowsDesktop } from "../src/desktop-install.mjs";
+import { runImageMcp } from "../src/mcp-image.mjs";
 
 process.on("uncaughtException", (err) => {
   logError("Uncaught Exception", err);
@@ -312,6 +313,8 @@ async function main() {
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
+  } else if (command === "mcp" && args[0] === "image") {
+    await runImageMcp();
   } else if (command === "status") {
     let settings = null;
     try {

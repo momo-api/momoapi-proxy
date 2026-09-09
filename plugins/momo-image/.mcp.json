@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "momo-image": {
+      "type": "stdio",
+      "command": "momoapi-proxy",
+      "args": ["mcp", "image"]
+    }
+  }
+}

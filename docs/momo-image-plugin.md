@@ -1,0 +1,37 @@
+# MOMO Image Plugin
+
+plugins/momo-image packages the Codex-facing image feature for MOMO API Proxy. The plugin does not store a MOMO key: its STDIO MCP calls authenticated loopback endpoints, and the proxy uses the key already saved in local settings.
+
+## Architecture
+
+    Codex Desktop / CLI
+      -> momo-image Skill + STDIO MCP
+      -> momoapi-proxy authenticated 127.0.0.1 image endpoints
+      -> model-specific MOMO API route
+
+The four MCP tools are image_capabilities, image_generate, image_edit, and image_task_status. Reference and mask URLs must use HTTPS, literal and DNS-resolved loopback/private-address targets are rejected, redirects are not followed, and each downloaded or inline image is limited to 20 MiB.
+
+## Model routing and protocol controls
+
+| Model | Generation | Reference editing | n | References | Size controls |
+| --- | --- | --- | ---: | ---: | --- |
+| gpt-image-2 | POST /v1/images/generations | Same endpoint with image_urls; asynchronous task_id is supported | 1 | 1 | 1:1; 3:2/2:3; 16:9/9:16 aliases; 1k/2k/4k quality hints |
+| gpt-image-2-momoapi | POST /v1/images/generations | Streaming multimodal POST /v1/chat/completions | 1-4 | 1-4 | Same GPT mapping; the prompt carries the requested output hint |
+| gemini-3.1-flash-image | POST /v1/images/generations | Multimodal POST /v1/chat/completions with modalities and extra_body.google.image_config | 1 | 1 | aspect_ratio plus 1K/2K/4K image_size |
+| gpt-image-2.5-sunburst | POST /v1/images/generations | Multipart POST /v1/images/edits | 1-10 | 1-16 | Native quality, arbitrary valid WIDTHxHEIGHT, format, compression, background, moderation, streaming |
+| gpt-image-2.5-flare | POST /v1/images/generations | Multipart POST /v1/images/edits | 1-10 | 1-16 | Same native controls; optimized for faster everyday generation |
+
+For GPT models, 16:9 maps to the available 1536x1024 canvas, whose physical ratio is 3:2; 9:16 maps to 1024x1536, whose physical ratio is 2:3. The resolution labels sent to GPT are low/medium/high quality hints and do not guarantee an exact pixel count. Gemini receives size as the aspect ratio and quality as 1K, 2K, or 4K on its Images generation route.
+
+Mask input remains disabled for the three legacy routes. The GPT Image 2.5 protocol adapter supports mask input and `input_fidelity=low/high`. Its native output controls are `quality=auto/low/medium/high/xhigh/max`, `output_format=png/jpeg/webp`, `output_compression=0-100` for JPEG/WebP, `background=auto/opaque/transparent`, `moderation=auto/low`, `stream`, and `partial_images=0-3`. Custom dimensions must use multiples of 16, stay between 1:3 and 3:1, keep each edge at or below 3840 pixels, and contain 655,360-8,294,400 total pixels.
+
+GPT Image 2.5 is catalog-gated. The plugin keeps Sunburst and Flare out of the MCP model enum until the authenticated MOMO `/v1/models` response actually contains them. `image_capabilities` still reports both as known protocol adapters with `available: false`, so operators can distinguish "implemented but upstream unavailable" from "unsupported by the plugin". Live generation/editing must not be claimed until a MOMO channel is present and the end-to-end matrix passes.
+
+## Install and run locally
+
+1. Install or update MOMO API Proxy from this repository.
+2. Install plugins/momo-image with the Codex plugin manager.
+3. Ensure the proxy is configured and running on 127.0.0.1:18789.
+4. The plugin launches momoapi-proxy mcp image over STDIO.
+
+Call image_capabilities at runtime instead of duplicating model limits in clients.
