@@ -2,7 +2,7 @@
 
 - 版本：v1.1
 - 日期：2026-09-09
-- 状态：Phase 1（P0）已实现并完成本地回归；Phase 2 尚未实现
+- 状态：Phase 1（P0）已发布到 main；Phase 2（P1）已实现并进入独立 PR 验证
 
 ## 背景
 
@@ -26,12 +26,17 @@
 - 日志只输出数字统计和策略动作，并对上游错误中的凭据、data URL、长不透明 Base64 做脱敏。
 - 测试覆盖事故等比例的 72 张历史图片、当前轮图片保护、本地 413 不请求上游、413/429/503 不重放，以及错误状态语义。
 
-## Phase 2（后续）
+## Phase 2（P1）
 
-- 实现 `/v1/responses/compact`、`compaction_trigger` 和可恢复摘要。
-- 实现基于 provider output 边界的 `previous_response_id` 历史去重。
-- 增加大请求并发/CPU admission 和压缩互斥锁。
-- 在 2 核生产等价环境验证 RSS、CPU、TTFB 和并发基线。
+- 实现标准 `POST /v1/responses/compact` 透传。compact 使用独立 32 MiB 准入，先 marker 化历史图片、内嵌附件和超大工具输出，避免压缩请求被普通 18 MiB hard limit 锁死。
+- 支持 Responses `context_management: [{ type: "compaction", compact_threshold }]`，先治理旧二进制历史，再保留该字段交给上游 server-side compaction。
+- 支持 Codex remote-compaction v2 的 `compaction_trigger`，并只返回一个可重放的 `compaction` item。
+- 上游 compact 明确不可用或因请求体返回 413 时，返回固定结构的本地恢复 checkpoint；鉴权、限流和 5xx 保留真实错误。
+- 对同一 `thread-id`、session header 或 `previous_response_id` 的 compact 请求执行互斥，重复请求返回 `409 compaction_in_progress`。
+- 实现基于 provider output 边界的 `previous_response_id` 历史去重：只有完整前缀匹配、跨越已记录 provider output 边界、且该输出含 provider-issued `id` 时才跳过；大项、深嵌套、部分前缀和未知 ID 全部 fail-open。
+- 续传状态只保存在代理进程内的有界 SHA-256 指纹缓存中，不写提示词、图片或工具输出原文到磁盘；`store:false`、模型切换和非 Responses 路由不创建去重锚点。
+- metrics 新增 `compactRequests`、`compactFailures`、`activeCompactions`、`replayDedupHits`、`replayBytesSkipped`。
+- 仍待生产发布前完成 2 核等价环境的 RSS、CPU、TTFB 和并发基线。
 
 ## 验收标准
 
@@ -40,4 +45,6 @@
 - 上游 413、429、5xx 各只产生一次请求。
 - 本地拒绝不访问上游，并返回 `context_budget_exceeded` 或 `media_budget_exceeded`。
 - SSE 失败不含 `response.completed`。
+- compact 输出可以原样作为下一轮 Responses 输入；本地恢复输出包含最近用户请求和固定恢复说明。
+- 重复 full-transcript + `previous_response_id` 不再线性增长；任何不确定匹配不删除输入。
 - `npm test` 和 secret scan 通过。

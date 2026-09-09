@@ -7,6 +7,8 @@
 - Stopped Responses fallback replay for 413, 429, authentication, and 5xx failures; only explicit endpoint capability mismatches may fall back once.
 - Preserved real upstream failure status and emitted `response.failed` instead of a false `response.completed` success.
 - Added redacted request/body/media metrics and incident-scale regression coverage for 72-image histories.
+- Added standard `/v1/responses/compact`, `context_management` compaction admission, and Codex `compaction_trigger` support with recoverable local checkpoints when the compact endpoint is explicitly unavailable or returns 413.
+- Added per-session compaction mutual exclusion plus bounded, memory-only `previous_response_id` replay deduplication that fails open unless a complete prefix crosses provider-issued output.
 
 ## 0.11.0 - 2026-09-09
 

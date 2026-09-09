@@ -119,7 +119,7 @@ node .\scripts\codex-cli-smoke.mjs --claude
 
 - It is for Codex CLI first. Codex Desktop needs a separate acceptance pass per release.
 - It supports standard function tools. Image generation and editing are available through the optional MOMO Image plugin; Codex-hosted services such as `codex-auto-review`, browser/computer use, video generation, and every third-party MCP shape are not marked universally compatible.
-- It does not currently implement OpenCodex's complete `/v1/responses/compact` subsystem; compatibility claims are limited to the paths covered by this repository's tests.
+- It implements the tested MOMO/Codex subset of `/v1/responses/compact`, server-side `context_management` admission, and `compaction_trigger`. It does not claim every OpenCodex persistence, routing, or account-pool behavior.
 - The installer is a developer command today; a signed one-line PowerShell/Bash installer and background process manager belong to the release work.
 
 ## Context and media limits
@@ -142,6 +142,20 @@ Advanced users may override the non-secret defaults in `settings.json`:
 ```
 
 The hard limit is deliberately capped at 18 MiB in the proxy. Raising nginx alone is not a supported fix for repeated image history. Local authenticated metrics at `/internal/metrics` expose admission, rewrite, rejection, and image-byte counters without logging prompts or Base64.
+
+Long-running Responses clients may use either official compact mode:
+
+```json
+{
+  "model": "gpt-5.6-sol",
+  "input": [{ "role": "user", "content": "Continue the task" }],
+  "context_management": [{ "type": "compaction", "compact_threshold": 200000 }]
+}
+```
+
+or `POST /v1/responses/compact`. The standalone compact route has an independent 32 MiB default budget (`MOMO_COMPACT_BODY_LIMIT_MB`, capped at 64 MiB) and safely markerizes old binary history before dispatch. If the MOMO upstream explicitly lacks compact support or rejects only the compact body as 413, the local proxy returns a fixed recoverable checkpoint. Authentication, quota and server errors are never converted into a fake compact success.
+
+`previous_response_id` continuation is conservative: for native Responses routes, the proxy drops a repeated transcript only after an exact complete-prefix match crosses a recorded provider-output boundary containing a provider-issued item id. Partial or ambiguous matches, model changes, `store:false`, and non-Responses routes fail open and remain untouched. Continuation fingerprints are SHA-256 hashes, bounded, and memory-only.
 
 ## Test evidence
 
