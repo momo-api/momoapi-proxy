@@ -42,6 +42,7 @@ test("internal endpoints enforce loopback and localToken authentication", async 
     assert.ok(metrics.ttfbMs && typeof metrics.ttfbMs.p50 === "number");
     assert.ok(metrics.memory && typeof metrics.memory.rssBytes === "number");
     assert.ok(typeof metrics.memory.externalBytes === "number");
+    assert.ok(metrics.telemetry && typeof metrics.telemetry.queueDepth === "number");
 
     // 4. 无 token 请求 /internal/shutdown -> 403
     const resShutdownNoToken = await fetch(`http://127.0.0.1:${port}/internal/shutdown`, { method: "POST" });

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added periodic update checks, tray update notifications, versioned package selection, SHA-256 verification, and automatic rollback when a new daemon fails health/version verification.
+- Added bounded local diagnostics and opt-out remote error telemetry containing metadata only; prompts, responses, credentials, file paths, Base64, and media contents are never recorded or reported.
 - Added final outbound context admission with a 16 MiB soft limit and 18 MiB hard limit below the production edge ceiling.
 - Added SHA-256 deduplication and budget-based expiry for historical inline images while preserving current-turn media.
 - Stopped Responses fallback replay for 413, 429, authentication, and 5xx failures; only explicit endpoint capability mismatches may fall back once.
