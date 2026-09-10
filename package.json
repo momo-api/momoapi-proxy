@@ -1,6 +1,6 @@
 {
   "name": "@momo-api/momoapi-proxy",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",
@@ -13,7 +13,7 @@
   },
   "scripts": {
     "start": "node bin/momoapi-proxy.mjs serve",
-    "test": "node --test test/server.test.mjs test/setup.test.mjs test/updater.test.mjs test/update-supervisor.test.mjs test/diagnostics.test.mjs test/compat.test.mjs test/config.test.mjs test/body-limit.test.mjs test/context-policy.test.mjs test/compaction.test.mjs test/internal-endpoints.test.mjs test/metrics.test.mjs test/doctor-metrics.test.mjs test/graceful-shutdown.test.mjs test/gemini-custom-tool.test.mjs test/image-service.test.mjs test/image-e2e.test.mjs",
+    "test": "node --test test/server.test.mjs test/setup.test.mjs test/updater.test.mjs test/update-supervisor.test.mjs test/diagnostics.test.mjs test/compat.test.mjs test/config.test.mjs test/body-limit.test.mjs test/context-policy.test.mjs test/compaction.test.mjs test/internal-endpoints.test.mjs test/metrics.test.mjs test/doctor-metrics.test.mjs test/graceful-shutdown.test.mjs test/gemini-custom-tool.test.mjs test/image-service.test.mjs test/image-assets.test.mjs test/image-e2e.test.mjs",
     "doctor": "node bin/momoapi-proxy.mjs doctor",
     "models": "node bin/momoapi-proxy.mjs models",
     "status": "node bin/momoapi-proxy.mjs status",

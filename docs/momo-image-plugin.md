@@ -9,7 +9,38 @@ plugins/momo-image packages the Codex-facing image feature for MOMO API Proxy. T
       -> momoapi-proxy authenticated 127.0.0.1 image endpoints
       -> model-specific MOMO API route
 
-The four MCP tools are image_capabilities, image_generate, image_edit, and image_task_status. Reference and mask URLs must use HTTPS, literal and DNS-resolved loopback/private-address targets are rejected, redirects are not followed, and each downloaded or inline image is limited to 20 MiB.
+The MCP tools are image_capabilities, image_generate, image_edit, image_task_status, image_asset_get, and image_asset_list. Reference and mask URLs must use HTTPS, literal and DNS-resolved loopback/private-address targets are rejected, redirects are not followed, and each downloaded or inline image is limited to 20 MiB.
+
+## Local image asset library
+
+Generated and edited images are materialized and stored on the user's computer under `~/.momoapi-proxy/images` by default. MCP results return a short `asset_id`, `asset:img_...` reference, local path, MIME type, byte count, and SHA-256. They do not return inline Base64 unless the caller explicitly sets `include_preview: true`.
+
+Use the returned reference for a later edit:
+
+```json
+{
+  "model": "gpt-image-2-momoapi",
+  "prompt": "Add a red hat",
+  "reference_images": ["asset:img_<sha256>"]
+}
+```
+
+The proxy resolves only opaque asset IDs from its own library. It never accepts an arbitrary local path from the model, so a prompt cannot turn the image plugin into a general local-file reader. PNG, JPEG, and WebP are content-sniffed, size-limited, content-addressed, and integrity-checked before reuse. Defaults are 20 MiB per image, 2 GiB total, 2,000 assets, and 30 days since last access. Identical content is deduplicated.
+
+The local library is not a CDN or persistent remote store. A selected asset leaves the computer only when the user asks an image model to edit it; the proxy then reads that one asset and sends it as the current upstream edit input.
+
+Optional non-secret settings:
+
+```json
+{
+  "imageAssets": {
+    "maxAssetMb": 20,
+    "maxTotalMb": 2048,
+    "maxAssets": 2000,
+    "retentionDays": 30
+  }
+}
+```
 
 ## Model routing and protocol controls
 

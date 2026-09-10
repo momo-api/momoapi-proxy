@@ -15,6 +15,7 @@ import { checkAndRecordLatestVersion, getCurrentVersion, readUpdateStatus, start
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
 import { installWindowsDesktop } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
+import { createImageAssetStore } from "../src/image-assets.mjs";
 import { configureDiagnostics, getDiagnosticsMetrics, readRecentDiagnostics, recordDiagnosticEvent } from "../src/diagnostics.mjs";
 
 process.on("uncaughtException", (err) => {
@@ -373,6 +374,26 @@ async function main() {
     process.once("SIGTERM", stop);
   } else if (command === "mcp" && args[0] === "image") {
     await runImageMcp();
+  } else if (command === "images" || command === "image-assets") {
+    const settings = { imageAssetDirectory: join(appHome(), "images"), imageAssets: readSettings().imageAssets };
+    const store = createImageAssetStore(settings);
+    const action = args[0] || "list";
+    if (action === "list") {
+      const images = await store.list({ limit: Number(value("--limit") || 100) });
+      console.log(JSON.stringify({ directory: settings.imageAssetDirectory, images }, null, 2));
+    } else if (action === "info") {
+      const assetId = args[1];
+      if (!assetId) throw new Error("Usage: momoapi-proxy images info <asset_id>");
+      console.log(JSON.stringify(await store.get(assetId), null, 2));
+    } else if (action === "clean") {
+      console.log(JSON.stringify(await store.cleanup(), null, 2));
+    } else if (action === "delete") {
+      const assetId = args[1];
+      if (!assetId) throw new Error("Usage: momoapi-proxy images delete <asset_id>");
+      console.log(JSON.stringify({ deleted: await store.remove(assetId) }, null, 2));
+    } else {
+      throw new Error("Usage: momoapi-proxy images [list|info <asset_id>|clean|delete <asset_id>]");
+    }
   } else if (command === "status") {
     let settings = null;
     try {
@@ -569,7 +590,7 @@ async function main() {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy diagnostics [-n 100]       - Print local-only error metadata for support\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
+    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy images [list|info|clean]  - Manage images saved on this computer\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy diagnostics [-n 100]       - Print local-only error metadata for support\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
   }
 }
 

@@ -2,7 +2,7 @@
 
 - 版本：v1.1
 - 日期：2026-09-09
-- 状态：Phase 1（P0）已发布到 main；Phase 2（P1）已实现并进入独立 PR 验证
+- 状态：Phase 1/2 已发布；Phase 3 本机图片资源库已实现并进入独立 PR 验证
 
 ## 背景
 
@@ -38,6 +38,16 @@
 - 续传状态只保存在代理进程内的有界 SHA-256 指纹缓存中，不写提示词、图片或工具输出原文到磁盘；`store:false`、模型切换和非 Responses 路由不创建去重锚点。
 - metrics 新增 `compactRequests`、`compactFailures`、`activeCompactions`、`replayDedupHits`、`replayBytesSkipped`。
 - 仍待生产发布前完成 2 核等价环境的 RSS、CPU、TTFB 和并发基线。
+
+## Phase 3（本机图片资源库）
+
+- 生图/编辑结果默认保存到用户电脑的 `~/.momoapi-proxy/images`，MCP 历史只保存 `asset_id`、路径、MIME、大小和 SHA-256。
+- 默认不返回 `b64_json`；只有调用方显式设置 `include_preview: true` 才提供当前轮内嵌预览。
+- 后续编辑使用 `asset:img_...`，代理仅在该次上游请求中从本机读取并转换为 Data URL 或 multipart 文件。
+- 不接受模型传入任意本机路径，防止路径穿越或读取用户其他文件。
+- PNG/JPEG/WebP 内容嗅探、MIME 校验、SHA-256 完整性校验、20 MiB 单图上限、内容寻址去重和原子写入。
+- 默认 30 天无访问清理、2 GiB/2,000 张容量上限；按最近访问时间淘汰，正在写入的资源不会被本次清理删除。
+- 图片不上传 MOMO CDN、公共对象存储或 NewAPI 做持久化；仅在用户要求后续编辑时，把指定 `asset_id` 对应图片作为该次模型请求输入。API Key 仍只由本地代理保存。
 
 ## 验收标准
 

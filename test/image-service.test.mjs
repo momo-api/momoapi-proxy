@@ -270,6 +270,27 @@ test("downloads HTTPS references once as data URLs and blocks SSRF targets", asy
   }), /host is not allowed/);
 });
 
+test("resolves local asset IDs only through the configured asset resolver", async () => {
+  const assetId = "img_" + "a".repeat(64);
+  let resolved;
+  await generateImage({
+    settings,
+    request: { model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["asset:" + assetId] },
+    operation: "edit",
+    assetResolver: async (reference) => {
+      resolved = reference;
+      return tinyPng;
+    },
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(body.messages[0].content[1].image_url.url, tinyPng);
+      return new Response("data: " + JSON.stringify({ choices: [{ delta: { content: "data:image/png;base64,aGVsbG8=" } }] }) + "\n\ndata: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+    },
+  });
+  assert.equal(resolved, "asset:" + assetId);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["C:\\Users\\example\\secret.png"] }, "edit"), /local asset IDs/);
+});
+
 test("extracts direct, nested, data URL, and async image response shapes", () => {
   assert.deepEqual(extractImageResults({ url: "https://example.com/a.png" }), { images: [{ url: "https://example.com/a.png" }], task_id: null, raw_status: null, terminal: false });
   assert.equal(extractImageResults({ data: [{ task_id: "task-1" }] }).task_id, "task-1");

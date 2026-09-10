@@ -1,4 +1,5 @@
 import { lookup } from "node:dns/promises";
+import { isImageAssetReference } from "./image-assets.mjs";
 
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
 const ASPECT_RATIOS = ["1:1", "3:2", "2:3", "16:9", "9:16"];
@@ -230,14 +231,14 @@ export function normalizeImageRequest(input, operation = "generate") {
   if (references.length > rules.maxReferenceImages) throw fail("reference_images supports at most " + rules.maxReferenceImages + " item(s) for " + model + ".");
   if (operation === "generate" && references.length > 0) throw fail("Use image_edit when reference_images are provided.");
   for (const reference of references) {
-    if (typeof reference !== "string" || (!asDataUrl(reference) && !/^https?:\/\//i.test(reference))) {
-      throw fail("reference_images must contain image data URLs or HTTPS URLs.");
+    if (typeof reference !== "string" || (!asDataUrl(reference) && !/^https?:\/\//i.test(reference) && !isImageAssetReference(reference))) {
+      throw fail("reference_images must contain local asset IDs, image data URLs, or HTTPS URLs.");
     }
   }
   const mask = input.mask || input.mask_image || input.maskImage;
   if (mask !== undefined && operation !== "edit") throw fail("mask is supported only for image_edit.");
   if (mask !== undefined && !rules.maskEdits) throw fail("mask is not supported for " + model + ".");
-  if (mask !== undefined && (typeof mask !== "string" || (!asDataUrl(mask) && !/^https?:\/\//i.test(mask)))) throw fail("mask must be an image data URL or HTTPS URL.");
+  if (mask !== undefined && (typeof mask !== "string" || (!asDataUrl(mask) && !/^https?:\/\//i.test(mask) && !isImageAssetReference(mask)))) throw fail("mask must be a local asset ID, image data URL, or HTTPS URL.");
   return { model, prompt, n, aspect_ratio: aspectRatio, resolution, reference_images: references, operation, ...nativeControls, ...(mask ? { mask } : {}) };
 }
 
@@ -322,9 +323,14 @@ async function responseBytesWithinLimit(response) {
   return Buffer.concat(chunks, total);
 }
 
-async function resolveReferenceDataUrls(request, fetchImpl, signal, lookupImpl) {
+async function resolveReferenceDataUrls(request, fetchImpl, signal, lookupImpl, assetResolver) {
   const dataUrls = [];
   for (const reference of request.reference_images) {
+    if (isImageAssetReference(reference)) {
+      if (typeof assetResolver !== "function") throw fail("Local image asset resolution is unavailable.", 500, "image_asset_unavailable");
+      dataUrls.push(await assetResolver(reference));
+      continue;
+    }
     const decoded = decodeDataUrl(reference);
     if (decoded) {
       dataUrls.push(decoded.dataUrl);
@@ -502,7 +508,7 @@ async function readUpstreamPayload(upstream) {
   }
 }
 
-export async function generateImage({ settings, request, fetchImpl = fetch, lookupImpl = lookup, signal, operation = "generate" }) {
+export async function generateImage({ settings, request, fetchImpl = fetch, lookupImpl = lookup, assetResolver, signal, operation = "generate" }) {
   const normalized = normalizeImageRequest(request, operation);
   if (MODEL_RULES[normalized.model]?.requiresCatalog) {
     const capabilities = await resolveImageCapabilities({ settings, fetchImpl, signal });
@@ -521,11 +527,11 @@ export async function generateImage({ settings, request, fetchImpl = fetch, look
   let multipart = false;
   if (operation === "generate") body = generationBody(normalized);
   else {
-    const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl);
+    const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
     if (GPT_IMAGE_25_MODELS.has(normalized.model)) {
       path = "/v1/images/edits";
       const maskDataUrl = normalized.mask
-        ? (await resolveReferenceDataUrls({ reference_images: [normalized.mask] }, fetchImpl, signal, lookupImpl))[0]
+        ? (await resolveReferenceDataUrls({ reference_images: [normalized.mask] }, fetchImpl, signal, lookupImpl, assetResolver))[0]
         : null;
       body = nativeEditForm(normalized, references, maskDataUrl);
       multipart = true;
