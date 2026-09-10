@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
@@ -96,6 +96,62 @@ function runProxyCli(scriptPath, commandArgs, timeoutMs = 30_000) {
   return result.status === 0 && !result.error;
 }
 
+function normalizedWindowsPath(value) {
+  return String(value || "").replaceAll("/", "\\").toLowerCase();
+}
+
+export function isManagedImageMcpProcess(processInfo, rootDir) {
+  if (!processInfo || String(processInfo.Name || processInfo.name || "").toLowerCase() !== "node.exe") return false;
+  const pid = Number(processInfo.ProcessId ?? processInfo.processId);
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
+  const commandLine = normalizedWindowsPath(processInfo.CommandLine ?? processInfo.commandLine);
+  const targetScript = normalizedWindowsPath(win32.join(win32.resolve(String(rootDir || "")), "bin", "momoapi-proxy.mjs"));
+  const index = commandLine.indexOf(targetScript);
+  if (index < 0) return false;
+  const before = index > 0 ? commandLine[index - 1] : " ";
+  const afterIndex = index + targetScript.length;
+  const after = afterIndex < commandLine.length ? commandLine[afterIndex] : " ";
+  if (!/[\s\"']/.test(before) || !/[\s\"']/.test(after)) return false;
+  const remaining = commandLine.slice(afterIndex).replace(/^[\s\"']+/, "");
+  return /^(?:\"|')?mcp(?:\"|')?[\s]+(?:\"|')?image(?:\"|')?(?:[\s]|$)/i.test(remaining);
+}
+
+export async function stopManagedImageMcpProcesses(rootDir, {
+  platform = process.platform,
+  listProcesses = () => {
+    const result = spawnSync("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-Command",
+      "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" -ErrorAction SilentlyContinue | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress",
+    ], { encoding: "utf8", windowsHide: true, timeout: 10_000 });
+    if (result.status !== 0 || !result.stdout?.trim()) return [];
+    try {
+      const parsed = JSON.parse(result.stdout);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  },
+  terminate = (pid) => process.kill(pid, "SIGTERM"),
+  waitForExit = waitForProcessExit,
+} = {}) {
+  if (platform !== "win32") return [];
+  const matches = listProcesses().filter((entry) => isManagedImageMcpProcess(entry, rootDir));
+  const matchedPids = matches.map((entry) => Number(entry.ProcessId ?? entry.processId));
+  for (const entry of matches) {
+    const pid = Number(entry.ProcessId ?? entry.processId);
+    try {
+      terminate(pid);
+    } catch {}
+  }
+  const exitStates = await Promise.all(matchedPids.map((pid) => waitForExit(pid, 5_000)));
+  for (let index = 0; index < matchedPids.length; index += 1) {
+    if (!exitStates[index]) {
+      throw Object.assign(new Error(`Managed image MCP process ${matchedPids[index]} did not exit before the update.`), { code: "update_mcp_stop_failed" });
+    }
+  }
+  return matchedPids;
+}
+
 export async function superviseUpdate({
   rootDir,
   stagingDir,
@@ -111,6 +167,7 @@ export async function superviseUpdate({
   move = renameSync,
   remove = (target) => rmSync(target, { recursive: true, force: true }),
   retry = retryFileOperation,
+  stopMcpProcesses = stopManagedImageMcpProcesses,
   pathExists = existsSync,
   installImagePlugin = true,
 } = {}) {
@@ -123,6 +180,20 @@ export async function superviseUpdate({
     validateStagedLayout({ rootDir, stagingDir, backupDir });
     appendSupervisorLog(`Stopping proxy v${previousVersion} before activating v${targetVersion}.`, env);
     if (pathExists(newScript)) runCli(newScript, "stop", 30_000);
+    try {
+      const stoppedMcpPids = await stopMcpProcesses(rootDir);
+      if (stoppedMcpPids.length) appendSupervisorLog(`Stopped ${stoppedMcpPids.length} managed image MCP process(es) that referenced the old application tree.`, env);
+    } catch (error) {
+      const restarted = pathExists(newScript) && runCli(newScript, "start");
+      const restoredHealthy = restarted && await healthCheck({ port, expectedVersion: previousVersion });
+      writeSupervisorStatus({
+        status: "activation_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
+        hasUpdate: true, checkFailed: true, rolledBack: false,
+        errorCode: error?.code || "update_mcp_stop_failed",
+      }, env);
+      appendSupervisorLog(`Stopping managed image MCP processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+      return { activated: false, rolledBack: false, restoredHealthy, errorCode: error?.code || "update_mcp_stop_failed" };
+    }
     await sleep(500);
     try {
       await retry(() => remove(backupDir));

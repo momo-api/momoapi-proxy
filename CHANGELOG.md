@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.13.4 - 2026-09-10
+
+- Stop only the exact Windows `node.exe .../app/bin/momoapi-proxy.mjs mcp image` processes managed by the installed MOMO image plugin before switching the application directory. This closes the remaining `EPERM` update lock without terminating Codex, unrelated Node processes, or other proxy commands.
+
 ## 0.13.3 - 2026-09-10
 
 - Fix Windows self-update failures caused by the running proxy trying to rename its own application directory (`EPERM`). Updates are verified into a sibling staging directory and activated by an external supervisor after the updater exits.
