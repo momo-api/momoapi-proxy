@@ -15,7 +15,7 @@ import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } f
 import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareContextManagedPayload } from "./compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
-import { getTelemetryMetrics } from "./telemetry.mjs";
+import { getDiagnosticsMetrics } from "./diagnostics.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -2233,7 +2233,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             dnsCache: { supported: false },
             connectionPooling: { supported: true, backend: "node-native-fetch" },
           },
-          telemetry: getTelemetryMetrics(),
+          diagnostics: getDiagnosticsMetrics(),
           version: getCurrentVersion(),
         });
       }

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -7,6 +7,21 @@ import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = dirname(__dirname);
+const OFFICIAL_MANIFEST_URLS = Object.freeze([
+  "https://momoapi.us/install/bridge-latest.json",
+  "https://api.github.com/repos/momo-api/momoapi-proxy/releases/latest",
+]);
+const TRUSTED_PACKAGE_HOSTS = new Set([
+  "momoapi.us",
+  "github.com",
+  "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
+]);
+const TRUSTED_MANIFEST_HOSTS = new Set(["momoapi.us", "api.github.com"]);
+const MAX_UPDATE_ARCHIVE_BYTES = 64 * 1024 * 1024;
+const MAX_UPDATE_EXPANDED_BYTES = 128 * 1024 * 1024;
+const MAX_UPDATE_ENTRIES = 4096;
+const WINDOWS_RESERVED_SEGMENT = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 function isTgzUrl(value) {
   if (typeof value !== "string" || !value) return false;
@@ -17,8 +32,145 @@ function isTgzUrl(value) {
   }
 }
 
+export function isTrustedUpdateUrl(value) {
+  if (!isTgzUrl(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && TRUSTED_PACKAGE_HOSTS.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function isTrustedVersionedPackageUrl(value, version) {
+  if (!isTrustedUpdateUrl(value) || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(String(version || ""))) return false;
+  try {
+    return new URL(value).pathname.endsWith(`/momoapi-proxy-${version}.tgz`);
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedManifestUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || !TRUSTED_MANIFEST_HOSTS.has(url.hostname.toLowerCase())) return false;
+    if (url.hostname.toLowerCase() === "momoapi.us") return url.pathname === "/install/bridge-latest.json";
+    return url.pathname === "/repos/momo-api/momoapi-proxy/releases/latest";
+  } catch {
+    return false;
+  }
+}
+
 function uniqueTgzUrls(values) {
-  return [...new Set(values.filter(isTgzUrl))];
+  return [...new Set(values.filter(isTrustedUpdateUrl))];
+}
+
+function preferPackageMirror(releases, version) {
+  const urls = releases.map((release) => release.downloadUrl).filter((value) => isTrustedVersionedPackageUrl(value, version));
+  return urls.find((value) => new URL(value).hostname.toLowerCase() === "momoapi.us") || urls[0] || null;
+}
+
+function archiveError(message, code = "update_archive_unsafe") {
+  return Object.assign(new Error(message), { code });
+}
+
+function validateArchivePath(name) {
+  if (!name || name.includes("\0") || name.includes("\\") || name.startsWith("/") || /^[A-Za-z]:/.test(name)) {
+    throw archiveError("Update archive contains an unsafe path.");
+  }
+  const normalized = name.endsWith("/") ? name.slice(0, -1) : name;
+  if (normalized.length > 4096) throw archiveError("Update archive path is too long.");
+  const segments = normalized.split("/");
+  if (segments[0] !== "momoapi-proxy" || segments.some((segment) => !segment || segment === "." || segment === "..")) {
+    throw archiveError("Update archive must contain one momoapi-proxy root directory.");
+  }
+  for (const segment of segments) {
+    if (segment.length > 255 || /[:\u0000-\u001f\u007f]/.test(segment) || /[. ]$/.test(segment) || WINDOWS_RESERVED_SEGMENT.test(segment)) {
+      throw archiveError("Update archive contains a platform-unsafe path.");
+    }
+  }
+}
+
+export function assertSafeArchiveListing(names, verboseLines) {
+  if (!Array.isArray(names) || names.length === 0 || names.length > MAX_UPDATE_ENTRIES) {
+    throw archiveError("Update archive has an invalid number of entries.");
+  }
+  const details = Array.isArray(verboseLines) ? verboseLines.filter(Boolean) : [];
+  if (details.length !== names.length) throw archiveError("Update archive listing is inconsistent.");
+
+  let expandedBytes = 0;
+  for (let index = 0; index < names.length; index += 1) {
+    validateArchivePath(names[index]);
+    const detail = details[index];
+    const type = detail[0];
+    if (type !== "-" && type !== "d") {
+      throw archiveError("Update archive links and special files are not allowed.");
+    }
+    if (type === "-") {
+      const fields = detail.trim().split(/\s+/);
+      const size = /^\d+$/.test(fields[1] || "") && /^\d+$/.test(fields[4] || "")
+        ? Number(fields[4])
+        : Number(fields[2]);
+      if (!Number.isSafeInteger(size) || size < 0) throw archiveError("Update archive file size could not be verified.");
+      expandedBytes += size;
+      if (!Number.isSafeInteger(expandedBytes) || expandedBytes > MAX_UPDATE_EXPANDED_BYTES) {
+        throw archiveError("Update archive expands beyond the allowed size.", "update_archive_too_large");
+      }
+    }
+  }
+  return { entries: names.length, expandedBytes };
+}
+
+export function validateUpdateArchive(archivePath) {
+  let names;
+  let details;
+  try {
+    names = execFileSync("tar", ["-tzf", archivePath], { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 })
+      .split(/\r?\n/)
+      .filter(Boolean);
+    details = execFileSync("tar", ["-tvzf", archivePath], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
+      .split(/\r?\n/)
+      .filter(Boolean);
+  } catch (error) {
+    throw archiveError("Downloaded update package is not a readable gzip tar archive.", "update_archive_invalid");
+  }
+  return assertSafeArchiveListing(names, details);
+}
+
+async function readResponseBodyLimited(response, maxBytes) {
+  const declaredLength = Number(response.headers?.get?.("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw archiveError("Downloaded update package exceeds the allowed size.", "update_archive_too_large");
+  }
+  if (!response.body?.getReader) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length === 0 || buffer.length > maxBytes) {
+      throw archiveError("Downloaded update package exceeds the allowed size.", "update_archive_too_large");
+    }
+    return buffer;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > maxBytes) {
+        await reader.cancel("update archive too large").catch(() => {});
+        throw archiveError("Downloaded update package exceeds the allowed size.", "update_archive_too_large");
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (total === 0) throw archiveError("Downloaded update package is empty.", "update_archive_invalid");
+  return Buffer.concat(chunks, total);
 }
 
 export function getCurrentVersion() {
@@ -45,29 +197,31 @@ export function isNewer(latest, current) {
 
 export async function checkLatestVersion({ endpoint = "https://momoapi.us", fetchImpl = fetch } = {}) {
   const current = getCurrentVersion();
-  const candidates = [...new Set([
-    endpoint.replace(/\/$/, "") + "/install/bridge-latest.json",
-    "https://momoapi.us/install/bridge-latest.json",
-    "https://api.github.com/repos/momo-api/momoapi-proxy/releases/latest",
-  ])];
+  const candidates = OFFICIAL_MANIFEST_URLS;
 
   const releases = [];
   const errors = [];
   for (const url of candidates) {
     try {
       const res = await fetchImpl(url, { headers: { "user-agent": "momo-codex-bridge" } });
+      if (res.url && !isTrustedManifestUrl(res.url)) {
+        errors.push({ source: url, code: "untrusted_redirect" });
+        continue;
+      }
       if (!res.ok) {
         errors.push({ source: url, code: "http_" + res.status });
         continue;
       }
       const data = await res.json();
       const latestVersion = data.version || data.tag_name?.replace(/^v/, "");
-      if (latestVersion) {
+      if (/^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?$/.test(latestVersion || "")) {
+        const githubAuthority = url === "https://api.github.com/repos/momo-api/momoapi-proxy/releases/latest";
         const assets = Array.isArray(data.assets) ? data.assets : [];
         const releaseAsset = assets.find((asset) => asset?.name === `momoapi-proxy-${latestVersion}.tgz`)
           || assets.find((asset) => String(asset?.browser_download_url || "").endsWith(`/momoapi-proxy-${latestVersion}.tgz`))
           || assets.find((asset) => /^momoapi-proxy-[0-9].*\.tgz$/i.test(asset?.name || ""));
         const notesSha = typeof data.body === "string" ? data.body.match(/SHA-256:\s*`?([a-f0-9]{64})`?/i)?.[1] : null;
+        const assetSha = typeof releaseAsset?.digest === "string" ? releaseAsset.digest.match(/^sha256:([a-f0-9]{64})$/i)?.[1] : null;
         releases.push({
           latest: latestVersion,
           downloadUrl: uniqueTgzUrls([
@@ -75,9 +229,10 @@ export async function checkLatestVersion({ endpoint = "https://momoapi.us", fetc
             data.url,
             data.tarballUrl,
             data.latest_url,
-          ])[0] || null,
+          ]).find((value) => isTrustedVersionedPackageUrl(value, latestVersion)) || null,
           releaseNotes: data.body || null,
-          sha256: (typeof data.sha256 === "string" ? data.sha256 : notesSha)?.toLowerCase() || null,
+          sha256: githubAuthority ? (assetSha || notesSha)?.toLowerCase() || null : null,
+          githubAuthority,
           source: url,
         });
       }
@@ -85,19 +240,29 @@ export async function checkLatestVersion({ endpoint = "https://momoapi.us", fetc
       errors.push({ source: url, code: error?.code || error?.name || "fetch_failed" });
     }
   }
-  const latest = releases.reduce((best, release) => {
-    if (!best || isNewer(release.latest, best.latest)) return release;
-    if (release.latest !== best.latest) return best;
+  const authority = releases
+    .filter((release) => release.githubAuthority && /^[a-f0-9]{64}$/.test(release.sha256 || ""))
+    .reduce((best, release) => !best || isNewer(release.latest, best.latest) ? release : best, null);
+  if (!authority) {
     return {
-      ...best,
-      downloadUrl: best.sha256 && best.downloadUrl ? best.downloadUrl : release.downloadUrl || best.downloadUrl,
-      releaseNotes: best.releaseNotes || release.releaseNotes,
-      sha256: best.sha256 || release.sha256,
-      source: best.sha256 ? best.source : release.source || best.source,
+      current,
+      latest: current,
+      hasUpdate: false,
+      downloadUrl: null,
+      sha256: null,
+      checkFailed: true,
+      errors: [...errors, { source: "github-release", code: "release_attestation_missing" }],
     };
-  }, null);
-  if (!latest) return { current, latest: current, hasUpdate: false, downloadUrl: null, checkFailed: true, errors };
-  return { current, ...latest, hasUpdate: isNewer(latest.latest, current), checkFailed: false, errors };
+  }
+  const sameVersion = releases.filter((release) => release.latest === authority.latest);
+  return {
+    current,
+    ...authority,
+    downloadUrl: preferPackageMirror(sameVersion, authority.latest) || authority.downloadUrl,
+    hasUpdate: isNewer(authority.latest, current),
+    checkFailed: false,
+    errors,
+  };
 }
 
 export function updateStatusPath(env = process.env) {
@@ -171,13 +336,11 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
 
   const updateId = process.pid + "-" + Date.now();
   const tmpTgz = join(tmpdir(), "momoapi-proxy-update-" + updateId + ".tgz");
-  const tmpExtract = join(dirname(ROOT_DIR), ".momoapi-proxy-update-" + updateId);
+  const tmpExtract = mkdtempSync(join(dirname(ROOT_DIR), ".momoapi-proxy-update-"));
   const urls = uniqueTgzUrls([
     info.downloadUrl,
-    endpoint.replace(/\/$/, "") + "/install/packages/momoapi-proxy-" + info.latest + ".tgz",
     "https://momoapi.us/install/packages/momoapi-proxy-" + info.latest + ".tgz",
     "https://github.com/momo-api/momoapi-proxy/releases/download/v" + info.latest + "/momoapi-proxy-" + info.latest + ".tgz",
-    "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",
   ]);
 
   let downloaded = false;
@@ -188,7 +351,10 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
       try {
         const res = await fetchImpl(url);
         if (res.ok) {
-          const buffer = Buffer.from(await res.arrayBuffer());
+          if (res.url && !isTrustedVersionedPackageUrl(res.url, info.latest)) {
+            throw archiveError("Update download redirected to an untrusted host.", "update_source_untrusted");
+          }
+          const buffer = await readResponseBodyLimited(res, MAX_UPDATE_ARCHIVE_BYTES);
           if (info.sha256) {
             const actual = createHash("sha256").update(buffer).digest("hex");
             if (actual !== info.sha256) {
@@ -211,9 +377,9 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
       throw Object.assign(new Error("Failed to download update package from all mirrors."), { code: "update_download_failed" });
     }
 
-    mkdirSync(tmpExtract, { recursive: true });
+    validateUpdateArchive(tmpTgz);
     try {
-      execFileSync("tar", ["-xz", "-f", tmpTgz, "-C", tmpExtract, "--strip-components=1"], { stdio: "ignore" });
+      execFileSync("tar", ["-xz", "-f", tmpTgz, "-C", tmpExtract, "--strip-components=1", "--no-same-owner", "--no-same-permissions"], { stdio: "ignore" });
     } catch (error) {
       throw Object.assign(new Error("Failed to extract the downloaded update package."), { code: "update_extract_failed", cause: error });
     }

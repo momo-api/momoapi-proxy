@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { recordDiagnosticEvent } from "./telemetry.mjs";
+import { recordDiagnosticEvent } from "./diagnostics.mjs";
 
 export function logPath(env = process.env) {
   const root = env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || join(homedir(), ".momoapi-proxy");

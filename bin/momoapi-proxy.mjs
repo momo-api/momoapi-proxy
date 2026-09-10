@@ -4,7 +4,7 @@ import { openSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
-import { ensureInstallationId, readSettings, resolveSettings, appHome } from "../src/config.mjs";
+import { readSettings, resolveSettings, appHome } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
 import { rollback, setup, uninstall } from "../src/setup.mjs";
 import { readCatalog } from "../src/catalog.mjs";
@@ -15,7 +15,7 @@ import { checkAndRecordLatestVersion, getCurrentVersion, readUpdateStatus, start
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
 import { installWindowsDesktop } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
-import { configureTelemetry, getTelemetryMetrics, recordDiagnosticEvent, startTelemetryReporter } from "../src/telemetry.mjs";
+import { configureDiagnostics, getDiagnosticsMetrics, readRecentDiagnostics, recordDiagnosticEvent } from "../src/diagnostics.mjs";
 
 process.on("uncaughtException", (err) => {
   logError("Uncaught Exception", err);
@@ -286,9 +286,8 @@ async function main() {
     await startDaemon(binFile, scriptDir, port);
     console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
   } else if (command === "serve") {
-    ensureInstallationId();
     const settings = resolveSettings();
-    configureTelemetry({ settings });
+    configureDiagnostics({ settings });
     const previousUpdateStatus = readUpdateStatus();
     if (previousUpdateStatus?.rolledBack && !previousUpdateStatus.failureReportedAt) {
       recordDiagnosticEvent({
@@ -358,8 +357,6 @@ async function main() {
         }
       },
     });
-    const telemetryReporter = startTelemetryReporter({ settings });
-
     const heartbeatTimer = setInterval(() => {
       writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint });
     }, 5000);
@@ -370,7 +367,6 @@ async function main() {
       writeHeartbeat({ running: false, port: settings.port });
       autoSync.stop();
       updateChecker.stop();
-      telemetryReporter.stop();
       server.close(() => process.exit(0));
     };
     process.once("SIGINT", stop);
@@ -405,7 +401,7 @@ async function main() {
       lastSyncStatus: settings.lastSyncStatus || null,
       lastError: settings.lastError || null,
       update: readUpdateStatus(),
-      telemetry: getTelemetryMetrics(),
+      diagnostics: getDiagnosticsMetrics(),
     }, null, 2));
   } else if (command === "models") {
     const catalog = readCatalog();
@@ -441,6 +437,14 @@ async function main() {
       console.log("=== Recent MOMO Codex Bridge Logs (Last " + logs.length + " entries) ===");
       console.log(logs.join("\n"));
       console.log("Log file: " + logPath());
+    }
+  } else if (command === "diagnostics" || command === "diagnostic") {
+    const count = Number(value("-n") || value("--lines") || 100);
+    const events = readRecentDiagnostics(count);
+    if (!events.length) {
+      console.log("No diagnostic events recorded.");
+    } else {
+      console.log(events.join("\n"));
     }
   } else if (command === "test") {
     const model = args[0] || "gpt-5.5";
@@ -565,13 +569,13 @@ async function main() {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
+    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy diagnostics [-n 100]       - Print local-only error metadata for support\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
   }
 }
 
 main().catch((err) => {
   let settings;
-  try { settings = resolveSettings(); } catch { settings = { diagnosticsEnabled: true, telemetryEnabled: false }; }
+  try { settings = resolveSettings(); } catch { settings = { diagnosticsEnabled: true }; }
   recordDiagnosticEvent({ event: "proxy_start_error", errorCode: err.code || "proxy_start_failed" }, { settings });
   console.error("Fatal error:", err.message);
   process.exit(1);
