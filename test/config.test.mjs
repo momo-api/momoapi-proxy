@@ -33,6 +33,8 @@ test("environment API key remains a fallback before setup creates settings", () 
     });
     assert.equal(settings.apiKey, "bootstrap-env-key");
     assert.equal(settings.autoUpdateEnabled, false);
+    assert.equal(settings.imageAssetDirectory, join(home, "images"));
+    assert.deepEqual(settings.imageAssets, { maxAssetMb: 20, maxTotalMb: 2048, maxAssets: 2000, retentionDays: 30 });
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

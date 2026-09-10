@@ -15,6 +15,7 @@ import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } f
 import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareContextManagedPayload } from "./compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
+import { createImageAssetStore, persistImageResult } from "./image-assets.mjs";
 import { getDiagnosticsMetrics } from "./diagnostics.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
@@ -1980,13 +1981,14 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
   response.end();
 }
 
-export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = process.exit } = {}) {
+export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = process.exit, assetStore } = {}) {
   metricsState.isDraining = false;
   const calls = new Map();
   const activeSockets = new Set();
   const activeSseEmitters = new Set();
   const activeAbortControllers = new Set();
   const compactLocks = new Set();
+  const imageAssetStore = assetStore || createImageAssetStore(settings);
   let serverInstance = null;
   let shutdownLifecycle = null;
 
@@ -2252,13 +2254,31 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         if (request.method === "POST" && (pathname === "/internal/images/generate" || pathname === "/internal/images/edit")) {
           const payload = await bodyOf(request, settings);
           const operation = pathname.endsWith("/edit") ? "edit" : "generate";
-          const result = await generateImage({ settings, request: payload, fetchImpl, signal: abortController.signal, operation });
-          return json(response, 200, result);
+          const result = await generateImage({
+            settings,
+            request: payload,
+            fetchImpl,
+            signal: abortController.signal,
+            operation,
+            assetResolver: (reference) => imageAssetStore.dataUrl(reference),
+          });
+          return json(response, 200, await persistImageResult(imageAssetStore, result, { includePreview: payload.include_preview === true }));
         }
         const taskMatch = /^\/internal\/images\/tasks\/([^/]+)$/.exec(pathname);
         if (request.method === "GET" && taskMatch) {
           const result = await getImageTask({ settings, taskId: decodeURIComponent(taskMatch[1]), fetchImpl, signal: abortController.signal });
-          return json(response, 200, result);
+          const includePreview = new URL(rawUrl, "http://127.0.0.1").searchParams.get("include_preview") === "1";
+          const persisted = result.images?.length ? await persistImageResult(imageAssetStore, result, { includePreview }) : result;
+          return json(response, 200, persisted);
+        }
+        if (request.method === "GET" && pathname === "/internal/images/assets") {
+          const limit = new URL(rawUrl, "http://127.0.0.1").searchParams.get("limit");
+          return json(response, 200, { images: await imageAssetStore.list({ limit }) });
+        }
+        const assetMatch = /^\/internal\/images\/assets\/(img_[a-f0-9]{64})$/.exec(pathname);
+        if (request.method === "GET" && assetMatch) {
+          const includePreview = new URL(rawUrl, "http://127.0.0.1").searchParams.get("include_preview") === "1";
+          return json(response, 200, { images: [await imageAssetStore.get(assetMatch[1], { includeData: includePreview })] });
         }
         return json(response, 404, { error: { message: "Image endpoint not found.", type: "invalid_request_error" } });
       }

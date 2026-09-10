@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a local image asset library under the user's MOMO Proxy home. Image plugin results now return short content-addressed asset IDs and local paths instead of Base64 by default, while later edits can safely reuse `asset:img_...` references.
+- Added PNG/JPEG/WebP content sniffing, MIME and SHA-256 integrity validation, atomic private writes, deduplication, retention/quota cleanup, and opt-in inline previews.
+- Added `image_asset_get` and `image_asset_list` tools. Arbitrary local paths remain forbidden, and the local library does not upload images for persistent storage or CDN hosting. A selected asset is sent upstream only for a user-requested edit.
 - Added periodic update checks, tray update notifications, trusted versioned package selection, SHA-256 verification, archive traversal/link/size admission, and automatic rollback when a manually or explicitly enabled update fails health/version verification. Update checks are enabled by default; unattended installation is opt-in.
 - Added bounded local-only diagnostics for 413, 429, 5xx, startup, crash, sync, and update errors. No diagnostic events, credentials, prompts, responses, file paths, Base64, or media contents are sent to MOMO or another remote service.
 - Added final outbound context admission with a 16 MiB soft limit and 18 MiB hard limit below the production edge ceiling.

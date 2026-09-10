@@ -1,4 +1,6 @@
 import { createInterface } from "node:readline";
+import { basename } from "node:path";
+import { pathToFileURL } from "node:url";
 import { resolveSettings } from "./config.mjs";
 
 function result(id, content = [], isError = false) {
@@ -15,6 +17,18 @@ function imageContent(image) {
   return null;
 }
 
+function localResourceContent(image) {
+  if (!image.local_path || !image.asset_id) return null;
+  return {
+    type: "resource_link",
+    name: basename(image.local_path),
+    uri: pathToFileURL(image.local_path).href,
+    description: "MOMO image saved on this computer (" + image.asset_id + ")",
+    mimeType: image.mime_type || "application/octet-stream",
+    ...(Number.isFinite(image.bytes) ? { size: image.bytes } : {}),
+  };
+}
+
 const LEGACY_MODELS = ["gpt-image-2-momoapi", "gpt-image-2", "gemini-3.1-flash-image"];
 const COMMON_PROPERTIES = {
   prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 10 },
@@ -27,6 +41,7 @@ const COMMON_PROPERTIES = {
   background: { type: "string", enum: ["auto", "opaque", "transparent"] },
   moderation: { type: "string", enum: ["auto", "low"] },
   stream: { type: "boolean" }, partial_images: { type: "integer", minimum: 0, maximum: 3 },
+  include_preview: { type: "boolean", default: false, description: "Explicitly return inline image content. Default false keeps Base64 out of conversation history." },
 };
 
 function toolDefs(capabilities) {
@@ -36,8 +51,10 @@ function toolDefs(capabilities) {
   return [
     { name: "image_capabilities", description: "List known MOMO image models, availability, operations, and limits.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     { name: "image_generate", description: "Generate one or more images through the local MOMO API Proxy. Call image_capabilities for model-specific limits.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES }, required: ["prompt"], additionalProperties: false } },
-    { name: "image_edit", description: "Edit up to the model-specific number of reference images. GPT Image 2.5 also accepts mask and input_fidelity.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES, reference_images: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 16 }, mask: { type: "string" }, input_fidelity: { type: "string", enum: ["low", "high"] } }, required: ["prompt", "reference_images"], additionalProperties: false } },
-    { name: "image_task_status", description: "Check an asynchronous MOMO image task.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false } },
+    { name: "image_edit", description: "Edit up to the model-specific number of reference images. Use asset:<asset_id> to reuse a locally saved result without putting Base64 in history.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES, reference_images: { type: "array", items: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, minItems: 1, maxItems: 16 }, mask: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, input_fidelity: { type: "string", enum: ["low", "high"] } }, required: ["prompt", "reference_images"], additionalProperties: false } },
+    { name: "image_task_status", description: "Check an asynchronous MOMO image task. Completed images are saved locally.", inputSchema: { type: "object", properties: { task_id: { type: "string" }, include_preview: COMMON_PROPERTIES.include_preview }, required: ["task_id"], additionalProperties: false } },
+    { name: "image_asset_get", description: "Get metadata for a locally saved image asset. Inline preview is opt-in.", inputSchema: { type: "object", properties: { asset_id: { type: "string", pattern: "^img_[a-f0-9]{64}$" }, include_preview: COMMON_PROPERTIES.include_preview }, required: ["asset_id"], additionalProperties: false } },
+    { name: "image_asset_list", description: "List recently used images saved on this computer.", inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 1000, default: 100 } }, additionalProperties: false } },
   ];
 }
 
@@ -61,8 +78,25 @@ async function callProxy(path, method = "GET", body) {
 }
 
 function toolResult(payload) {
-  const content = [text({ task_id: payload.task_id || null, images: payload.images?.map((image) => ({ url: image.url, mime_type: image.mime_type })) || [], status: payload.raw_status || null, terminal: Boolean(payload.terminal), ...(payload.error ? { error: payload.error } : {}) })];
+  const content = [text({
+    task_id: payload.task_id || null,
+    images: payload.images?.map((image) => ({
+      asset_id: image.asset_id,
+      reference: image.reference,
+      local_path: image.local_path,
+      mime_type: image.mime_type,
+      bytes: image.bytes,
+      sha256: image.sha256,
+      created_at: image.created_at,
+      last_accessed_at: image.last_accessed_at,
+    })) || [],
+    status: payload.raw_status || null,
+    terminal: Boolean(payload.terminal),
+    ...(payload.error ? { error: payload.error } : {}),
+  })];
   for (const image of payload.images || []) {
+    const resource = localResourceContent(image);
+    if (resource) content.push(resource);
     const block = imageContent(image);
     if (block) content.push(block);
   }
@@ -78,7 +112,7 @@ export async function runImageMcp() {
     try { request = JSON.parse(line); } catch { continue; }
     if (request.method === "notifications/initialized" || request.method === "notifications/cancelled") continue;
     if (request.method === "initialize") {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.3.0" } } }) + "\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.4.0" } } }) + "\n");
       continue;
     }
     try {
@@ -97,7 +131,9 @@ export async function runImageMcp() {
         }
         else if (name === "image_generate") payload = await callProxy("/internal/images/generate", "POST", args);
         else if (name === "image_edit") payload = await callProxy("/internal/images/edit", "POST", args);
-        else if (name === "image_task_status") payload = await callProxy(`/internal/images/tasks/${encodeURIComponent(args.task_id || "")}`);
+        else if (name === "image_task_status") payload = await callProxy(`/internal/images/tasks/${encodeURIComponent(args.task_id || "")}` + (args.include_preview ? "?include_preview=1" : ""));
+        else if (name === "image_asset_get") payload = await callProxy(`/internal/images/assets/${encodeURIComponent(args.asset_id || "")}` + (args.include_preview ? "?include_preview=1" : ""));
+        else if (name === "image_asset_list") payload = await callProxy(`/internal/images/assets?limit=${encodeURIComponent(args.limit || 100)}`);
         else throw new Error(`Unknown tool: ${name}`);
         const content = name === "image_capabilities" ? [text(payload)] : toolResult(payload);
         process.stdout.write(JSON.stringify(result(request.id, content)) + "\n");

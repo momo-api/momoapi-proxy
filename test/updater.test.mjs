@@ -19,17 +19,17 @@ test("checkLatestVersion detects updates from CDN JSON payload", async () => {
   const fakeFetch = async (url) => {
     if (url.includes("bridge-latest.json")) {
       return new Response(JSON.stringify({
-        version: "0.12.1",
-        url: "https://momoapi.us/install/packages/momoapi-proxy-0.12.1.tgz",
+        version: "0.13.1",
+        url: "https://momoapi.us/install/packages/momoapi-proxy-0.13.1.tgz",
         latest_url: "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (url.includes("api.github.com")) {
       return new Response(JSON.stringify({
-        tag_name: "v0.12.1",
+        tag_name: "v0.13.1",
         assets: [{
-          name: "momoapi-proxy-0.12.1.tgz",
-          browser_download_url: "https://github.com/momo-api/momoapi-proxy/releases/download/v0.12.1/momoapi-proxy-0.12.1.tgz",
+          name: "momoapi-proxy-0.13.1.tgz",
+          browser_download_url: "https://github.com/momo-api/momoapi-proxy/releases/download/v0.13.1/momoapi-proxy-0.13.1.tgz",
           digest: `sha256:${checksum}`,
         }],
       }), { status: 200 });
@@ -38,9 +38,9 @@ test("checkLatestVersion detects updates from CDN JSON payload", async () => {
   };
 
   const info = await checkLatestVersion({ endpoint: "https://mock.momo", fetchImpl: fakeFetch });
-  assert.equal(info.latest, "0.12.1");
+  assert.equal(info.latest, "0.13.1");
   assert.equal(info.hasUpdate, true);
-  assert.equal(info.downloadUrl, "https://momoapi.us/install/packages/momoapi-proxy-0.12.1.tgz");
+  assert.equal(info.downloadUrl, "https://momoapi.us/install/packages/momoapi-proxy-0.13.1.tgz");
 });
 
 test("checkLatestVersion prefers a newer GitHub release over a stale CDN manifest", async () => {

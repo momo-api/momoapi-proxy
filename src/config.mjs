@@ -44,6 +44,7 @@ export function newLocalToken() {
 
 export function resolveSettings(env = process.env) {
   const saved = readSettings(env);
+  const imageAssets = saved.imageAssets && typeof saved.imageAssets === "object" ? saved.imageAssets : {};
   // An installed daemon must remain pinned to its saved credential. Long-lived
   // shells (Codex/Desktop in particular) can retain an older process-level
   // MOMO_API_KEY after the user's credential has been updated. Treat the env
@@ -70,5 +71,12 @@ export function resolveSettings(env = process.env) {
     diagnosticsEnabled: saved.diagnosticsEnabled !== false,
     maxRequestBodyMb: saved.maxRequestBodyMb ? Number(saved.maxRequestBodyMb) : 64,
     contextPolicy: saved.contextPolicy && typeof saved.contextPolicy === "object" ? saved.contextPolicy : {},
+    imageAssetDirectory: join(appHome(env), "images"),
+    imageAssets: {
+      maxAssetMb: imageAssets.maxAssetMb === undefined ? 20 : Number(imageAssets.maxAssetMb),
+      maxTotalMb: imageAssets.maxTotalMb === undefined ? 2048 : Number(imageAssets.maxTotalMb),
+      maxAssets: imageAssets.maxAssets === undefined ? 2000 : Number(imageAssets.maxAssets),
+      retentionDays: imageAssets.retentionDays === undefined ? 30 : Number(imageAssets.retentionDays),
+    },
   };
 }

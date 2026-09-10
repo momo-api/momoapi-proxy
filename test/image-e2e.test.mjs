@@ -8,12 +8,18 @@ import { createMomoSwitch } from "../src/server.mjs";
 
 test("image MCP end-to-end over a fake upstream", async () => {
   const home = mkdtempSync(join(tmpdir(), "momo-image-e2e-"));
-  const settings = { endpoint: "https://mock.gateway", apiKey: "test-key-not-real", localToken: "test-local-token", host: "127.0.0.1", port: 0, maxRequestBodyMb: 64 };
-  const fakeFetch = async (url) => {
+  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mYQAAAAASUVORK5CYII=";
+  const settings = { endpoint: "https://mock.gateway", apiKey: "test-key-not-real", localToken: "test-local-token", host: "127.0.0.1", port: 0, maxRequestBodyMb: 64, imageAssetDirectory: join(home, "images") };
+  const fakeFetch = async (url, init = {}) => {
     const target = String(url);
     if (target === "https://mock.gateway/v1/models") return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
-    if (target === "https://mock.gateway/v1/images/generations") return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=", task_id: "task-e2e" }] }), { status: 200, headers: { "content-type": "application/json" } });
-    if (target === "https://mock.gateway/v1/images/generations/task-e2e") return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    if (target === "https://mock.gateway/v1/images/generations") return new Response(JSON.stringify({ data: [{ b64_json: pngBase64, task_id: "task-e2e" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    if (target === "https://mock.gateway/v1/images/generations/task-e2e") return new Response(JSON.stringify({ data: [{ b64_json: pngBase64 }] }), { status: 200, headers: { "content-type": "application/json" } });
+    if (target === "https://mock.gateway/v1/chat/completions") {
+      const body = JSON.parse(init.body);
+      assert.match(body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
+      return new Response("data: " + JSON.stringify({ choices: [{ delta: { content: "data:image/png;base64," + pngBase64 } }] }) + "\n\ndata: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
     throw new Error("unexpected upstream: " + target);
   };
   const server = createMomoSwitch(settings, { fetchImpl: fakeFetch });
@@ -51,10 +57,27 @@ test("image MCP end-to-end over a fake upstream", async () => {
     assert.equal(models.includes("gpt-image-2.5-flare"), false);
     send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "image_generate", arguments: { model: "gpt-image-2-momoapi", prompt: "test image", n: 1, aspect_ratio: "1:1", resolution: "1k" } } });
     await waitFor('"id":3');
-    assert.match(output, /aGVsbG8=/);
+    const generated = JSON.parse(output.trim().split(/\r?\n/).find((line) => line.includes('"id":3')));
+    assert.doesNotMatch(JSON.stringify(generated), new RegExp(pngBase64));
+    const summary = JSON.parse(generated.result.content[0].text);
+    assert.match(summary.images[0].asset_id, /^img_[a-f0-9]{64}$/);
+    assert.equal(summary.images[0].reference, "asset:" + summary.images[0].asset_id);
+    assert.equal(summary.images[0].local_path, join(home, "images", summary.images[0].asset_id + ".png"));
+    assert.equal(generated.result.content[1].type, "resource_link");
+    assert.match(generated.result.content[1].uri, /^file:\/\//);
     send({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "image_task_status", arguments: { task_id: "task-e2e" } } });
     await waitFor('"id":4');
     assert.match(output, /task-e2e/);
+    send({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "image_asset_get", arguments: { asset_id: summary.images[0].asset_id } } });
+    await waitFor('"id":5');
+    const fetched = JSON.parse(output.trim().split(/\r?\n/).find((line) => line.includes('"id":5')));
+    assert.doesNotMatch(JSON.stringify(fetched), new RegExp(pngBase64));
+    assert.match(fetched.result.content[0].text, new RegExp(summary.images[0].asset_id));
+    send({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "image_edit", arguments: { model: "gpt-image-2-momoapi", prompt: "edit local image", reference_images: [summary.images[0].reference] } } });
+    await waitFor('"id":6');
+    const edited = JSON.parse(output.trim().split(/\r?\n/).find((line) => line.includes('"id":6')));
+    assert.doesNotMatch(JSON.stringify(edited), new RegExp(pngBase64));
+    assert.match(edited.result.content[0].text, new RegExp(summary.images[0].asset_id));
   } finally {
     child.kill();
     await new Promise((resolve) => child.once("exit", resolve));
