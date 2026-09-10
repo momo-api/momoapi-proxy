@@ -42,12 +42,13 @@
 ## Phase 3（本机图片资源库）
 
 - 生图/编辑结果默认保存到用户电脑的 `~/.momoapi-proxy/images`，MCP 历史只保存 `asset_id`、路径、MIME、大小和 SHA-256。
-- 默认不返回 `b64_json`；只有调用方显式设置 `include_preview: true` 才提供当前轮内嵌预览。
+- MCP 永不返回完整 `b64_json`，即使旧调用方仍传 `include_preview: true`；原图只保存在用户本机。
 - 后续编辑使用 `asset:img_...`，代理仅在该次上游请求中从本机读取并转换为 Data URL 或 multipart 文件。
 - 不接受模型传入任意本机路径，防止路径穿越或读取用户其他文件。
 - PNG/JPEG/WebP 内容嗅探、MIME 校验、SHA-256 完整性校验、20 MiB 单图上限、内容寻址去重和原子写入。
 - 默认 30 天无访问清理、2 GiB/2,000 张容量上限；按最近访问时间淘汰，正在写入的资源不会被本次清理删除。
 - 图片不上传 MOMO CDN、公共对象存储或 NewAPI 做持久化；仅在用户要求后续编辑时，把指定 `asset_id` 对应图片作为该次模型请求输入。API Key 仍只由本地代理保存。
+- 若 MOMO 生图响应同时提供同源 HTTPS URL，代理将其保存为私有资产元数据并向 MCP 返回带本机 HMAC 的不透明引用；只在紧随工具调用的当前轮验证签名与本地资产后，将该 URL 提升为 Responses `input_image`。伪造、历史、HTTP、跨域、缺失资产均不展开。
 
 ## 验收标准
 

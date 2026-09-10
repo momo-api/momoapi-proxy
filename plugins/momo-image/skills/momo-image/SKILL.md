@@ -14,7 +14,7 @@ Use the momo-image MCP tools. The local proxy owns the MOMO API key; never ask t
 3. Generated and edited images are saved under the local proxy image directory. Keep the returned `asset_id` or `asset:img_...` reference in the conversation instead of requesting an inline preview by default.
 4. For a reference-image transformation, prefer `asset:img_...` in `reference_images`. HTTPS image URLs and data:image base64 values remain accepted for new external inputs.
 5. If a call returns a task_id without an image, poll image_task_status until an image or terminal status is returned. Stop on failed, error, cancelled/canceled, or expired instead of polling forever. Image jobs can take several minutes.
-6. Use image_asset_get or image_asset_list when the user refers to a previously generated local image. Set `include_preview: true` only when the current turn truly needs inline visual content; previews can enlarge conversation history.
+6. Use image_asset_get or image_asset_list when the user refers to a previously generated local image. These tools return compact metadata and never inline the full image. The local proxy may attach a trusted MOMO HTTPS image URL to the immediate next model turn through its signed vision-reference mechanism.
 7. Tell the user where the local file was saved. Never expose MOMO keys, local tokens, authorization headers, or unredacted request logs.
 8. Treat `available: false` as authoritative. Do not call or claim support for a catalog-gated model until it becomes available.
 

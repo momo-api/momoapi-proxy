@@ -110,7 +110,7 @@ momoapi plugin install
 
 Use momoapi install --no-image-plugin only when an administrator intentionally does not want Codex image capabilities. The plugin uses the MOMO key already stored by the local proxy; it does not ask users to paste the key again. GPT Image 2.5 Sunburst and Flare remain hidden until the authenticated MOMO model catalog reports an available channel.
 
-Image results are saved on the user's own computer under `~/.momoapi-proxy/images`. By default, the plugin returns only a short `asset_id` and local path, not the image Base64, so generated pictures do not accumulate in conversation history. Later edits can reference `asset:img_...`. Inline previews are opt-in with `include_preview: true`.
+Image results are saved on the user's own computer under `~/.momoapi-proxy/images`. The plugin returns only compact metadata, a short `asset_id`, and a local path—never the full image Base64—so generated pictures do not accumulate in conversation history. When MOMO also returns a same-origin HTTPS result URL, the proxy adds a signed opaque vision reference; on the immediate next model turn it resolves that reference locally and sends the trusted HTTPS URL as `input_image`. Later image edits can reference `asset:img_...`.
 
 The library does not upload images to a CDN or remote storage. When the user requests a later edit, only the selected asset is read locally and sent as that edit request's model input.
 

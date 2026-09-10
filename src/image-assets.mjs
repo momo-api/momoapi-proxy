@@ -91,7 +91,31 @@ function publicMetadata(metadata) {
     sha256: metadata.sha256,
     created_at: metadata.created_at,
     last_accessed_at: metadata.last_accessed_at,
+    vision_available: Boolean(metadata.source_url),
   };
+}
+
+function trustedOrigins(values) {
+  const origins = new Set();
+  for (const value of values || []) {
+    try {
+      const parsed = new URL(String(value || ""));
+      if (parsed.protocol === "https:") origins.add(parsed.origin);
+    } catch { /* Ignore invalid configured origins. */ }
+  }
+  return origins;
+}
+
+function normalizeSourceUrl(value, allowedOrigins) {
+  if (!value || allowedOrigins.size === 0) return null;
+  try {
+    const parsed = new URL(String(value));
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !allowedOrigins.has(parsed.origin)) return null;
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return null;
+  }
 }
 
 export function isImageAssetReference(value) {
@@ -100,13 +124,14 @@ export function isImageAssetReference(value) {
 }
 
 export class ImageAssetStore {
-  constructor({ rootDir, maxAssetBytes = 20 * MEBIBYTE, maxTotalBytes = 2 * 1024 * MEBIBYTE, maxAssets = 2000, retentionDays = 30 } = {}) {
+  constructor({ rootDir, maxAssetBytes = 20 * MEBIBYTE, maxTotalBytes = 2 * 1024 * MEBIBYTE, maxAssets = 2000, retentionDays = 30, trustedSourceOrigins = [] } = {}) {
     if (!rootDir) throw new Error("Image asset rootDir is required.");
     this.rootDir = rootDir;
     this.maxAssetBytes = Math.floor(positiveNumber(maxAssetBytes, 20 * MEBIBYTE, MEBIBYTE, 20 * MEBIBYTE));
     this.maxTotalBytes = Math.floor(positiveNumber(maxTotalBytes, 2 * 1024 * MEBIBYTE, this.maxAssetBytes, 64 * 1024 * MEBIBYTE));
     this.maxAssets = Math.floor(positiveNumber(maxAssets, 2000, 10, 100000));
     this.retentionMs = positiveNumber(retentionDays, 30, 1, 3650) * 24 * 60 * 60 * 1000;
+    this.trustedSourceOrigins = trustedOrigins(trustedSourceOrigins);
     this.activeAssetIds = new Map();
   }
 
@@ -159,7 +184,7 @@ export class ImageAssetStore {
     return { ...metadata, local_path: localPath };
   }
 
-  async putBase64({ b64_json, mime_type }) {
+  async putBase64({ b64_json, mime_type, source_url }) {
     await ensurePrivateDirectory(this.rootDir);
     const bytes = decodeBase64(b64_json, this.maxAssetBytes);
     const detectedMimeType = sniffMimeType(bytes);
@@ -179,15 +204,17 @@ export class ImageAssetStore {
     try {
       const now = new Date().toISOString();
       let createdAt = now;
+      let existingSourceUrl = null;
       try {
         const existing = await this.readMetadata(assetId);
         createdAt = existing.created_at || now;
+        existingSourceUrl = normalizeSourceUrl(existing.source_url, this.trustedSourceOrigins);
       } catch (error) {
         if (error?.code !== "image_asset_not_found") throw error;
         await atomicWrite(localPath, bytes);
       }
       const metadata = {
-        version: 1,
+        version: 2,
         asset_id: assetId,
         extension,
         mime_type: detectedMimeType,
@@ -195,6 +222,9 @@ export class ImageAssetStore {
         sha256,
         created_at: createdAt,
         last_accessed_at: now,
+        ...(normalizeSourceUrl(source_url, this.trustedSourceOrigins) || existingSourceUrl
+          ? { source_url: normalizeSourceUrl(source_url, this.trustedSourceOrigins) || existingSourceUrl }
+          : {}),
       };
       await atomicWrite(this.metadataPath(assetId), JSON.stringify(metadata, null, 2) + "\n");
       await this.cleanup({ preserveAssetIds: new Set([assetId]) });
@@ -235,6 +265,11 @@ export class ImageAssetStore {
   async dataUrl(reference) {
     const asset = await this.get(reference, { includeData: true });
     return "data:" + asset.mime_type + ";base64," + asset.b64_json;
+  }
+
+  async sourceUrl(reference) {
+    const metadata = await this.readMetadata(reference);
+    return normalizeSourceUrl(metadata.source_url, this.trustedSourceOrigins);
   }
 
   async list({ limit = 100 } = {}) {
@@ -300,6 +335,7 @@ export function createImageAssetStore(settings = {}) {
     maxTotalBytes: positiveNumber(policy.maxTotalMb, 2048, 20, 65536) * MEBIBYTE,
     maxAssets: positiveNumber(policy.maxAssets, 2000, 10, 100000),
     retentionDays: positiveNumber(policy.retentionDays, 30, 1, 3650),
+    trustedSourceOrigins: [settings.endpoint],
   });
 }
 

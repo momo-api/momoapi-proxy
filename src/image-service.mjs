@@ -476,20 +476,34 @@ export function extractImageResults(payload) {
   return { images: uniqueImages, task_id: taskIds[0] || null, raw_status: rawStatus, terminal, ...(error ? { error } : {}) };
 }
 
-async function materializeImages(result, fetchImpl, signal, lookupImpl) {
+function trustedSourceUrl(value, endpoint) {
+  try {
+    const parsed = new URL(String(value || ""));
+    const trustedOrigin = new URL(String(endpoint || "")).origin;
+    if (parsed.protocol !== "https:" || parsed.origin !== trustedOrigin || parsed.username || parsed.password) return null;
+    parsed.hash = "";
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+async function materializeImages(result, fetchImpl, signal, lookupImpl, endpoint) {
   const images = [];
   for (const image of result.images) {
-    if (image.b64_json || !image.url || !/^https?:\/\//i.test(image.url)) { images.push(image); continue; }
+    const sourceUrl = trustedSourceUrl(image.url, endpoint);
+    const materialized = sourceUrl ? { ...image, source_url: sourceUrl } : image;
+    if (image.b64_json || !image.url || !/^https?:\/\//i.test(image.url)) { images.push(materialized); continue; }
     try {
       const parsed = validateReferenceUrl(image.url);
       await assertPublicHostname(parsed, lookupImpl);
       const response = await fetchImpl(parsed, { redirect: "error", signal: imageSignal(signal, 60000) });
-      if (!response.ok) { images.push(image); continue; }
+      if (!response.ok) { images.push(materialized); continue; }
       const mimeType = (response.headers.get("content-type") || "image/png").split(";", 1)[0];
-      if (!mimeType.toLowerCase().startsWith("image/")) { images.push(image); continue; }
+      if (!mimeType.toLowerCase().startsWith("image/")) { images.push(materialized); continue; }
       const bytes = await responseBytesWithinLimit(response);
-      images.push({ ...image, b64_json: bytes.toString("base64"), mime_type: mimeType });
-    } catch { images.push(image); }
+      images.push({ ...materialized, b64_json: bytes.toString("base64"), mime_type: mimeType });
+    } catch { images.push(materialized); }
   }
   return { ...result, images };
 }
@@ -548,7 +562,7 @@ export async function generateImage({ settings, request, fetchImpl = fetch, look
   });
   const payload = await readUpstreamPayload(upstream);
   if (!upstream.ok) throw fail(payload?.error?.message || "Image upstream returned HTTP " + upstream.status, upstream.status >= 400 && upstream.status < 500 ? upstream.status : 502, "image_upstream_error");
-  const result = await materializeImages(extractImageResults(payload), fetchImpl, signal, lookupImpl);
+  const result = await materializeImages(extractImageResults(payload), fetchImpl, signal, lookupImpl, endpoint);
   if (!GPT_IMAGE_25_MODELS.has(normalized.model)) return result;
   const mimeType = normalized.output_format === "jpeg" ? "image/jpeg" : "image/" + normalized.output_format;
   return { ...result, images: result.images.map((image) => image.b64_json && !image.mime_type ? { ...image, mime_type: mimeType } : image) };
@@ -563,5 +577,5 @@ export async function getImageTask({ settings, taskId, fetchImpl = fetch, lookup
   });
   const payload = await readUpstreamPayload(upstream);
   if (!upstream.ok) throw fail(payload?.error?.message || "Image task returned HTTP " + upstream.status, upstream.status, "image_task_error");
-  return materializeImages(extractImageResults(payload), fetchImpl, signal, lookupImpl);
+  return materializeImages(extractImageResults(payload), fetchImpl, signal, lookupImpl, endpoint);
 }
