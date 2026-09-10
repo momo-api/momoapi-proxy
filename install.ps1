@@ -62,42 +62,34 @@ if (-not $ApiKey) {
   exit 1
 }
 
-# 3. Download / Install to ~/.momoapi-proxy
-$installDir = [System.IO.Path]::Combine($HOME, ".momoapi-proxy", "app")
-if (Test-Path $installDir) {
-  Remove-Item -Recurse -Force $installDir
+# 3. Download and verify an immutable package from the official manifest.
+$installRoot = [System.IO.Path]::Combine($HOME, ".momoapi-proxy")
+$installDir = [System.IO.Path]::Combine($installRoot, "app")
+$stagingDir = [System.IO.Path]::Combine($installRoot, ".install-" + [guid]::NewGuid().ToString("N"))
+$tgzPath = [System.IO.Path]::Combine($installRoot, "package.tgz")
+New-Item -ItemType Directory -Path $installRoot, $stagingDir -Force | Out-Null
+Write-Step "Reading and verifying the official release manifest..."
+$manifestPath = [System.IO.Path]::Combine($installRoot, "bridge-latest.json")
+Invoke-WebRequest -Uri "https://momoapi.us/install/bridge-latest.json" -OutFile $manifestPath -UseBasicParsing -TimeoutSec 20
+$manifest = Get-Content -Raw $manifestPath | ConvertFrom-Json
+if ($manifest.version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$' -or $manifest.sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw "Official release manifest is invalid or missing SHA-256." }
+$version = [string]$manifest.version
+$expectedSha = ([string]$manifest.sha256).ToLowerInvariant()
+$urls = @("https://momoapi.us/install/packages/momoapi-proxy-$version.tgz", "https://github.com/momo-api/momoapi-proxy/releases/download/v$version/momoapi-proxy-$version.tgz")
+$downloaded = $false
+foreach ($url in $urls) {
+  try {
+    Invoke-WebRequest -Uri $url -OutFile $tgzPath -UseBasicParsing -TimeoutSec 60
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $tgzPath).Hash.ToLowerInvariant() -eq $expectedSha) { $downloaded = $true; break }
+  } catch {}
 }
-  New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-  
-  Write-Step "Downloading latest release package..."
-  $urls = @(
-    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.11.0/momoapi-proxy-0.11.0.tgz",
-    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.11.0/momoapi-proxy-0.11.0.tgz",
-    "$Endpoint/install/packages/momoapi-proxy-latest.tgz",
-    "$Endpoint/install/packages/momo-api-codex-bridge-latest.tgz",
-    "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",
-    "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz"
-  )
-  $tgzPath = [System.IO.Path]::Combine($HOME, ".momoapi-proxy", "package.tgz")
-
-  $downloaded = $false
-  foreach ($url in $urls) {
-    try {
-      Invoke-WebRequest -Uri $url -OutFile $tgzPath -UseBasicParsing -TimeoutSec 15
-      if ((Test-Path $tgzPath) -and (Get-Item $tgzPath).Length -gt 1000) {
-        $downloaded = $true
-        break
-      }
-    } catch {}
-  }
-
-  if ($downloaded) {
-    tar -xzf $tgzPath -C $installDir --strip-components=1
-    Remove-Item $tgzPath -Force -ErrorAction SilentlyContinue
-  } else {
-    Write-Step "Direct download failed, falling back to git clone..."
-    git clone https://github.com/momo-api/momoapi-proxy.git $installDir
-  }
+if (-not $downloaded) { throw "Unable to download a release package matching the official SHA-256." }
+tar -xzf $tgzPath -C $stagingDir --strip-components=1 --no-same-owner --no-same-permissions
+$package = Get-Content -Raw (Join-Path $stagingDir "package.json") | ConvertFrom-Json
+if ([string]$package.version -ne $version) { throw "Package version does not match the verified manifest." }
+if (Test-Path $installDir) { Remove-Item -Recurse -Force $installDir }
+Move-Item -LiteralPath $stagingDir -Destination $installDir
+Remove-Item $tgzPath, $manifestPath -Force -ErrorAction SilentlyContinue
 
 # 4. Generate Windows CLI wrappers in bin & compile Native Tray EXE
 $binDir = [System.IO.Path]::Combine($installDir, "bin")
