@@ -17,6 +17,7 @@ import { installWindowsDesktop } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
 import { createImageAssetStore } from "../src/image-assets.mjs";
 import { configureDiagnostics, getDiagnosticsMetrics, readRecentDiagnostics, recordDiagnosticEvent } from "../src/diagnostics.mjs";
+import { getImagePluginStatus, installImagePlugin } from "../src/plugin-install.mjs";
 
 process.on("uncaughtException", (err) => {
   logError("Uncaught Exception", err);
@@ -143,6 +144,7 @@ async function promptApiKey() {
 async function main() {
   if (command === "auto") {
     let settings = null;
+    let imagePluginResult = null;
     try { settings = resolveSettings(); } catch { settings = readSettings(); }
     const port = settings?.port || 18789;
 
@@ -156,10 +158,24 @@ async function main() {
         process.exit(1);
       }
       console.log("\n正在为您自动配置 Codex 与模型目录...");
-      const result = await setup({ apiKey: enteredKey, endpoint: "https://momoapi.us", port, autostart: true, desktopAliases: true });
+      const result = await setup({ apiKey: enteredKey, endpoint: "https://momoapi.us", port, autostart: true, desktopAliases: true, imagePlugin: true });
       console.log("✅ [1/4] 已写入 Codex 配置: ~/.codex/config.toml (Provider: momoapi-proxy)");
       console.log("✅ [2/4] 已同步模型目录: " + result.models + " 个模型 (默认: " + result.defaultModel + ")");
-      settings = { apiKey: enteredKey, endpoint: "https://momoapi.us", port };
+      imagePluginResult = result.imagePlugin;
+      settings = { apiKey: enteredKey, endpoint: "https://momoapi.us", port, imagePluginEnabled: true };
+    } else if (settings.imagePluginEnabled !== false) {
+      imagePluginResult = getImagePluginStatus();
+      if (!imagePluginResult.installed || !imagePluginResult.enabled) {
+        imagePluginResult = installImagePlugin();
+      }
+    }
+
+    if (imagePluginResult) {
+      if (imagePluginResult.installed && imagePluginResult.enabled) {
+        console.log("✅ MOMO Image 生图插件已安装并启用；新建 Codex 会话后生效。");
+      } else {
+        console.warn("⚠️ 生图插件未自动启用: " + imagePluginResult.message);
+      }
     }
 
     let isRunning = false;
@@ -205,15 +221,20 @@ async function main() {
     const port = Number(value("--port") || 18789);
     const autostart = !hasFlag("--no-autostart");
     const desktopAliases = !hasFlag("--no-desktop-aliases");
+    const imagePlugin = !hasFlag("--no-image-plugin");
 
     console.log("正在配置 MOMO API Proxy...");
-    const result = await setup({ apiKey, endpoint, port, autostart, desktopAliases });
+    const result = await setup({ apiKey, endpoint, port, autostart, desktopAliases, imagePlugin });
     const desktop = installWindowsDesktop({ port });
     console.log("MOMO API Proxy 配置成功！");
     console.log("  - 上游端点: " + (endpoint || "https://momoapi.us"));
     console.log("  - 本地代理: http://127.0.0.1:" + port + "/v1");
     console.log("  - 模型已同步: " + result.models + " (默认: " + result.defaultModel + ")");
+    console.log("  - MOMO Image 插件: " + (result.imagePlugin.installed && result.imagePlugin.enabled ? "已安装并启用" : result.imagePlugin.message));
     console.log("  - 桌面快捷方式: " + (desktop?.installed ? "已创建 (桌面/开始菜单/开机自启)" : "无"));
+    if (result.imagePlugin.installed && result.imagePlugin.enabled) {
+      console.log("  - 生图能力将在新建的 Codex 会话中加载");
+    }
     console.log("\n运行 'momoapi start' 启动后台服务，或直接双击桌面 'MOMO API Proxy' 图标。");
   } else if (command === "start" || command === "up" || command === "daemon") {
     let settings = null;
@@ -394,6 +415,19 @@ async function main() {
     } else {
       throw new Error("Usage: momoapi-proxy images [list|info <asset_id>|clean|delete <asset_id>]");
     }
+  } else if (command === "plugin") {
+    const action = args[0] || "status";
+    if (action === "install" || action === "repair") {
+      const result = installImagePlugin();
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.installed || !result.enabled) process.exitCode = 1;
+    } else if (action === "status") {
+      const result = getImagePluginStatus();
+      console.log(JSON.stringify(result, null, 2));
+      if (!result.installed || !result.enabled) process.exitCode = 1;
+    } else {
+      throw new Error("Usage: momoapi-proxy plugin [install|repair|status]");
+    }
   } else if (command === "status") {
     let settings = null;
     try {
@@ -557,6 +591,7 @@ async function main() {
           "--previous", res.previous,
           "--port", String(settings.port || 18789),
           "--parent-pid", String(process.pid),
+          ...(settings.imagePluginEnabled === false ? ["--no-image-plugin"] : []),
         ], {
           detached: true,
           stdio: "ignore",
@@ -590,7 +625,7 @@ async function main() {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy images [list|info|clean]  - Manage images saved on this computer\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy diagnostics [-n 100]       - Print local-only error metadata for support\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
+    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy plugin [status|install]   - Check or repair the MOMO Image plugin\n  momoapi-proxy images [list|info|clean]  - Manage images saved on this computer\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy diagnostics [-n 100]       - Print local-only error metadata for support\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
   }
 }
 

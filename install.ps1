@@ -3,7 +3,8 @@ param(
   [string]$ApiKey = "",
   [string]$Endpoint = "https://momoapi.us",
   [int]$Port = 18789,
-  [switch]$NoAutostart
+  [switch]$NoAutostart,
+  [switch]$NoImagePlugin
 )
 
 $ErrorActionPreference = "Stop"
@@ -130,6 +131,7 @@ Remove-Item -Path (Join-Path $binDir "momo.ps1") -Force -ErrorAction SilentlyCon
 Write-Step "Configuring Codex provider & syncing models..."
 $setupArgs = @($bridgeBin, "install", "--api-key", $ApiKey, "--endpoint", $Endpoint, "--port", "$Port")
 if ($NoAutostart) { $setupArgs += "--no-autostart" }
+if ($NoImagePlugin) { $setupArgs += "--no-image-plugin" }
 
 & node @setupArgs
 if ($LASTEXITCODE -ne 0) {
@@ -169,6 +171,9 @@ Write-Host "Local Bridge is listening on: http://127.0.0.1:$Port/v1" -Foreground
 Write-Host "Taskbar System Tray Icon (Indigo M badge with Green Dot) is active." -ForegroundColor Green
 Write-Host "Codex CLI & ChatGPT Desktop have been configured with requires_openai_auth=false" -ForegroundColor Yellow
 Write-Host "Synced models are ready. Restart Codex App to use." -ForegroundColor Yellow
+if (-not $NoImagePlugin) {
+  Write-Host "MOMO Image plugin is installed automatically. Start a new Codex conversation to load it." -ForegroundColor Yellow
+}
 Write-Host ""
 Write-Host "Health Status:" -ForegroundColor Cyan
 & node "$bridgeBin" status

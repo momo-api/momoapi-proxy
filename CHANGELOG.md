@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.13.1 - 2026-09-10
+
+- The one-click installer, setup, and install now install and enable the bundled momo-image Codex plugin automatically. Existing installations also repair the plugin after a successful proxy update.
+- Added momoapi plugin status and momoapi plugin install for verification and repair, plus an explicit --no-image-plugin opt-out. Missing or outdated Codex CLIs produce a warning without breaking the text proxy installation.
+
+## 0.13.0 - 2026-09-10
+
 - Added a local image asset library under the user's MOMO Proxy home. Image plugin results now return short content-addressed asset IDs and local paths instead of Base64 by default, while later edits can safely reuse `asset:img_...` references.
 - Added PNG/JPEG/WebP content sniffing, MIME and SHA-256 integrity validation, atomic private writes, deduplication, retention/quota cleanup, and opt-in inline previews.
 - Added `image_asset_get` and `image_asset_list` tools. Arbitrary local paths remain forbidden, and the local library does not upload images for persistent storage or CDN hosting. A selected asset is sent upstream only for a user-requested edit.

@@ -25,6 +25,7 @@ It implements a focused subset of OpenCodex-inspired protocol compatibility; it 
 - **Doctor & Rollback**: Built-in environment diagnostic and one-step backup restore.
 - **Local-Only Diagnostics**: Keeps bounded metadata for 413/429/5xx and lifecycle failures in the user's profile; the proxy has no remote telemetry sender.
 - **Safe Update Checks**: Checks official MOMO/GitHub release metadata, accepts packages only from approved HTTPS hosts, verifies SHA-256 and archive structure, and leaves unattended installation disabled unless explicitly enabled.
+- **Automatic MOMO Image Plugin**: One-click setup installs and enables the bundled Codex image plugin by default; no second API key or manual marketplace command is required.
 
 ## Local security model
 
@@ -98,14 +99,16 @@ The setup command backs up `~/.codex/config.toml` and `~/.codex/auth.json`, writ
 
 ### MOMO Image plugin
 
-After installing and configuring MOMO API Proxy, add the repository marketplace and install the image plugin:
+The one-click installer and momoapi install now add and enable the bundled momo-image plugin automatically. Start a new Codex conversation after installation so Codex loads the plugin.
+
+To check or repair the plugin installation:
 
 ```powershell
-codex plugin marketplace add momo-api/momoapi-proxy --ref main
-codex plugin add momo-image@momo-api
+momoapi plugin status
+momoapi plugin install
 ```
 
-Start a new Codex conversation after installation. The plugin uses the MOMO key already stored by the local proxy; it does not ask users to paste the key again. GPT Image 2.5 Sunburst and Flare remain hidden until the authenticated MOMO model catalog reports an available channel.
+Use momoapi install --no-image-plugin only when an administrator intentionally does not want Codex image capabilities. The plugin uses the MOMO key already stored by the local proxy; it does not ask users to paste the key again. GPT Image 2.5 Sunburst and Flare remain hidden until the authenticated MOMO model catalog reports an available channel.
 
 Image results are saved on the user's own computer under `~/.momoapi-proxy/images`. By default, the plugin returns only a short `asset_id` and local path, not the image Base64, so generated pictures do not accumulate in conversation history. Later edits can reference `asset:img_...`. Inline previews are opt-in with `include_preview: true`.
 
@@ -130,9 +133,9 @@ node .\scripts\codex-cli-smoke.mjs --claude
 ## Deliberate limits
 
 - It is for Codex CLI first. Codex Desktop needs a separate acceptance pass per release.
-- It supports standard function tools. Image generation and editing are available through the optional MOMO Image plugin; Codex-hosted services such as `codex-auto-review`, browser/computer use, video generation, and every third-party MCP shape are not marked universally compatible.
+- It supports standard function tools. Image generation and editing are installed by default through the MOMO Image plugin; Codex-hosted services such as `codex-auto-review`, browser/computer use, video generation, and every third-party MCP shape are not marked universally compatible.
 - It implements the tested MOMO/Codex subset of `/v1/responses/compact`, server-side `context_management` admission, and `compaction_trigger`. It does not claim every OpenCodex persistence, routing, or account-pool behavior.
-- The installer is a developer command today; a signed one-line PowerShell/Bash installer and background process manager belong to the release work.
+- The signed one-line installers configure the proxy, background service, and bundled image plugin. Platform-specific Codex Desktop behavior still receives a separate acceptance pass per release.
 
 ## Context and media limits
 

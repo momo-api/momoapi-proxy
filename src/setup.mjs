@@ -6,6 +6,7 @@ import { newLocalToken, writeSettings, settingsPath } from "./config.mjs";
 import { installAutostart, uninstallAutostart } from "./autostart.mjs";
 import { installWindowsService, uninstallWindowsService } from "./service.mjs";
 import { migrateHistory } from "./history.mjs";
+import { installImagePlugin as installBundledImagePlugin } from "./plugin-install.mjs";
 
 export const MARKER = "# MOMOAPI_PROXY_MANAGED";
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free"]);
@@ -94,7 +95,17 @@ function isCodexCandidate(model) {
   return model?.id && status !== "hidden" && status !== "image" && status !== "video";
 }
 
-export async function setup({ apiKey, endpoint, port = 18789, autostart = true, desktopAliases = true, fetchImpl = fetch, env = process.env } = {}) {
+export async function setup({
+  apiKey,
+  endpoint,
+  port = 18789,
+  autostart = true,
+  desktopAliases = true,
+  imagePlugin = true,
+  imagePluginInstaller = installBundledImagePlugin,
+  fetchImpl = fetch,
+  env = process.env,
+} = {}) {
   if (!apiKey) throw new Error("--api-key is required.");
   const localToken = newLocalToken();
   const settings = {
@@ -108,6 +119,7 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
     autoUpdateEnabled: false,
     updateCheckIntervalHours: 12,
     diagnosticsEnabled: true,
+    imagePluginEnabled: Boolean(imagePlugin),
   };
   const modelsResponse = await fetchImpl(settings.endpoint + "/agent/catalog", { headers: { authorization: "Bearer " + apiKey } });
   let models;
@@ -172,7 +184,38 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
     historyResult = { migrated: 0, error: err.message };
   }
 
-  return { catalog, settingsFile, models: models.length, defaultModel, config, auth, localToken, autostart: autostartResult, historyMigrated: historyResult?.migrated || 0 };
+  let imagePluginResult = {
+    attempted: false,
+    installed: false,
+    enabled: false,
+    message: "MOMO Image plugin installation was skipped.",
+  };
+  if (imagePlugin) {
+    try {
+      imagePluginResult = imagePluginInstaller({ env });
+    } catch (err) {
+      imagePluginResult = {
+        attempted: true,
+        installed: false,
+        enabled: false,
+        errorCode: err.code || "codex_plugin_install_failed",
+        message: "MOMO Image plugin installation did not complete. Run 'momoapi plugin install' to retry.",
+      };
+    }
+  }
+
+  return {
+    catalog,
+    settingsFile,
+    models: models.length,
+    defaultModel,
+    config,
+    auth,
+    localToken,
+    autostart: autostartResult,
+    historyMigrated: historyResult?.migrated || 0,
+    imagePlugin: imagePluginResult,
+  };
 }
 
 export function rollback(env = process.env) {

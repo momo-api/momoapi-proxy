@@ -69,6 +69,7 @@ export function resolveSettings(env = process.env) {
     lastSyncStatus: saved.lastSyncStatus || null,
     lastError: saved.lastError || null,
     diagnosticsEnabled: saved.diagnosticsEnabled !== false,
+    imagePluginEnabled: saved.imagePluginEnabled !== false,
     maxRequestBodyMb: saved.maxRequestBodyMb ? Number(saved.maxRequestBodyMb) : 64,
     contextPolicy: saved.contextPolicy && typeof saved.contextPolicy === "object" ? saved.contextPolicy : {},
     imageAssetDirectory: join(appHome(env), "images"),
