@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.13.3 - 2026-09-10
+
+- Fix Windows self-update failures caused by the running proxy trying to rename its own application directory (`EPERM`). Updates are verified into a sibling staging directory and activated by an external supervisor after the updater exits.
+- Stop the old Windows service before switching files, verify the new daemon health, and restore the previous version automatically if activation fails.
+- Make automatic verified updates the default for new and existing installations. Administrators can explicitly select notification-only mode with `updateMode: "notify"`.
+- Improve tray update waiting and error reporting so it does not display only the initial "Checking..." line when the update fails.
+
 ## 0.13.2 - 2026-09-10
 
 - Image MCP results never return full inline Base64, even if an older caller sends `include_preview`; generated files remain in the user's local asset library.

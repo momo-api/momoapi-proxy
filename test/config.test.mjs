@@ -32,7 +32,8 @@ test("environment API key remains a fallback before setup creates settings", () 
       MOMO_BRIDGE_TOKEN: "local-token",
     });
     assert.equal(settings.apiKey, "bootstrap-env-key");
-    assert.equal(settings.autoUpdateEnabled, false);
+    assert.equal(settings.updateMode, "automatic");
+    assert.equal(settings.autoUpdateEnabled, true);
     assert.equal(settings.imagePluginEnabled, true);
     assert.equal(settings.imageAssetDirectory, join(home, "images"));
     assert.deepEqual(settings.imageAssets, { maxAssetMb: 20, maxTotalMb: 2048, maxAssets: 2000, retentionDays: 30 });
@@ -50,7 +51,7 @@ test("diagnostic reporting and update checks have safe configurable defaults", (
       endpoint: "https://momoapi.us/",
       diagnosticsEnabled: false,
       updateCheckEnabled: false,
-      autoUpdateEnabled: false,
+      updateMode: "notify",
       updateCheckIntervalHours: 24,
       imagePluginEnabled: false,
     }));
@@ -61,6 +62,27 @@ test("diagnostic reporting and update checks have safe configurable defaults", (
     assert.equal(settings.autoUpdateEnabled, false);
     assert.equal(settings.updateCheckIntervalHours, 24);
     assert.equal(settings.imagePluginEnabled, false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("legacy installations migrate to verified automatic updates unless notification-only mode is explicit", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-"));
+  try {
+    writeFileSync(join(home, "settings.json"), JSON.stringify({
+      apiKey: "saved-current-key", localToken: "local-token", autoUpdateEnabled: false,
+    }));
+    const migrated = resolveSettings({ MOMO_PROXY_HOME: home });
+    assert.equal(migrated.updateMode, "automatic");
+    assert.equal(migrated.autoUpdateEnabled, true);
+
+    writeFileSync(join(home, "settings.json"), JSON.stringify({
+      apiKey: "saved-current-key", localToken: "local-token", updateMode: "notify",
+    }));
+    const notifyOnly = resolveSettings({ MOMO_PROXY_HOME: home });
+    assert.equal(notifyOnly.updateMode, "notify");
+    assert.equal(notifyOnly.autoUpdateEnabled, false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

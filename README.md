@@ -24,7 +24,7 @@ It implements a focused subset of OpenCodex-inspired protocol compatibility; it 
 - **Autostart Support**: Configures login autostart on Windows, macOS launchd, and Linux systemd.
 - **Doctor & Rollback**: Built-in environment diagnostic and one-step backup restore.
 - **Local-Only Diagnostics**: Keeps bounded metadata for 413/429/5xx and lifecycle failures in the user's profile; the proxy has no remote telemetry sender.
-- **Safe Update Checks**: Checks official MOMO/GitHub release metadata, accepts packages only from approved HTTPS hosts, verifies SHA-256 and archive structure, and leaves unattended installation disabled unless explicitly enabled.
+- **Safe Automatic Updates**: Checks official MOMO/GitHub release metadata, accepts packages only from approved HTTPS hosts, verifies SHA-256 and archive structure, stages Windows updates outside the running app, and automatically rolls back failed activation. Set `updateMode` to `notify` for notification-only operation.
 - **Automatic MOMO Image Plugin**: One-click setup installs and enables the bundled Codex image plugin by default; no second API key or manual marketplace command is required.
 
 ## Local security model
