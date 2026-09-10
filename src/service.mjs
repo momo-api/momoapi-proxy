@@ -47,7 +47,12 @@ export function readRuntimePort() {
 
 export function writeHeartbeat(status = {}) {
   const { heartbeatPath } = getRuntimePaths();
+  let previous = {};
+  if (existsSync(heartbeatPath)) {
+    try { previous = JSON.parse(readFileSync(heartbeatPath, "utf8")); } catch {}
+  }
   const data = {
+    ...previous,
     timestamp: Date.now(),
     time: new Date().toISOString(),
     version: getCurrentVersion(),

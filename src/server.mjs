@@ -15,6 +15,7 @@ import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } f
 import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareContextManagedPayload } from "./compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
+import { getTelemetryMetrics } from "./telemetry.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -2232,6 +2233,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             dnsCache: { supported: false },
             connectionPooling: { supported: true, backend: "node-native-fetch" },
           },
+          telemetry: getTelemetryMetrics(),
           version: getCurrentVersion(),
         });
       }
@@ -2366,7 +2368,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
           metricsState.contextRequestsRejected++;
         }
         const code = error.code || "payload_too_large";
-        logRequest({ method: request.method, url: pathname, model: requestedModel, status: 413, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp, ...contextLogFields(response, request) });
+        logRequest({ method: request.method, url: pathname, model: requestedModel, status: 413, elapsedMs: Date.now() - t0, error: error.message, errorCode: code, ip: remoteIp, ...contextLogFields(response, request) });
         const body = { error: { message: error.message, type: "payload_too_large", code, ...(error.details ? { details: error.details } : {}) } };
         if ((pathname === "/v1/responses" || pathname === "/responses") && request.momoRequestBodyBytes) {
           return writeResponsesFailure(response, requestedModel || "unknown", 413, error.message, code);
@@ -2381,11 +2383,11 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
 
       if (Number.isInteger(error.statusCode) && (pathname === "/v1/responses/compact" || pathname === "/responses/compact")) {
         const status = error.statusCode;
-        logRequest({ method: request.method, url: pathname, model: requestedModel, status, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
+        logRequest({ method: request.method, url: pathname, model: requestedModel, status, elapsedMs: Date.now() - t0, error: error.message, errorCode: error.code || `http_${status}`, ip: remoteIp });
         return json(response, status, { error: { message: error.message, type: "compact_error", code: error.code || `http_${status}` } });
       }
 
-      logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp, ...contextLogFields(response, request) });
+      logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, errorCode: error.code || "upstream_request_failed", ip: remoteIp, ...contextLogFields(response, request) });
       if (pathname === "/v1/responses" || pathname === "/responses") {
         return writeResponsesFailure(response, requestedModel || "unknown", 502, error.message);
       }

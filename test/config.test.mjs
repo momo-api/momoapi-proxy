@@ -32,6 +32,34 @@ test("environment API key remains a fallback before setup creates settings", () 
       MOMO_BRIDGE_TOKEN: "local-token",
     });
     assert.equal(settings.apiKey, "bootstrap-env-key");
+    assert.equal(settings.autoUpdateEnabled, true);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("diagnostic reporting and update checks have safe configurable defaults", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-"));
+  try {
+    writeFileSync(join(home, "settings.json"), JSON.stringify({
+      apiKey: "saved-current-key",
+      localToken: "local-token",
+      endpoint: "https://momoapi.us/",
+      telemetryEnabled: false,
+      diagnosticsEnabled: false,
+      updateCheckEnabled: false,
+      autoUpdateEnabled: false,
+      updateCheckIntervalHours: 24,
+      installationId: "install_opaque_123456",
+    }));
+    const settings = resolveSettings({ MOMO_PROXY_HOME: home });
+    assert.equal(settings.endpoint, "https://momoapi.us");
+    assert.equal(settings.telemetryEnabled, false);
+    assert.equal(settings.diagnosticsEnabled, false);
+    assert.equal(settings.updateCheckEnabled, false);
+    assert.equal(settings.autoUpdateEnabled, false);
+    assert.equal(settings.updateCheckIntervalHours, 24);
+    assert.equal(settings.installationId, "install_opaque_123456");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

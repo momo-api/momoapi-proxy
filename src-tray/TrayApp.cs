@@ -71,12 +71,14 @@ namespace MomoApi.Tray
         private readonly Icon activeIcon;
         private readonly Icon inactiveIcon;
         private readonly ToolStripMenuItem titleItem;
+        private readonly ToolStripMenuItem updateItem;
         private readonly ToolStripMenuItem autostartItem;
         private readonly SynchronizationContext syncContext;
         private readonly CancellationTokenSource cts = new CancellationTokenSource();
         private IntPtr jobHandle = IntPtr.Zero;
         private bool isRunning = false;
         private bool isCliRunning = false;
+        private string lastNotifiedVersion = "";
 
         public TrayApplicationContext(int port)
         {
@@ -136,7 +138,7 @@ namespace MomoApi.Tray
                 await RestartBridgeAsync();
             };
 
-            var updateItem = menu.Items.Add("检查并更新版本 (Update)");
+            updateItem = (ToolStripMenuItem)menu.Items.Add("检查并更新版本 (Update)");
             updateItem.Click += async (s, e) => await RunCliAsync("update", true);
 
             autostartItem = new ToolStripMenuItem("开机自动启动");
@@ -190,6 +192,7 @@ namespace MomoApi.Tray
             {
                 bool healthy = await CheckHealthOnceAsync(300);
                 syncContext.Post(_ => UpdateHealthUI(healthy), null);
+                CheckUpdateStatus();
 
                 int delay = healthy ? 8000 : 1500;
                 try
@@ -201,6 +204,63 @@ namespace MomoApi.Tray
                     break;
                 }
             }
+        }
+
+        private static string ReadJsonString(string json, string key)
+        {
+            string marker = "\"" + key + "\"";
+            int idx = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return "";
+            int colon = json.IndexOf(':', idx + marker.Length);
+            int start = colon >= 0 ? json.IndexOf('\"', colon + 1) : -1;
+            int end = start >= 0 ? json.IndexOf('\"', start + 1) : -1;
+            return end > start ? json.Substring(start + 1, end - start - 1) : "";
+        }
+
+        private static bool ReadJsonBool(string json, string key)
+        {
+            string marker = "\"" + key + "\"";
+            int idx = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return false;
+            int colon = json.IndexOf(':', idx + marker.Length);
+            if (colon < 0) return false;
+            string tail = json.Substring(colon + 1).TrimStart();
+            return tail.StartsWith("true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void CheckUpdateStatus()
+        {
+            try
+            {
+                string path = Path.Combine(proxyHome, "update-status.json");
+                if (!File.Exists(path)) return;
+                string json = File.ReadAllText(path);
+                bool failed = ReadJsonBool(json, "checkFailed");
+                bool available = ReadJsonBool(json, "hasUpdate");
+                string latest = ReadJsonString(json, "latest");
+                syncContext.Post(_ =>
+                {
+                    if (failed)
+                    {
+                        updateItem.Text = "更新检查失败，点击重试 (Update)";
+                        return;
+                    }
+                    if (available && !string.IsNullOrWhiteSpace(latest))
+                    {
+                        updateItem.Text = "发现新版本 v" + latest + "，点击更新";
+                        if (!string.Equals(lastNotifiedVersion, latest, StringComparison.OrdinalIgnoreCase))
+                        {
+                            lastNotifiedVersion = latest;
+                            notifyIcon.ShowBalloonTip(5000, "MOMO API Proxy", "发现新版本 v" + latest + "，可从托盘菜单更新。", ToolTipIcon.Info);
+                        }
+                    }
+                    else
+                    {
+                        updateItem.Text = "检查并更新版本 (Update)";
+                    }
+                }, null);
+            }
+            catch { }
         }
 
         private void UpdateHealthUI(bool healthy)

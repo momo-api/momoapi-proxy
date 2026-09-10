@@ -4,17 +4,18 @@ import { openSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
-import { readSettings, resolveSettings, appHome } from "../src/config.mjs";
+import { ensureInstallationId, readSettings, resolveSettings, appHome } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
 import { rollback, setup, uninstall } from "../src/setup.mjs";
 import { readCatalog } from "../src/catalog.mjs";
 import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogs, logInfo, logError } from "../src/logger.mjs";
-import { checkLatestVersion, getCurrentVersion, updateSelf } from "../src/updater.mjs";
+import { checkAndRecordLatestVersion, getCurrentVersion, readUpdateStatus, startUpdateChecker, updateSelf, writeUpdateStatus } from "../src/updater.mjs";
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
 import { installWindowsDesktop } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
+import { configureTelemetry, getTelemetryMetrics, recordDiagnosticEvent, startTelemetryReporter } from "../src/telemetry.mjs";
 
 process.on("uncaughtException", (err) => {
   logError("Uncaught Exception", err);
@@ -285,7 +286,20 @@ async function main() {
     await startDaemon(binFile, scriptDir, port);
     console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
   } else if (command === "serve") {
+    ensureInstallationId();
     const settings = resolveSettings();
+    configureTelemetry({ settings });
+    const previousUpdateStatus = readUpdateStatus();
+    if (previousUpdateStatus?.rolledBack && !previousUpdateStatus.failureReportedAt) {
+      recordDiagnosticEvent({
+        event: "proxy_update_error",
+        errorCode: previousUpdateStatus.errorCode || "update_activation_failed",
+      }, { settings });
+      writeUpdateStatus({
+        ...previousUpdateStatus,
+        failureReportedAt: new Date().toISOString(),
+      });
+    }
     const server = await listen(settings);
     console.log("MOMO Codex Bridge listening at http://" + settings.host + ":" + settings.port + "/v1");
     writeRuntimePort(settings.port, process.pid);
@@ -295,10 +309,56 @@ async function main() {
       settings,
       onSync: (err, res) => {
         writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint, lastSyncTime: new Date().toISOString() });
-        if (err) console.warn("[auto-sync] sync failed:", err.message);
+        if (err) {
+          console.warn("[auto-sync] sync failed:", err.message);
+          recordDiagnosticEvent({ event: "proxy_sync_error", errorCode: err.code || "catalog_sync_failed" }, { settings });
+        }
         else if (res.changed) console.log("[auto-sync] catalog updated (" + res.count + " models).");
       },
     });
+    let automaticUpdateStarted = false;
+    const updateChecker = startUpdateChecker({
+      endpoint: settings.endpoint,
+      enabled: settings.updateCheckEnabled,
+      intervalHours: settings.updateCheckIntervalHours,
+      onCheck: (info) => {
+        if (info.checkFailed) {
+          recordDiagnosticEvent({ event: "proxy_update_check_error", errorCode: "all_update_sources_failed" }, { settings });
+        }
+        writeHeartbeat({
+          running: true,
+          port: settings.port,
+          endpoint: settings.endpoint,
+          updateAvailable: Boolean(info.hasUpdate),
+          latestVersion: info.latest,
+          updateCheckFailed: Boolean(info.checkFailed),
+        });
+        if (info.hasUpdate && settings.autoUpdateEnabled && !automaticUpdateStarted) {
+          automaticUpdateStarted = true;
+          writeUpdateStatus({ status: "automatic_update_starting", latest: info.latest, hasUpdate: true, checkFailed: false });
+          try {
+            const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "update", "--automatic"], {
+              detached: true,
+              stdio: "ignore",
+              windowsHide: true,
+            });
+            if (!child.pid) throw new Error("Automatic update process did not start.");
+            child.unref();
+          } catch {
+            automaticUpdateStarted = false;
+            writeUpdateStatus({
+              status: "automatic_update_start_failed",
+              latest: info.latest,
+              hasUpdate: true,
+              checkFailed: true,
+              errorCode: "automatic_update_start_failed",
+            });
+            recordDiagnosticEvent({ event: "proxy_update_error", errorCode: "automatic_update_start_failed" }, { settings });
+          }
+        }
+      },
+    });
+    const telemetryReporter = startTelemetryReporter({ settings });
 
     const heartbeatTimer = setInterval(() => {
       writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint });
@@ -309,6 +369,8 @@ async function main() {
       clearInterval(heartbeatTimer);
       writeHeartbeat({ running: false, port: settings.port });
       autoSync.stop();
+      updateChecker.stop();
+      telemetryReporter.stop();
       server.close(() => process.exit(0));
     };
     process.once("SIGINT", stop);
@@ -342,6 +404,8 @@ async function main() {
       lastSyncTime: settings.lastSyncTime || null,
       lastSyncStatus: settings.lastSyncStatus || null,
       lastError: settings.lastError || null,
+      update: readUpdateStatus(),
+      telemetry: getTelemetryMetrics(),
     }, null, 2));
   } else if (command === "models") {
     const catalog = readCatalog();
@@ -446,26 +510,69 @@ async function main() {
     const settings = resolveSettings();
     const force = hasFlag("--force");
     console.log("Checking for MOMO Codex Bridge updates (current: v" + getCurrentVersion() + ")...");
-    const res = await updateSelf({ endpoint: settings.endpoint, force });
+    let res;
+    try {
+      res = await updateSelf({ endpoint: settings.endpoint, force });
+    } catch (error) {
+      recordDiagnosticEvent({ event: "proxy_update_error", errorCode: error.code || "update_failed" }, { settings });
+      throw error;
+    }
     if (res.updated) {
       console.log(res.message);
       console.log("Syncing model catalogs...");
       try { await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint, desktopAliases: settings.desktopAliases }); } catch {}
-      console.log("Update completed. Please restart 'momo-codex-bridge serve' if running.");
+      console.log("Update completed. Verifying the new version; the previous version will be restored automatically if startup fails...");
+      try {
+        const supervisor = join(res.rootDir, "src", "update-supervisor.mjs");
+        const child = spawn(process.execPath, [
+          supervisor,
+          "--root", res.rootDir,
+          "--backup", res.backupDir,
+          "--target", res.current,
+          "--previous", res.previous,
+          "--port", String(settings.port || 18789),
+          "--parent-pid", String(process.pid),
+        ], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        if (!child.pid) throw new Error("Update supervisor did not start.");
+        child.unref();
+      } catch (error) {
+        writeUpdateStatus({
+          status: "restart_supervisor_failed",
+          latest: res.current,
+          previous: res.previous,
+          hasUpdate: false,
+          checkFailed: true,
+          errorCode: "update_supervisor_start_failed",
+        });
+        recordDiagnosticEvent({ event: "proxy_update_error", errorCode: "update_supervisor_start_failed" }, { settings });
+        throw error;
+      }
     } else {
       console.log(res.message);
     }
+  } else if (command === "check-update") {
+    const settings = resolveSettings();
+    const info = await checkAndRecordLatestVersion({ endpoint: settings.endpoint });
+    console.log(JSON.stringify(info, null, 2));
+    if (info.checkFailed) process.exitCode = 1;
   } else if (command === "version" || command === "-v" || command === "--version") {
     console.log("momoapi-proxy v" + getCurrentVersion());
   } else if (command === "uninstall") {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
+    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
   }
 }
 
 main().catch((err) => {
+  let settings;
+  try { settings = resolveSettings(); } catch { settings = { diagnosticsEnabled: true, telemetryEnabled: false }; }
+  recordDiagnosticEvent({ event: "proxy_start_error", errorCode: err.code || "proxy_start_failed" }, { settings });
   console.error("Fatal error:", err.message);
   process.exit(1);
 });

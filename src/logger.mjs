@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { recordDiagnosticEvent } from "./telemetry.mjs";
 
 export function logPath(env = process.env) {
   const root = env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || join(homedir(), ".momoapi-proxy");
@@ -37,9 +38,13 @@ export function logError(title, error, env = process.env) {
   const timestamp = new Date().toISOString();
   const errMsg = safeLogValue(error?.stack || error?.message || error);
   writeLog(`[${timestamp}] [ERROR] ${title}: ${errMsg}`, env);
+  recordDiagnosticEvent({
+    event: "proxy_crash",
+    errorCode: error?.code || String(title || "proxy_error").toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+  }, { env });
 }
 
-export function logRequest({ method, url, model, status, elapsedMs, error, ip, toolsCount, toolCalls, requestBytes, outboundBytes, imageCount, imageBytes, policyAction }, env = process.env) {
+export function logRequest({ method, url, model, status, elapsedMs, error, errorCode, ip, toolsCount, toolCalls, requestBytes, outboundBytes, imageCount, imageBytes, policyAction, inputTokens, outputTokens, totalTokens }, env = process.env) {
   const timestamp = new Date().toISOString();
   const modelTag = model ? ` [${safeLogValue(model)}]` : "";
   const statusTag = status != null ? ` -> HTTP ${status}` : "";
@@ -58,6 +63,25 @@ export function logRequest({ method, url, model, status, elapsedMs, error, ip, t
   const policyTag = policyAction ? ` [policy:${String(policyAction).slice(0, 160)}]` : "";
   const line = `[${timestamp}]${ipTag} ${method} ${url}${modelTag}${toolsTag}${callsTag}${requestBytesTag}${outboundBytesTag}${mediaTag}${policyTag}${statusTag}${timeTag}${errorTag}`;
   writeLog(line, env);
+  const businessRoute = /^(?:(?:\/v1)?\/(?:responses|chat\/completions|images(?:\/|$)|messages|models(?:\/|$))|\/internal\/images(?:\/|$))/i.test(String(url || ""));
+  if (businessRoute && Number(status) >= 400) {
+    recordDiagnosticEvent({
+      event: "proxy_request_error",
+      route: url,
+      model,
+      status,
+      errorCode: errorCode || (Number.isFinite(status) ? `http_${status}` : "request_error"),
+      requestBytes,
+      outboundBytes,
+      imageCount,
+      imageBytes,
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      latencyMs: elapsedMs,
+      policyAction,
+    }, { env });
+  }
 }
 
 export function readRecentLogs(lines = 100, env = process.env) {
