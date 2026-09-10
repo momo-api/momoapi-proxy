@@ -549,6 +549,7 @@ namespace MomoApi.Tray
 
                 string output = "";
                 string error = "";
+                int exitCode = -1;
 
                 await Task.Run(() =>
                 {
@@ -564,19 +565,26 @@ namespace MomoApi.Tray
 
                             var outTask = Task.Run(() => p.StandardOutput.ReadToEnd());
                             var errTask = Task.Run(() => p.StandardError.ReadToEnd());
-                            Task.WaitAll(new Task[] { outTask, errTask }, 15000);
-                            p.WaitForExit(2000);
+                            int timeoutMs = subCommand == "update" ? 120000 : 15000;
+                            bool exited = p.WaitForExit(timeoutMs);
+                            if (!exited)
+                            {
+                                try { p.Kill(); } catch { }
+                            }
+                            Task.WaitAll(new Task[] { outTask, errTask }, 5000);
 
                             output = outTask.IsCompleted ? outTask.Result : "";
                             error = errTask.IsCompleted ? errTask.Result : "";
+                            exitCode = exited ? p.ExitCode : -1;
                         }
                     }
                 });
 
                 if (showResult)
                 {
-                    string msg = string.IsNullOrWhiteSpace(output) ? error : output;
-                    MessageBox.Show(msg.Trim(), "MOMO API Proxy - " + subCommand, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    string msg = (output + (string.IsNullOrWhiteSpace(error) ? "" : Environment.NewLine + error)).Trim();
+                    if (string.IsNullOrWhiteSpace(msg)) msg = exitCode == 0 ? "操作已完成。" : "操作失败，未返回详细信息。";
+                    MessageBox.Show(msg, "MOMO API Proxy - " + subCommand, MessageBoxButtons.OK, exitCode == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Error);
                 }
             }
             catch (Exception ex)

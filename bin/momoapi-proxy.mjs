@@ -580,12 +580,13 @@ async function main() {
       console.log(res.message);
       console.log("Syncing model catalogs...");
       try { await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint, desktopAliases: settings.desktopAliases }); } catch {}
-      console.log("Update completed. Verifying the new version; the previous version will be restored automatically if startup fails...");
+      console.log("Update package verified. The proxy will restart in the background; the previous version will be restored automatically if startup fails.");
       try {
-        const supervisor = join(res.rootDir, "src", "update-supervisor.mjs");
+        const supervisor = res.supervisorPath || join(res.rootDir, "src", "update-supervisor.mjs");
         const child = spawn(process.execPath, [
           supervisor,
           "--root", res.rootDir,
+          ...(res.stagingDir ? ["--staging", res.stagingDir] : []),
           "--backup", res.backupDir,
           "--target", res.current,
           "--previous", res.previous,
@@ -596,6 +597,7 @@ async function main() {
           detached: true,
           stdio: "ignore",
           windowsHide: true,
+          cwd: dirname(res.rootDir),
         });
         if (!child.pid) throw new Error("Update supervisor did not start.");
         child.unref();

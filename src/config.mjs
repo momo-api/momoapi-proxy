@@ -44,6 +44,7 @@ export function newLocalToken() {
 
 export function resolveSettings(env = process.env) {
   const saved = readSettings(env);
+  const updateMode = saved.updateMode === "notify" ? "notify" : "automatic";
   const imageAssets = saved.imageAssets && typeof saved.imageAssets === "object" ? saved.imageAssets : {};
   // An installed daemon must remain pinned to its saved credential. Long-lived
   // shells (Codex/Desktop in particular) can retain an older process-level
@@ -61,7 +62,8 @@ export function resolveSettings(env = process.env) {
     host: "127.0.0.1",
     syncIntervalMinutes: Number(saved.syncIntervalMinutes || 60),
     updateCheckEnabled: saved.updateCheckEnabled !== false,
-    autoUpdateEnabled: saved.autoUpdateEnabled === true,
+    updateMode,
+    autoUpdateEnabled: updateMode === "automatic",
     updateCheckIntervalHours: Math.max(1, Number(saved.updateCheckIntervalHours || 12)),
     desktopAliases: saved.desktopAliases !== false,
     autostart: saved.autostart !== false,

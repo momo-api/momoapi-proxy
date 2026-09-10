@@ -28,7 +28,8 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.match(readFileSync(result.catalog, "utf8"), /gemini-3\.7-flash/);
     const settings = JSON.parse(readFileSync(result.settingsFile, "utf8"));
     assert.equal(settings.updateCheckEnabled, true);
-    assert.equal(settings.autoUpdateEnabled, false);
+    assert.equal(settings.updateMode, "automatic");
+    assert.equal(settings.autoUpdateEnabled, true);
     assert.equal(settings.diagnosticsEnabled, true);
     assert.equal("telemetryEnabled" in settings, false);
     assert.equal("installationId" in settings, false);

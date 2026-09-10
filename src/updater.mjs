@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -337,6 +337,7 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
   const updateId = process.pid + "-" + Date.now();
   const tmpTgz = join(tmpdir(), "momoapi-proxy-update-" + updateId + ".tgz");
   const tmpExtract = mkdtempSync(join(dirname(ROOT_DIR), ".momoapi-proxy-update-"));
+  const supervisorPath = join(dirname(ROOT_DIR), ".momoapi-proxy-update-supervisor-" + updateId + ".mjs");
   const urls = uniqueTgzUrls([
     info.downloadUrl,
     "https://momoapi.us/install/packages/momoapi-proxy-" + info.latest + ".tgz",
@@ -346,6 +347,7 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
   let downloaded = false;
   let downloadedUrl = null;
   let checksumMismatch = false;
+  let staged = false;
   try {
     for (const url of urls) {
       try {
@@ -399,44 +401,38 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
       }
     }
 
-    const backupDir = ROOT_DIR + ".update-backup";
-    rmSync(backupDir, { recursive: true, force: true });
-    renameSync(ROOT_DIR, backupDir);
-    try {
-      renameSync(tmpExtract, ROOT_DIR);
-    } catch (error) {
-      if (!existsSync(ROOT_DIR) && existsSync(backupDir)) renameSync(backupDir, ROOT_DIR);
-      throw Object.assign(new Error("Failed to activate the downloaded update package."), { code: "update_swap_failed", cause: error });
-    }
-
-    try {
-      const { unlinkSync } = await import("node:fs");
-      const p1 = join(ROOT_DIR, "bin", "momo-codex-bridge.ps1");
-      const p2 = join(ROOT_DIR, "bin", "momo-codex-switch.ps1");
-      if (existsSync(p1)) unlinkSync(p1);
-      if (existsSync(p2)) unlinkSync(p2);
-    } catch {}
-
-    const newVersion = getCurrentVersion();
+    // Windows may keep the running application directory busy while the
+    // updater, daemon, tray, or an MCP child still uses it. Stage the verified
+    // tree beside the application and copy a standalone, built-in-only
+    // supervisor outside ROOT_DIR. It performs the swap after this process
+    // exits and after the old service is stopped.
+    copyFileSync(join(tmpExtract, "src", "update-supervisor.mjs"), supervisorPath);
+    staged = true;
     writeUpdateStatus({
-      status: "awaiting_restart",
+      status: "awaiting_activation",
       latest: info.latest,
-      hasUpdate: false,
+      hasUpdate: true,
       checkFailed: false,
       previous: info.current,
-      target: newVersion,
+      target: info.latest,
     }, env);
     return {
       updated: true,
+      staged: true,
       previous: info.current,
-      current: newVersion,
+      current: info.latest,
       rootDir: ROOT_DIR,
+      stagingDir: tmpExtract,
+      supervisorPath,
       downloadedUrl,
-      backupDir,
-      message: "Successfully updated MOMO Codex Bridge from v" + info.current + " to v" + newVersion + "!",
+      backupDir: ROOT_DIR + ".update-backup",
+      message: "Downloaded and verified MOMO API Proxy v" + info.latest + ". Activation will continue after the updater exits.",
     };
   } finally {
     rmSync(tmpTgz, { force: true });
-    rmSync(tmpExtract, { recursive: true, force: true });
+    if (!staged) {
+      rmSync(tmpExtract, { recursive: true, force: true });
+      rmSync(supervisorPath, { force: true });
+    }
   }
 }
