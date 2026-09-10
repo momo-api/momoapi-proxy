@@ -26,39 +26,36 @@ if [ -z "$API_KEY" ]; then
   exit 1
 fi
 
-INSTALL_DIR="$HOME/.momoapi-proxy/app"
+INSTALL_ROOT="$HOME/.momoapi-proxy"
+INSTALL_DIR="$INSTALL_ROOT/app"
+STAGING_DIR="$INSTALL_ROOT/.install-$RANDOM-$RANDOM"
+TGZ_PATH="$INSTALL_ROOT/package.tgz"
+MANIFEST_PATH="$INSTALL_ROOT/bridge-latest.json"
+mkdir -p "$INSTALL_ROOT" "$STAGING_DIR"
+echo "==> [momo-codex-bridge] Reading and verifying the official release manifest..."
+curl -fsSL --connect-timeout 10 --max-time 20 "https://momoapi.us/install/bridge-latest.json" -o "$MANIFEST_PATH"
+readarray -t RELEASE < <(node - "$MANIFEST_PATH" <<'NODE'
+const fs = require('fs');
+const value = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(value.version || '') || !/^[a-f0-9]{64}$/i.test(value.sha256 || '')) process.exit(2);
+process.stdout.write(value.version + '\n' + String(value.sha256).toLowerCase());
+NODE
+)
+if [ "${#RELEASE[@]}" -lt 2 ]; then echo "==> ERROR: Official release manifest is invalid or missing SHA-256." >&2; exit 1; fi
+VERSION="${RELEASE[0]}"
+EXPECTED_SHA256="${RELEASE[1]}"
+URLS=("https://momoapi.us/install/packages/momoapi-proxy-${VERSION}.tgz" "https://github.com/momo-api/momoapi-proxy/releases/download/v${VERSION}/momoapi-proxy-${VERSION}.tgz")
+DOWNLOADED=0
+for url in "${URLS[@]}"; do
+  if curl -fsSL --connect-timeout 10 --max-time 120 "$url" -o "$TGZ_PATH" && [ "$(sha256sum "$TGZ_PATH" | awk '{print $1}')" = "$EXPECTED_SHA256" ]; then DOWNLOADED=1; break; fi
+done
+if [ "$DOWNLOADED" -ne 1 ]; then echo "==> ERROR: No release package matched the official SHA-256." >&2; exit 1; fi
+tar -xzf "$TGZ_PATH" -C "$STAGING_DIR" --strip-components=1 --no-same-owner --no-same-permissions
+PACKAGE_VERSION="$(node -p "require(process.argv[1]).version" "$STAGING_DIR/package.json")"
+[ "$PACKAGE_VERSION" = "$VERSION" ] || { echo "==> ERROR: Package version does not match manifest." >&2; exit 1; }
 rm -rf "$INSTALL_DIR"
-  mkdir -p "$INSTALL_DIR"
-  
-  echo "==> [momo-codex-bridge] Downloading latest release..."
-  URLS=(
-    "https://github.com/momo-api/momoapi-proxy/releases/download/v0.11.0/momoapi-proxy-0.11.0.tgz"
-    "https://ghproxy.net/https://github.com/momo-api/momoapi-proxy/releases/download/v0.11.0/momoapi-proxy-0.11.0.tgz"
-    "${ENDPOINT%/}/install/packages/momoapi-proxy-latest.tgz"
-    "${ENDPOINT%/}/install/packages/momo-api-codex-bridge-latest.tgz"
-    "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz"
-    "https://momoapi.us/install/packages/momo-api-codex-bridge-latest.tgz"
-  )
-  
-  DOWNLOADED=0
-  for url in "${URLS[@]}"; do
-    if command -v curl >/dev/null 2>&1; then
-      if curl -fsSL --connect-timeout 10 "$url" | tar -xz -C "$INSTALL_DIR" --strip-components=1 2>/dev/null; then
-        DOWNLOADED=1
-        break
-      fi
-    elif command -v wget >/dev/null 2>&1; then
-      if wget -qO- --timeout=10 "$url" | tar -xz -C "$INSTALL_DIR" --strip-components=1 2>/dev/null; then
-        DOWNLOADED=1
-        break
-      fi
-    fi
-  done
-
-  if [ "$DOWNLOADED" -eq 0 ]; then
-    echo "==> [momo-codex-bridge] Direct download failed, falling back to git clone..."
-    git clone https://github.com/momo-api/momoapi-proxy.git "$INSTALL_DIR"
-  fi
+mv "$STAGING_DIR" "$INSTALL_DIR"
+rm -f "$TGZ_PATH" "$MANIFEST_PATH"
 
 BRIDGE_BIN="$INSTALL_DIR/bin/momoapi-proxy.mjs"
 chmod +x "$BRIDGE_BIN"
