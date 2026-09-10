@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.13.2 - 2026-09-10
+
+- Image MCP results never return full inline Base64, even if an older caller sends `include_preview`; generated files remain in the user's local asset library.
+- Preserve same-origin MOMO HTTPS result URLs in private local asset metadata and attach a signed opaque vision reference to compact MCP results.
+- Promote only valid current-turn signed references backed by an existing local asset into native Responses `input_image` URL parts; reject forged, historical, HTTP, cross-origin, missing, or damaged references.
+- Added host, container, security, and live end-to-end coverage proving an approximately 0.8 MiB generated image continues as an approximately 0.8 KiB upstream request and is correctly recognized by the vision model.
+
 ## 0.13.1 - 2026-09-10
 
 - The one-click installer, setup, and install now install and enable the bundled momo-image Codex plugin automatically. Existing installations also repair the plugin after a successful proxy update.

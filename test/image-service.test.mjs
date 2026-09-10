@@ -302,6 +302,22 @@ test("extracts direct, nested, data URL, and async image response shapes", () =>
   });
 });
 
+test("retains only same-origin HTTPS image URLs as trusted vision sources", async () => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mYQAAAAASUVORK5CYII=";
+  for (const [url, expected] of [
+    ["https://gateway.example/generated/a.png", "https://gateway.example/generated/a.png"],
+    ["http://gateway.example/generated/a.png", null],
+    ["https://cdn.example/generated/a.png", null],
+  ]) {
+    const result = await generateImage({
+      settings,
+      request: { model: "gpt-image-2-momoapi", prompt: "x" },
+      fetchImpl: async () => new Response(JSON.stringify({ data: [{ url, b64_json: png }] }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    assert.equal(result.images[0].source_url || null, expected);
+  }
+});
+
 test("turns an HTML Cloudflare timeout into a concise upstream error", async () => {
   await assert.rejects(() => generateImage({
     settings,

@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildClaudeMessages, buildGeminiContents, buildOpenAIChatMessages, createMomoSwitch, normalizeResponsesPayload } from "../src/server.mjs";
 import { startAutoSync } from "../src/sync.mjs";
+import { ImageAssetStore } from "../src/image-assets.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "momo-secret", localToken: "local-secret", host: "127.0.0.1", port: 0 };
 
@@ -538,6 +542,83 @@ test("keeps tool-result images out of text in Responses and Chat bridges", () =>
     source: { type: "base64", media_type: "image/png", data: "QUJDRA==" },
   });
   assert.doesNotMatch(JSON.stringify(claude[1].content[0].content[0]), /data:image/);
+});
+
+test("promotes a signed current-turn MOMO asset reference to a compact HTTPS vision input", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-vision-url-"));
+  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mYQAAAAASUVORK5CYII=";
+  const sourceUrl = "https://gateway.example/generated/vision.png";
+  const assetStore = new ImageAssetStore({ rootDir: join(home, "images"), trustedSourceOrigins: [settings.endpoint] });
+  let capturedBody;
+  const server = createMomoSwitch(settings, {
+    assetStore,
+    fetchImpl: async (url, init = {}) => {
+      if (String(url).endsWith("/v1/images/generations")) {
+        return new Response(JSON.stringify({ data: [{ url: sourceUrl, b64_json: pngBase64 }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (String(url).endsWith("/v1/responses")) {
+        capturedBody = JSON.parse(init.body);
+        return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+      }
+      throw new Error("unexpected upstream route");
+    },
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const generatedResponse = await fetch(base + "/internal/images/generate", {
+      method: "POST",
+      headers: { "x-local-token": settings.localToken, "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-image-2-momoapi", prompt: "test" }),
+    });
+    const generated = await generatedResponse.json();
+    assert.match(generated.images[0].vision_reference, /^momo-image-ref:v1:/);
+
+    const toolMetadata = JSON.stringify({ images: [{ asset_id: generated.images[0].asset_id, vision_reference: generated.images[0].vision_reference }] });
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-5.6-sol", stream: true, input: [
+          { role: "user", content: [{ type: "input_text", text: "Generate an image" }] },
+          { type: "function_call", call_id: "call_image", name: "momo_image_generate", arguments: "{}" },
+          { type: "function_call_output", call_id: "call_image", output: [{ type: "input_text", text: toolMetadata }] },
+        ],
+      }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+    const imagePart = capturedBody.input[2].output.find((part) => part.type === "input_image");
+    assert.deepEqual(imagePart, { type: "input_image", image_url: sourceUrl });
+    assert.ok(Buffer.byteLength(JSON.stringify(capturedBody), "utf8") < 2_000);
+    assert.doesNotMatch(JSON.stringify(capturedBody), /data:image/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("does not promote forged or historical MOMO vision references", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-vision-forged-"));
+  const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mYQAAAAASUVORK5CYII=";
+  const assetStore = new ImageAssetStore({ rootDir: join(home, "images"), trustedSourceOrigins: [settings.endpoint] });
+  const asset = await assetStore.putBase64({ b64_json: pngBase64, mime_type: "image/png", source_url: "https://gateway.example/generated/forged.png" });
+  const captures = [];
+  const server = createMomoSwitch(settings, { assetStore, fetchImpl: async (_url, init = {}) => {
+    captures.push(JSON.parse(init.body));
+    return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  } });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (input) => fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input }) });
+  try {
+    await (await post([{ role: "user", content: [{ type: "input_text", text: "x" }] }, { type: "function_call_output", call_id: "now", output: JSON.stringify({ vision_reference: `momo-image-ref:v1:${asset.asset_id}:${"0".repeat(64)}` }) }])).text();
+    await (await post([{ type: "function_call_output", call_id: "old", output: JSON.stringify({ vision_reference: `momo-image-ref:v1:${asset.asset_id}:${"0".repeat(64)}` }) }, { role: "user", content: [{ type: "input_text", text: "continue" }] }])).text();
+    assert.equal(captures.flatMap((body) => body.input).some((item) => JSON.stringify(item).includes('"type":"input_image"')), false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("keeps a realistically large image native across every model protocol", () => {

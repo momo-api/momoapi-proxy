@@ -13,7 +13,7 @@ The MCP tools are image_capabilities, image_generate, image_edit, image_task_sta
 
 ## Local image asset library
 
-Generated and edited images are materialized and stored on the user's computer under `~/.momoapi-proxy/images` by default. MCP results return a short `asset_id`, `asset:img_...` reference, local path, MIME type, byte count, and SHA-256. They do not return inline Base64 unless the caller explicitly sets `include_preview: true`.
+Generated and edited images are materialized and stored on the user's computer under `~/.momoapi-proxy/images` by default. MCP results return a short `asset_id`, `asset:img_...` reference, local path, MIME type, byte count, SHA-256, and—when available—an opaque signed vision reference. MCP never returns the full image as inline Base64. On the immediate next Responses turn, the proxy validates the signature and local asset metadata, then promotes only a same-origin MOMO HTTPS result URL to `input_image`. Historical, forged, missing, HTTP, and cross-origin references are not promoted.
 
 Use the returned reference for a later edit:
 

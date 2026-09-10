@@ -1,6 +1,6 @@
 {
   "name": "momo-image",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Generate and edit images through the local MOMO API Proxy, storing results on the user's computer without exposing API keys.",
   "author": {
     "name": "MOMO API"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "MOMO Image",
     "shortDescription": "Generate, save, and edit local images with MOMO.",
-    "longDescription": "A Codex plugin for MOMO image generation and editing through the locally configured proxy. Generated images stay on the user's computer and are reused by opaque asset ID.",
+    "longDescription": "A Codex plugin for MOMO image generation and editing through the locally configured proxy. Generated images stay on the user's computer; compact signed references let the next model turn inspect a trusted HTTPS result without Base64 history.",
     "developerName": "MOMO API",
     "category": "Productivity",
     "capabilities": [],

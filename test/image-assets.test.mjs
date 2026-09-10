@@ -24,6 +24,24 @@ test("stores generated images locally, deduplicates content, and keeps Base64 op
   }
 });
 
+test("persists only trusted HTTPS source URLs for later vision requests", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-assets-url-"));
+  try {
+    const trustedUrl = "https://gateway.example/generated/result.png";
+    const store = new ImageAssetStore({ rootDir: join(home, "images"), trustedSourceOrigins: ["https://gateway.example/v1"] });
+    const trusted = await store.putBase64({ b64_json: PNG_BASE64, mime_type: "image/png", source_url: trustedUrl });
+    assert.equal(trusted.vision_available, true);
+    assert.equal(await store.sourceUrl(trusted.asset_id), trustedUrl);
+
+    const untrusted = new ImageAssetStore({ rootDir: join(home, "other"), trustedSourceOrigins: ["https://gateway.example/v1"] });
+    const asset = await untrusted.putBase64({ b64_json: PNG_BASE64, mime_type: "image/png", source_url: "https://attacker.example/private.png" });
+    assert.equal(asset.vision_available, false);
+    assert.equal(await untrusted.sourceUrl(asset.asset_id), null);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("accepts only opaque asset IDs and rejects arbitrary local paths or corrupt data", async () => {
   const home = mkdtempSync(join(tmpdir(), "momo-assets-"));
   try {

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
 import {
   rewriteRoutedNamespaceToolsForUpstream,
@@ -28,6 +28,7 @@ const KNOWN_METADATA_TYPES = new Set([
   "thread_settings_applied", "compacted", "turn_aborted", "inter_agent_communication_metadata",
   "agent_message"
 ]);
+const IMAGE_VISION_REFERENCE = /^momo-image-ref:v1:(img_[a-f0-9]{64}):([a-f0-9]{64})$/;
 
 const GEMINI_REASONING_MAP = {
   none: "",
@@ -504,6 +505,81 @@ function responsesToolOutput(value) {
     ...output.images.map((image) => ({ type: "input_image", image_url: image.url })),
     ...output.files,
   ];
+}
+
+function imageVisionMac(assetId, secret) {
+  return createHmac("sha256", String(secret || "")).update("momo-image-ref:v1\n" + assetId).digest("hex");
+}
+
+function imageVisionReference(assetId, secret) {
+  return `momo-image-ref:v1:${assetId}:${imageVisionMac(assetId, secret)}`;
+}
+
+function verifyImageVisionReference(value, secret) {
+  const match = IMAGE_VISION_REFERENCE.exec(String(value || ""));
+  if (!match || !secret) return null;
+  const expected = Buffer.from(imageVisionMac(match[1], secret), "hex");
+  const actual = Buffer.from(match[2], "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected) ? match[1] : null;
+}
+
+function withImageVisionReferences(payload, secret) {
+  return {
+    ...payload,
+    images: (payload?.images || []).map((image) => image?.vision_available
+      ? { ...image, vision_reference: imageVisionReference(image.asset_id, secret) }
+      : image),
+  };
+}
+
+function collectImageVisionReferences(value, output, depth = 0) {
+  if (depth > 8 || value === null || value === undefined) return;
+  if (typeof value === "string") {
+    if (value.length > 100_000) return;
+    try { collectImageVisionReferences(JSON.parse(value), output, depth + 1); } catch { /* Only exact JSON tool metadata is eligible. */ }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectImageVisionReferences(item, output, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+  if (typeof value.vision_reference === "string") output.add(value.vision_reference);
+  for (const child of Object.values(value)) collectImageVisionReferences(child, output, depth + 1);
+}
+
+async function expandCurrentImageVisionReferences(payload, imageAssetStore, secret) {
+  const input = Array.isArray(payload?.input) ? payload.input : [];
+  let currentTurnStart = 0;
+  for (let index = input.length - 1; index >= 0; index--) {
+    if (input[index]?.role === "user" || input[index]?.type === "input_text") { currentTurnStart = index; break; }
+  }
+  const expanded = [...input];
+  for (let index = currentTurnStart; index < expanded.length; index++) {
+    const item = expanded[index];
+    if (item?.type !== "function_call_output" && item?.type !== "custom_tool_call_output") continue;
+    const references = new Set();
+    collectImageVisionReferences(item.output, references);
+    const images = [];
+    const seenUrls = new Set();
+    for (const reference of references) {
+      const assetId = verifyImageVisionReference(reference, secret);
+      if (!assetId) continue;
+      try {
+        const sourceUrl = await imageAssetStore.sourceUrl(assetId);
+        if (sourceUrl && !seenUrls.has(sourceUrl)) {
+          seenUrls.add(sourceUrl);
+          images.push({ type: "input_image", image_url: sourceUrl, detail: "high" });
+        }
+      } catch { /* Missing, expired, or damaged local assets are left as metadata only. */ }
+    }
+    if (images.length === 0) continue;
+    const existingOutput = Array.isArray(item.output)
+      ? item.output
+      : [{ type: "input_text", text: typeof item.output === "string" ? item.output : safePartJson(item.output) }];
+    expanded[index] = { ...item, output: [...existingOutput, ...images] };
+  }
+  return { ...payload, input: expanded };
 }
 
 function geminiOutputParts(value, name, callId) {
@@ -1709,7 +1785,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
   emitter.complete();
 }
 
-async function forwardResponses(request, response, settings, payload, calls, fetchImpl, signal, replay = null) {
+async function forwardResponses(request, response, settings, payload, calls, fetchImpl, signal, replay = null, imageAssetStore = null) {
   // 1. Lower tool_search to standard function
   const { body: searchBody, names: searchNames } = rewriteRoutedToolSearchForUpstream(payload);
   // 2. Lower custom tools (exec, etc.) to standard functions
@@ -1717,7 +1793,10 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   // 3. Lower namespace tools (e.g. personal:codex-canvas) to flat functions
   const { body: nsBody, aliases: nsAliases } = rewriteRoutedNamespaceToolsForUpstream(customBody);
   // 4. Normalize schema for upstream OpenAI Responses endpoint
-  const cleanPayload = normalizeResponsesPayload(nsBody);
+  const visionPayload = imageAssetStore
+    ? await expandCurrentImageVisionReferences(nsBody, imageAssetStore, settings.localToken)
+    : nsBody;
+  const cleanPayload = normalizeResponsesPayload(visionPayload);
   const managedPayload = Array.isArray(cleanPayload.context_management)
     && cleanPayload.context_management.some((item) => item?.type === "compaction")
     ? prepareContextManagedPayload(cleanPayload)
@@ -2262,14 +2341,14 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             operation,
             assetResolver: (reference) => imageAssetStore.dataUrl(reference),
           });
-          return json(response, 200, await persistImageResult(imageAssetStore, result, { includePreview: payload.include_preview === true }));
+          const persisted = await persistImageResult(imageAssetStore, result);
+          return json(response, 200, withImageVisionReferences(persisted, settings.localToken));
         }
         const taskMatch = /^\/internal\/images\/tasks\/([^/]+)$/.exec(pathname);
         if (request.method === "GET" && taskMatch) {
           const result = await getImageTask({ settings, taskId: decodeURIComponent(taskMatch[1]), fetchImpl, signal: abortController.signal });
-          const includePreview = new URL(rawUrl, "http://127.0.0.1").searchParams.get("include_preview") === "1";
-          const persisted = result.images?.length ? await persistImageResult(imageAssetStore, result, { includePreview }) : result;
-          return json(response, 200, persisted);
+          const persisted = result.images?.length ? await persistImageResult(imageAssetStore, result) : result;
+          return json(response, 200, withImageVisionReferences(persisted, settings.localToken));
         }
         if (request.method === "GET" && pathname === "/internal/images/assets") {
           const limit = new URL(rawUrl, "http://127.0.0.1").searchParams.get("limit");
@@ -2277,8 +2356,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         }
         const assetMatch = /^\/internal\/images\/assets\/(img_[a-f0-9]{64})$/.exec(pathname);
         if (request.method === "GET" && assetMatch) {
-          const includePreview = new URL(rawUrl, "http://127.0.0.1").searchParams.get("include_preview") === "1";
-          return json(response, 200, { images: [await imageAssetStore.get(assetMatch[1], { includeData: includePreview })] });
+          return json(response, 200, withImageVisionReferences({ images: [await imageAssetStore.get(assetMatch[1])] }, settings.localToken));
         }
         return json(response, 404, { error: { message: "Image endpoint not found.", type: "invalid_request_error" } });
       }
@@ -2355,7 +2433,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         let handlerPromise;
         if (asArray(routedPayload.input).some((item) => item?.type === "compaction_trigger")) {
           handlerPromise = forwardCompactionTrigger(request, response, settings, routedPayload, fetchImpl, abortController.signal, compactLocks);
-        } else if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal, replay);
+        } else if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal, replay, imageAssetStore);
         else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else if (protocol === "gemini") handlerPromise = bridgeGemini(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
