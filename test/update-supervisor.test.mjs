@@ -17,16 +17,43 @@ test("update supervisor records activation after matching health check", async (
   const backup = join(home, "app.update-backup");
   createVersion(root, "0.12.0");
   createVersion(backup, "0.11.0");
+  const commands = [];
   try {
     const result = await superviseUpdate({
       rootDir: root, backupDir: backup, targetVersion: "0.12.0", previousVersion: "0.11.0", port: 18789,
       env: { MOMO_PROXY_HOME: home },
       waitForParent: async () => true,
-      runCli: () => true,
+      runCli: (_script, command) => { commands.push(command); return true; },
       healthCheck: async ({ expectedVersion }) => expectedVersion === "0.12.0",
     });
     assert.equal(result.activated, true);
+    assert.equal(result.imagePluginInstalled, true);
+    assert.deepEqual(commands, ["restart", ["plugin", "install"]]);
     assert.equal(JSON.parse(readFileSync(join(home, "update-status.json"), "utf8")).status, "active");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("update supervisor honors an explicit image plugin opt-out", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-"));
+  const root = join(home, "app");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.1");
+  createVersion(backup, "0.13.0");
+  const commands = [];
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, backupDir: backup, targetVersion: "0.13.1", previousVersion: "0.13.0", port: 18789,
+      env: { MOMO_PROXY_HOME: home },
+      waitForParent: async () => true,
+      runCli: (_script, command) => { commands.push(command); return true; },
+      healthCheck: async () => true,
+      installImagePlugin: false,
+    });
+    assert.equal(result.activated, true);
+    assert.equal(result.imagePluginInstalled, false);
+    assert.deepEqual(commands, ["restart"]);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -33,6 +33,7 @@ test("environment API key remains a fallback before setup creates settings", () 
     });
     assert.equal(settings.apiKey, "bootstrap-env-key");
     assert.equal(settings.autoUpdateEnabled, false);
+    assert.equal(settings.imagePluginEnabled, true);
     assert.equal(settings.imageAssetDirectory, join(home, "images"));
     assert.deepEqual(settings.imageAssets, { maxAssetMb: 20, maxTotalMb: 2048, maxAssets: 2000, retentionDays: 30 });
   } finally {
@@ -51,6 +52,7 @@ test("diagnostic reporting and update checks have safe configurable defaults", (
       updateCheckEnabled: false,
       autoUpdateEnabled: false,
       updateCheckIntervalHours: 24,
+      imagePluginEnabled: false,
     }));
     const settings = resolveSettings({ MOMO_PROXY_HOME: home });
     assert.equal(settings.endpoint, "https://momoapi.us");
@@ -58,6 +60,7 @@ test("diagnostic reporting and update checks have safe configurable defaults", (
     assert.equal(settings.updateCheckEnabled, false);
     assert.equal(settings.autoUpdateEnabled, false);
     assert.equal(settings.updateCheckIntervalHours, 24);
+    assert.equal(settings.imagePluginEnabled, false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

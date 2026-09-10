@@ -60,8 +60,9 @@ export async function waitForExpectedHealth({ port, expectedVersion, timeoutMs =
   return false;
 }
 
-function runProxyCli(scriptPath, command, timeoutMs = 30_000) {
-  const result = spawnSync(process.execPath, [scriptPath, command], {
+function runProxyCli(scriptPath, commandArgs, timeoutMs = 30_000) {
+  const args = Array.isArray(commandArgs) ? commandArgs : [commandArgs];
+  const result = spawnSync(process.execPath, [scriptPath, ...args], {
     stdio: "ignore",
     windowsHide: true,
     timeout: timeoutMs,
@@ -82,6 +83,7 @@ export async function superviseUpdate({
   healthCheck = waitForExpectedHealth,
   move = renameSync,
   pathExists = existsSync,
+  installImagePlugin = true,
 } = {}) {
   const newScript = join(rootDir, "bin", "momoapi-proxy.mjs");
   const backupScript = join(backupDir, "bin", "momoapi-proxy.mjs");
@@ -91,6 +93,7 @@ export async function superviseUpdate({
   const restarted = runCli(newScript, "restart");
   const healthy = restarted && await healthCheck({ port, expectedVersion: targetVersion });
   if (healthy) {
+    const imagePluginInstalled = installImagePlugin ? runCli(newScript, ["plugin", "install"], 120_000) : false;
     writeSupervisorStatus({
       status: "active",
       current: targetVersion,
@@ -99,9 +102,13 @@ export async function superviseUpdate({
       hasUpdate: false,
       checkFailed: false,
       rolledBack: false,
+      imagePluginInstalled,
     }, env);
     appendSupervisorLog(`Proxy v${targetVersion} passed health verification.`, env);
-    return { activated: true, rolledBack: false };
+    appendSupervisorLog(imagePluginInstalled
+      ? "MOMO Image plugin installation verified after update."
+      : (installImagePlugin ? "MOMO Image plugin installation needs a manual retry." : "MOMO Image plugin installation was skipped by configuration."), env);
+    return { activated: true, rolledBack: false, imagePluginInstalled };
   }
 
   appendSupervisorLog(`Proxy v${targetVersion} failed health verification; starting rollback.`, env);
@@ -165,6 +172,7 @@ if (invokedPath && invokedPath.toLowerCase() === fileURLToPath(import.meta.url).
     previousVersion: arg("--previous"),
     port: Number(arg("--port") || 18789),
     parentPid: Number(arg("--parent-pid") || 0),
+    installImagePlugin: !process.argv.includes("--no-image-plugin"),
   });
   process.exitCode = result.activated || result.restoredHealthy ? 0 : 1;
 }
