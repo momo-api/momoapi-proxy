@@ -42,18 +42,6 @@ export function newLocalToken() {
   return randomBytes(32).toString("base64url");
 }
 
-export function newInstallationId() {
-  return randomBytes(18).toString("base64url");
-}
-
-export function ensureInstallationId(env = process.env) {
-  const saved = readSettings(env);
-  if (typeof saved.installationId === "string" && saved.installationId) return saved.installationId;
-  saved.installationId = newInstallationId();
-  writeSettings(saved, env);
-  return saved.installationId;
-}
-
 export function resolveSettings(env = process.env) {
   const saved = readSettings(env);
   // An installed daemon must remain pinned to its saved credential. Long-lived
@@ -72,19 +60,14 @@ export function resolveSettings(env = process.env) {
     host: "127.0.0.1",
     syncIntervalMinutes: Number(saved.syncIntervalMinutes || 60),
     updateCheckEnabled: saved.updateCheckEnabled !== false,
-    autoUpdateEnabled: saved.autoUpdateEnabled !== false,
+    autoUpdateEnabled: saved.autoUpdateEnabled === true,
     updateCheckIntervalHours: Math.max(1, Number(saved.updateCheckIntervalHours || 12)),
     desktopAliases: saved.desktopAliases !== false,
     autostart: saved.autostart !== false,
     lastSyncTime: saved.lastSyncTime || null,
     lastSyncStatus: saved.lastSyncStatus || null,
     lastError: saved.lastError || null,
-    installationId: typeof saved.installationId === "string" ? saved.installationId : null,
     diagnosticsEnabled: saved.diagnosticsEnabled !== false,
-    telemetryEnabled: saved.telemetryEnabled !== false,
-    telemetryEndpoint: typeof saved.telemetryEndpoint === "string" && saved.telemetryEndpoint
-      ? saved.telemetryEndpoint.replace(/\/$/, "")
-      : null,
     maxRequestBodyMb: saved.maxRequestBodyMb ? Number(saved.maxRequestBodyMb) : 64,
     contextPolicy: saved.contextPolicy && typeof saved.contextPolicy === "object" ? saved.contextPolicy : {},
   };

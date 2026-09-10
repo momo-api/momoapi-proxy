@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync } fro
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexHome, catalogPath, writeCatalog } from "./catalog.mjs";
-import { newInstallationId, newLocalToken, writeSettings, settingsPath } from "./config.mjs";
+import { newLocalToken, writeSettings, settingsPath } from "./config.mjs";
 import { installAutostart, uninstallAutostart } from "./autostart.mjs";
 import { installWindowsService, uninstallWindowsService } from "./service.mjs";
 import { migrateHistory } from "./history.mjs";
@@ -102,14 +102,12 @@ export async function setup({ apiKey, endpoint, port = 18789, autostart = true, 
     endpoint: (endpoint || "https://momoapi.us").replace(/\/$/, ""),
     port,
     localToken,
-    installationId: newInstallationId(),
     autostart: Boolean(autostart),
     desktopAliases: Boolean(desktopAliases),
     updateCheckEnabled: true,
-    autoUpdateEnabled: true,
+    autoUpdateEnabled: false,
     updateCheckIntervalHours: 12,
     diagnosticsEnabled: true,
-    telemetryEnabled: true,
   };
   const modelsResponse = await fetchImpl(settings.endpoint + "/agent/catalog", { headers: { authorization: "Bearer " + apiKey } });
   let models;

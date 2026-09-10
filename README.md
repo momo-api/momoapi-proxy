@@ -23,12 +23,15 @@ It implements a focused subset of OpenCodex-inspired protocol compatibility; it 
 - **Hourly Model Sync**: Background worker periodically pulls rich model capabilities from `https://momoapi.us/agent/catalog` (fallback to `/v1/models`).
 - **Autostart Support**: Configures login autostart on Windows, macOS launchd, and Linux systemd.
 - **Doctor & Rollback**: Built-in environment diagnostic and one-step backup restore.
+- **Local-Only Diagnostics**: Keeps bounded metadata for 413/429/5xx and lifecycle failures in the user's profile; the proxy has no remote telemetry sender.
+- **Safe Update Checks**: Checks official MOMO/GitHub release metadata, accepts packages only from approved HTTPS hosts, verifies SHA-256 and archive structure, and leaves unattended installation disabled unless explicitly enabled.
 
 ## Local security model
 
 - The server binds only to `127.0.0.1`.
 - Codex receives a random **local** bearer token. The MOMO key is not written into `~/.codex/auth.json` after setup.
 - The MOMO key is stored in the Bridge settings file under the user's profile and never logged.
+- Diagnostic events remain on the local machine in `~/.momoapi-proxy/diagnostic-events.jsonl` (bounded to 2 MiB / 1,000 retained lines) and are never uploaded automatically.
 - `rollback` restores the backed-up Codex configuration and auth file.
 
 ## CLI Usage
@@ -64,6 +67,9 @@ momo-codex-bridge models
 
 # Run full diagnostic
 momo-codex-bridge doctor
+
+# Print bounded local-only error metadata for support
+momo-codex-bridge diagnostics -n 100
 
 # Test streaming turn
 momo-codex-bridge test gpt-5.5

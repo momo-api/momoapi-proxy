@@ -26,6 +26,12 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.match(written, /requires_openai_auth = false/);
     assert.match(written, /MOMOAPI_PROXY_MANAGED/);
     assert.match(readFileSync(result.catalog, "utf8"), /gemini-3\.7-flash/);
+    const settings = JSON.parse(readFileSync(result.settingsFile, "utf8"));
+    assert.equal(settings.updateCheckEnabled, true);
+    assert.equal(settings.autoUpdateEnabled, false);
+    assert.equal(settings.diagnosticsEnabled, true);
+    assert.equal("telemetryEnabled" in settings, false);
+    assert.equal("installationId" in settings, false);
     assert.equal(isAutostartInstalled(process.platform, env), true);
     assert.deepEqual(rollback(env), [result.config]);
     assert.equal(readFileSync(config, "utf8"), "model = \"old-model\"\n");
