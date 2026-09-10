@@ -109,9 +109,11 @@ test("staged Windows-style activation stops the old service before swapping dire
     assert.equal(JSON.parse(readFileSync(join(backup, "package.json"), "utf8")).version, "0.13.2");
     assert.equal(operations[0].command, "stop");
     assert.equal(operations[1].type, "mcp");
-    assert.equal(operations[2].type, "move");
-    assert.equal(operations[4].command, "restart");
-    assert.deepEqual(operations[5].command, ["plugin", "install"]);
+    assert.deepEqual(operations[2].command, ["plugin", "install"]);
+    assert.equal(operations[3].type, "move");
+    assert.equal(operations[5].command, "restart");
+    assert.deepEqual(operations[6].command, ["plugin", "install"]);
+    assert.equal(result.activationMode, "swap");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -200,7 +202,7 @@ test("staged activation keeps the old tree and restores service when managed MCP
   }
 });
 
-test("staged activation restores the previous tree when the new tree cannot be moved into place", async () => {
+test("staged activation falls back to transactional in-place replacement when directory swap is blocked", async () => {
   const home = mkdtempSync(join(tmpdir(), "momo-supervisor-stage-failure-"));
   const root = join(home, "app");
   const staging = join(home, ".momoapi-proxy-update-stage");
@@ -213,7 +215,83 @@ test("staged activation restores the previous tree when the new tree cannot be m
       rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.3", previousVersion: "0.13.2", port: 18789,
       env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
       runCli: (script, command) => { commands.push({ script, command }); return true; },
-      healthCheck: async ({ expectedVersion }) => expectedVersion === "0.13.2",
+      healthCheck: async ({ expectedVersion }) => expectedVersion === "0.13.3",
+      retry: async (operation) => operation(),
+      move: (source, destination) => {
+        if (source === staging) throw Object.assign(new Error("locked"), { code: "EPERM" });
+        return renameSync(source, destination);
+      },
+    });
+    assert.deepEqual(commands.map(({ command }) => command), ["stop", ["plugin", "install"], "restart", ["plugin", "install"]]);
+    assert.equal(result.activated, true);
+    assert.equal(result.rolledBack, false);
+    assert.equal(result.activationMode, "inplace");
+    assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.3");
+    assert.equal(JSON.parse(readFileSync(join(backup, "package.json"), "utf8")).version, "0.13.2");
+    assert.equal(JSON.parse(readFileSync(join(home, "update-status.json"), "utf8")).status, "active");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("transactional in-place activation restores the complete backup when replacement fails", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-inplace-copy-failure-"));
+  const root = join(home, "app");
+  const staging = join(home, ".momoapi-proxy-update-stage");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.4");
+  createVersion(staging, "0.13.5");
+  writeFileSync(join(root, "previous-only.txt"), "preserve me");
+  const commands = [];
+  let replacementCalls = 0;
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.5", previousVersion: "0.13.4", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
+      runCli: (_script, command) => { commands.push(command); return true; },
+      healthCheck: async ({ expectedVersion }) => expectedVersion === "0.13.4",
+      retry: async (operation) => operation(),
+      move: (source, destination) => {
+        if (source === staging) throw Object.assign(new Error("locked"), { code: "EPERM" });
+        return renameSync(source, destination);
+      },
+      replaceContents: (destination, source) => {
+        replacementCalls += 1;
+        const version = JSON.parse(readFileSync(join(source, "package.json"), "utf8")).version;
+        createVersion(destination, version);
+        if (replacementCalls === 1) {
+          writeFileSync(join(destination, "partial-new-file.txt"), "partial");
+          throw Object.assign(new Error("copy failed"), { code: "EIO" });
+        }
+        rmSync(join(destination, "partial-new-file.txt"), { force: true });
+        writeFileSync(join(destination, "previous-only.txt"), readFileSync(join(source, "previous-only.txt"), "utf8"));
+      },
+    });
+    assert.deepEqual(result, { activated: false, rolledBack: true, restoredHealthy: true, errorCode: "update_inplace_failed" });
+    assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.4");
+    assert.equal(readFileSync(join(root, "previous-only.txt"), "utf8"), "preserve me");
+    assert.equal(JSON.parse(readFileSync(join(home, "update-status.json"), "utf8")).status, "rolled_back");
+    assert.deepEqual(commands, ["stop", ["plugin", "install"], "start"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("transactional in-place activation restores the backup when target health fails", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-inplace-health-failure-"));
+  const root = join(home, "app");
+  const staging = join(home, ".momoapi-proxy-update-stage");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.4");
+  createVersion(staging, "0.13.5");
+  const commands = [];
+  const healthVersions = [];
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.5", previousVersion: "0.13.4", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
+      runCli: (_script, command) => { commands.push(command); return true; },
+      healthCheck: async ({ expectedVersion }) => { healthVersions.push(expectedVersion); return expectedVersion === "0.13.4"; },
       retry: async (operation) => operation(),
       move: (source, destination) => {
         if (source === staging) throw Object.assign(new Error("locked"), { code: "EPERM" });
@@ -223,8 +301,10 @@ test("staged activation restores the previous tree when the new tree cannot be m
     assert.equal(result.activated, false);
     assert.equal(result.rolledBack, true);
     assert.equal(result.restoredHealthy, true);
-    assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.2");
-    assert.deepEqual(commands.map(({ command }) => command), ["stop", "start"]);
+    assert.equal(result.errorCode, "update_activation_failed");
+    assert.deepEqual(healthVersions, ["0.13.5", "0.13.4"]);
+    assert.deepEqual(commands, ["stop", ["plugin", "install"], "restart", "stop", "restart"]);
+    assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.4");
     assert.equal(JSON.parse(readFileSync(join(home, "update-status.json"), "utf8")).status, "rolled_back");
   } finally {
     rmSync(home, { recursive: true, force: true });

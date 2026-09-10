@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BUNDLED_MARKETPLACE_ROOT, getImagePluginStatus, installImagePlugin } from "../src/plugin-install.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BUNDLED_MARKETPLACE_ROOT, getImagePluginStatus, installImagePlugin, marketplaceMirrorRoot, materializeMarketplaceMirror } from "../src/plugin-install.mjs";
 
 function result(stdout = "", status = 0, stderr = "", error = null) {
   return { status, stdout, stderr, error };
@@ -8,6 +11,9 @@ function result(stdout = "", status = 0, stderr = "", error = null) {
 
 test("image plugin installer adds the bundled marketplace and enables the plugin", () => {
   const calls = [];
+  const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-install-"));
+  const env = { MOMO_PROXY_HOME: proxyHome };
+  const mirrorRoot = marketplaceMirrorRoot({ env });
   const runCodex = (args) => {
     calls.push(args);
     if (args[0] === "plugin" && args[1] === "marketplace" && args[2] === "list") {
@@ -26,24 +32,31 @@ test("image plugin installer adds the bundled marketplace and enables the plugin
     return result("{}");
   };
 
-  const installed = installImagePlugin({ runCodex });
-  assert.equal(installed.installed, true);
-  assert.equal(installed.enabled, true);
-  assert.equal(installed.marketplaceSource, "bundled");
-  assert.deepEqual(calls, [
-    ["plugin", "marketplace", "list", "--json"],
-    ["plugin", "marketplace", "add", BUNDLED_MARKETPLACE_ROOT, "--json"],
-    ["plugin", "add", "momo-image@momo-api", "--json"],
-    ["plugin", "list", "--json"],
-  ]);
+  try {
+    const installed = installImagePlugin({ env, runCodex });
+    assert.equal(installed.installed, true);
+    assert.equal(installed.enabled, true);
+    assert.equal(installed.marketplaceSource, "bundled");
+    assert.deepEqual(calls, [
+      ["plugin", "marketplace", "list", "--json"],
+      ["plugin", "marketplace", "add", mirrorRoot, "--json"],
+      ["plugin", "add", "momo-image@momo-api", "--json"],
+      ["plugin", "list", "--json"],
+    ]);
+  } finally {
+    rmSync(proxyHome, { recursive: true, force: true });
+  }
 });
 
 test("image plugin installer is idempotent for its bundled local marketplace", () => {
   const calls = [];
+  const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-install-"));
+  const env = { MOMO_PROXY_HOME: proxyHome };
+  const mirrorRoot = materializeMarketplaceMirror({ env });
   const runCodex = (args) => {
     calls.push(args);
     if (args[1] === "marketplace") {
-      return result(JSON.stringify({ marketplaces: [{ name: "momo-api", root: BUNDLED_MARKETPLACE_ROOT }] }));
+      return result(JSON.stringify({ marketplaces: [{ name: "momo-api", root: mirrorRoot }] }));
     }
     if (args[1] === "list") {
       return result(JSON.stringify({ installed: [{
@@ -55,11 +68,15 @@ test("image plugin installer is idempotent for its bundled local marketplace", (
     return result("{}");
   };
 
-  const installed = installImagePlugin({ runCodex });
-  assert.equal(installed.installed, true);
-  assert.equal(installed.enabled, true);
-  assert.equal(calls.some((args) => args[2] === "add" && args[1] === "marketplace"), false);
-  assert.equal(calls.some((args) => args[2] === "upgrade"), false);
+  try {
+    const installed = installImagePlugin({ env, runCodex });
+    assert.equal(installed.installed, true);
+    assert.equal(installed.enabled, true);
+    assert.equal(calls.some((args) => args[2] === "add" && args[1] === "marketplace"), false);
+    assert.equal(calls.some((args) => args[2] === "upgrade"), false);
+  } finally {
+    rmSync(proxyHome, { recursive: true, force: true });
+  }
 });
 
 test("image plugin installer replaces a previously configured marketplace with the bundled copy", () => {
@@ -107,4 +124,17 @@ test("Codex commands are passed as argument arrays without a shell", () => {
   installImagePlugin({ marketplaceRoot: BUNDLED_MARKETPLACE_ROOT, runCodex });
   assert.ok(calls.every(Array.isArray));
   assert.equal(calls.flat().some((value) => String(value).includes("&&")), false);
+});
+
+test("marketplace mirror contains only the public plugin bundle outside the application tree", () => {
+  const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-mirror-"));
+  const env = { MOMO_PROXY_HOME: proxyHome };
+  try {
+    const mirror = materializeMarketplaceMirror({ env });
+    assert.equal(mirror.startsWith(join(proxyHome, "marketplaces")), true);
+    assert.notEqual(mirror, BUNDLED_MARKETPLACE_ROOT);
+    assert.equal(materializeMarketplaceMirror({ env }), mirror);
+  } finally {
+    rmSync(proxyHome, { recursive: true, force: true });
+  }
 });

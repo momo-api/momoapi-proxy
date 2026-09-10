@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +30,41 @@ function validateStagedLayout({ rootDir, stagingDir, backupDir }) {
     || staging === backup) {
     throw Object.assign(new Error("Refusing an unsafe staged update directory layout."), { code: "update_layout_unsafe" });
   }
+}
+
+function copyDirectoryContents(source, destination) {
+  mkdirSync(destination, { recursive: true, mode: 0o700 });
+  for (const entry of readdirSync(source)) {
+    cpSync(join(source, entry), join(destination, entry), { recursive: true });
+  }
+}
+
+function replaceDirectoryContents(destination, source) {
+  mkdirSync(destination, { recursive: true, mode: 0o700 });
+  const sourceEntries = new Set(readdirSync(source));
+  for (const entry of sourceEntries) {
+    const sourcePath = join(source, entry);
+    const destinationPath = join(destination, entry);
+    const sourceStat = lstatSync(sourcePath);
+    if (sourceStat.isDirectory()) {
+      if (existsSync(destinationPath) && !lstatSync(destinationPath).isDirectory()) {
+        rmSync(destinationPath, { recursive: true, force: true });
+      }
+      replaceDirectoryContents(destinationPath, sourcePath);
+    } else {
+      if (existsSync(destinationPath) && lstatSync(destinationPath).isDirectory()) {
+        rmSync(destinationPath, { recursive: true, force: true });
+      }
+      cpSync(sourcePath, destinationPath, { force: true });
+    }
+  }
+  for (const entry of readdirSync(destination)) {
+    if (!sourceEntries.has(entry)) rmSync(join(destination, entry), { recursive: true, force: true });
+  }
+}
+
+function installedTreeVersion(root) {
+  try { return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version || null; } catch { return null; }
 }
 
 function proxyHome(env = process.env) {
@@ -169,9 +204,12 @@ export async function superviseUpdate({
   retry = retryFileOperation,
   stopMcpProcesses = stopManagedImageMcpProcesses,
   pathExists = existsSync,
+  copyContents = copyDirectoryContents,
+  replaceContents = replaceDirectoryContents,
   installImagePlugin = true,
 } = {}) {
   const stagedActivation = Boolean(stagingDir);
+  let activationMode = stagedActivation ? "swap" : "legacy";
   const newScript = join(rootDir, "bin", "momoapi-proxy.mjs");
   const backupScript = join(backupDir, "bin", "momoapi-proxy.mjs");
   await waitForParent(parentPid);
@@ -194,6 +232,13 @@ export async function superviseUpdate({
       appendSupervisorLog(`Stopping managed image MCP processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
       return { activated: false, rolledBack: false, restoredHealthy, errorCode: error?.code || "update_mcp_stop_failed" };
     }
+    if (installImagePlugin) {
+      const stagedScript = join(stagingDir, "bin", "momoapi-proxy.mjs");
+      const marketplaceMigrated = pathExists(stagedScript) && runCli(stagedScript, ["plugin", "install"], 120_000);
+      appendSupervisorLog(marketplaceMigrated
+        ? "Moved the MOMO Image marketplace outside the application tree before activation."
+        : "The MOMO Image marketplace pre-activation migration was unavailable; activation will continue with rollback protection.", env);
+    }
     await sleep(500);
     try {
       await retry(() => remove(backupDir));
@@ -209,19 +254,64 @@ export async function superviseUpdate({
       } catch (restoreError) {
         appendSupervisorLog(`Restoring the previous update tree failed: ${restoreError?.code || restoreError?.name || "unknown_error"}.`, env);
       }
-      const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
-      const restarted = restoredTree && pathExists(restoredScript) && runCli(restoredScript, "start");
-      const restoredHealthy = restarted && await healthCheck({ port, expectedVersion: previousVersion });
-      writeSupervisorStatus({
-        status: restoredHealthy ? "rolled_back" : "rollback_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
-        hasUpdate: true, checkFailed: true, rolledBack: restoredTree,
-        errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
-      }, env);
-      appendSupervisorLog(`Update file swap failed: ${error?.code || error?.name || "unknown_error"}.`, env);
-      return {
-        activated: false, rolledBack: restoredTree, restoredHealthy,
-        errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
-      };
+      const canUseInPlaceFallback = restoredTree && pathExists(stagingDir)
+        && new Set(["EPERM", "EACCES", "EBUSY", "ENOTEMPTY"]).has(error?.code);
+      if (canUseInPlaceFallback) {
+        let backupValid = false;
+        try {
+          await retry(() => remove(backupDir));
+          copyContents(rootDir, backupDir);
+          if (installedTreeVersion(backupDir) !== previousVersion) {
+            throw Object.assign(new Error("The in-place update backup did not preserve the previous version."), { code: "update_inplace_backup_invalid" });
+          }
+          backupValid = true;
+          replaceContents(rootDir, stagingDir);
+          if (installedTreeVersion(rootDir) !== targetVersion) {
+            throw Object.assign(new Error("The in-place update did not install the target version."), { code: "update_inplace_copy_invalid" });
+          }
+          activationMode = "inplace";
+          appendSupervisorLog(`Directory swap was blocked (${error.code}); activated the verified tree with the transactional in-place fallback.`, env);
+        } catch (fallbackError) {
+          let restoredTreeContents = false;
+          try {
+            if (backupValid && pathExists(backupDir)) {
+              replaceContents(rootDir, backupDir);
+              restoredTreeContents = installedTreeVersion(rootDir) === previousVersion;
+            } else {
+              restoredTreeContents = installedTreeVersion(rootDir) === previousVersion;
+            }
+          } catch (restoreError) {
+            appendSupervisorLog(`Restoring the in-place update backup failed: ${restoreError?.code || restoreError?.name || "unknown_error"}.`, env);
+          }
+          const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
+          const restarted = restoredTreeContents && pathExists(restoredScript) && runCli(restoredScript, "start");
+          const restoredHealthy = restarted && await healthCheck({ port, expectedVersion: previousVersion });
+          writeSupervisorStatus({
+            status: restoredHealthy ? "rolled_back" : "rollback_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
+            hasUpdate: true, checkFailed: true, rolledBack: restoredTreeContents,
+            errorCode: restoredHealthy ? "update_inplace_failed" : "update_inplace_restore_failed",
+          }, env);
+          appendSupervisorLog(`Transactional in-place activation failed: ${fallbackError?.code || fallbackError?.name || "unknown_error"}.`, env);
+          return {
+            activated: false, rolledBack: restoredTreeContents, restoredHealthy,
+            errorCode: restoredHealthy ? "update_inplace_failed" : "update_inplace_restore_failed",
+          };
+        }
+      } else {
+        const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
+        const restarted = restoredTree && pathExists(restoredScript) && runCli(restoredScript, "start");
+        const restoredHealthy = restarted && await healthCheck({ port, expectedVersion: previousVersion });
+        writeSupervisorStatus({
+          status: restoredHealthy ? "rolled_back" : "rollback_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
+          hasUpdate: true, checkFailed: true, rolledBack: restoredTree,
+          errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
+        }, env);
+        appendSupervisorLog(`Update file swap failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+        return {
+          activated: false, rolledBack: restoredTree, restoredHealthy,
+          errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
+        };
+      }
     }
   }
 
@@ -239,15 +329,43 @@ export async function superviseUpdate({
       checkFailed: false,
       rolledBack: false,
       imagePluginInstalled,
+      activationMode,
     }, env);
     appendSupervisorLog(`Proxy v${targetVersion} passed health verification.`, env);
     appendSupervisorLog(imagePluginInstalled
       ? "MOMO Image plugin installation verified after update."
       : (installImagePlugin ? "MOMO Image plugin installation needs a manual retry." : "MOMO Image plugin installation was skipped by configuration."), env);
-    return { activated: true, rolledBack: false, imagePluginInstalled };
+    if (activationMode === "inplace" && stagingDir) {
+      try { remove(stagingDir); } catch {}
+    }
+    return { activated: true, rolledBack: false, imagePluginInstalled, activationMode };
   }
 
   appendSupervisorLog(`Proxy v${targetVersion} failed health verification; starting rollback.`, env);
+  if (activationMode === "inplace") {
+    if (pathExists(newScript)) runCli(newScript, "stop", 15_000);
+    let restoredTree = false;
+    try {
+      replaceContents(rootDir, backupDir);
+      restoredTree = installedTreeVersion(rootDir) === previousVersion;
+    } catch (error) {
+      appendSupervisorLog(`In-place health rollback failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+    }
+    const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
+    const restored = restoredTree && runCli(restoredScript, "restart");
+    const restoredHealthy = restored && await healthCheck({ port, expectedVersion: previousVersion });
+    writeSupervisorStatus({
+      status: restoredHealthy ? "rolled_back" : "rollback_failed",
+      current: previousVersion, latest: targetVersion, previous: previousVersion,
+      hasUpdate: true, checkFailed: !restoredHealthy, rolledBack: restoredTree,
+      errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
+    }, env);
+    return {
+      activated: false, rolledBack: restoredTree, restoredHealthy,
+      errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
+    };
+  }
+
   if (pathExists(backupScript)) runCli(backupScript, "stop", 15_000);
 
   const failedDir = rootDir + `.failed-${Date.now()}-${process.pid}`;
