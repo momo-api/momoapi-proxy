@@ -52,8 +52,17 @@ if ($major -lt 22) {
 Write-Step "Found Node.js v$nodeVer"
 
 # 2. Resolve API Key
+$installRoot = [System.IO.Path]::Combine($HOME, ".momoapi-proxy")
+$installDir = [System.IO.Path]::Combine($installRoot, "app")
+$savedSettingsPath = [System.IO.Path]::Combine($installRoot, "settings.json")
 if (-not $ApiKey) {
   $ApiKey = $env:MOMO_API_KEY
+}
+if (-not $ApiKey -and (Test-Path -LiteralPath $savedSettingsPath)) {
+  try {
+    $savedSettings = Get-Content -LiteralPath $savedSettingsPath -Raw | ConvertFrom-Json
+    if ($savedSettings.apiKey) { $ApiKey = [string]$savedSettings.apiKey }
+  } catch {}
 }
 if (-not $ApiKey) {
   $ApiKey = Read-Host "Enter your MOMO API Key (e.g. sk-momo-...)"
@@ -64,9 +73,7 @@ if (-not $ApiKey) {
 }
 
 # 3. Download and verify an immutable package from the official manifest.
-$installRoot = [System.IO.Path]::Combine($HOME, ".momoapi-proxy")
-$installDir = [System.IO.Path]::Combine($installRoot, "app")
-$stagingDir = [System.IO.Path]::Combine($installRoot, ".install-" + [guid]::NewGuid().ToString("N"))
+$stagingDir = [System.IO.Path]::Combine($installRoot, ".momoapi-proxy-update-install-" + [guid]::NewGuid().ToString("N"))
 $tgzPath = [System.IO.Path]::Combine($installRoot, "package.tgz")
 New-Item -ItemType Directory -Path $installRoot, $stagingDir -Force | Out-Null
 Write-Step "Reading and verifying the official release manifest..."
@@ -88,8 +95,33 @@ if (-not $downloaded) { throw "Unable to download a release package matching the
 tar -xzf $tgzPath -C $stagingDir --strip-components=1 --no-same-owner --no-same-permissions
 $package = Get-Content -Raw (Join-Path $stagingDir "package.json") | ConvertFrom-Json
 if ([string]$package.version -ne $version) { throw "Package version does not match the verified manifest." }
-if (Test-Path $installDir) { Remove-Item -Recurse -Force $installDir }
-Move-Item -LiteralPath $stagingDir -Destination $installDir
+if (Test-Path -LiteralPath $installDir) {
+  $previousPackage = Get-Content -LiteralPath (Join-Path $installDir "package.json") -Raw | ConvertFrom-Json
+  $previousVersion = [string]$previousPackage.version
+  if ($previousVersion -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { throw "Existing proxy package version is invalid." }
+  $supervisorPath = [System.IO.Path]::Combine($installRoot, ".momoapi-proxy-install-supervisor-" + [guid]::NewGuid().ToString("N") + ".mjs")
+  Copy-Item -LiteralPath (Join-Path $stagingDir "src\update-supervisor.mjs") -Destination $supervisorPath -Force
+  Write-Step "Safely upgrading existing MOMO API Proxy v$previousVersion to v$version..."
+  $supervisorArgs = @(
+    $supervisorPath,
+    "--root", $installDir,
+    "--staging", $stagingDir,
+    "--backup", ($installDir + ".update-backup"),
+    "--target", $version,
+    "--previous", $previousVersion,
+    "--port", "$Port",
+    "--parent-pid", "0"
+  )
+  if ($NoImagePlugin) { $supervisorArgs += "--no-image-plugin" }
+  & node @supervisorArgs
+  $supervisorExit = $LASTEXITCODE
+  Remove-Item -LiteralPath $supervisorPath -Force -ErrorAction SilentlyContinue
+  if ($supervisorExit -ne 0) { throw "Existing proxy upgrade failed safely; the previous version was restored." }
+  $activatedPackage = Get-Content -LiteralPath (Join-Path $installDir "package.json") -Raw | ConvertFrom-Json
+  if ([string]$activatedPackage.version -ne $version) { throw "Existing proxy upgrade did not activate the verified target version." }
+} else {
+  Move-Item -LiteralPath $stagingDir -Destination $installDir
+}
 Remove-Item $tgzPath, $manifestPath -Force -ErrorAction SilentlyContinue
 
 # 4. Generate Windows CLI wrappers in bin & compile Native Tray EXE

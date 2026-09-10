@@ -21,17 +21,17 @@ test("checkLatestVersion detects updates from CDN JSON payload", async () => {
   const fakeFetch = async (url) => {
     if (url.includes("bridge-latest.json")) {
       return new Response(JSON.stringify({
-        version: "0.13.5",
-        url: "https://momoapi.us/install/packages/momoapi-proxy-0.13.5.tgz",
+        version: "0.13.6",
+        url: "https://momoapi.us/install/packages/momoapi-proxy-0.13.6.tgz",
         latest_url: "https://momoapi.us/install/packages/momoapi-proxy-latest.tgz",
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (url.includes("api.github.com")) {
       return new Response(JSON.stringify({
-        tag_name: "v0.13.5",
+        tag_name: "v0.13.6",
         assets: [{
-          name: "momoapi-proxy-0.13.5.tgz",
-          browser_download_url: "https://github.com/momo-api/momoapi-proxy/releases/download/v0.13.5/momoapi-proxy-0.13.5.tgz",
+          name: "momoapi-proxy-0.13.6.tgz",
+          browser_download_url: "https://github.com/momo-api/momoapi-proxy/releases/download/v0.13.6/momoapi-proxy-0.13.6.tgz",
           digest: `sha256:${checksum}`,
         }],
       }), { status: 200 });
@@ -40,9 +40,9 @@ test("checkLatestVersion detects updates from CDN JSON payload", async () => {
   };
 
   const info = await checkLatestVersion({ endpoint: "https://mock.momo", fetchImpl: fakeFetch });
-  assert.equal(info.latest, "0.13.5");
+  assert.equal(info.latest, "0.13.6");
   assert.equal(info.hasUpdate, true);
-  assert.equal(info.downloadUrl, "https://momoapi.us/install/packages/momoapi-proxy-0.13.5.tgz");
+  assert.equal(info.downloadUrl, "https://momoapi.us/install/packages/momoapi-proxy-0.13.6.tgz");
 });
 
 test("checkLatestVersion prefers a newer GitHub release over a stale CDN manifest", async () => {
@@ -252,11 +252,11 @@ test("self-update fails closed when GitHub release attestation is missing", asyn
 test("self-update verifies and stages a newer package without renaming the running tree", async () => {
   const fixture = mkdtempSync(join(tmpdir(), "momo-updater-stage-"));
   const source = join(fixture, "source", "momoapi-proxy");
-  const archive = join(fixture, "momoapi-proxy-0.13.5.tgz");
+  const archive = join(fixture, "momoapi-proxy-0.13.6.tgz");
   const proxyHome = join(fixture, "home");
   mkdirSync(join(source, "bin"), { recursive: true });
   mkdirSync(join(source, "src"), { recursive: true });
-  writeFileSync(join(source, "package.json"), JSON.stringify({ version: "0.13.5" }));
+  writeFileSync(join(source, "package.json"), JSON.stringify({ version: "0.13.6" }));
   writeFileSync(join(source, "bin", "momoapi-proxy.mjs"), "// staged CLI\n");
   writeFileSync(join(source, "src", "update-supervisor.mjs"), "// staged supervisor\n");
   execFileSync("tar", ["-czf", archive, "-C", join(fixture, "source"), "momoapi-proxy"]);
@@ -269,15 +269,15 @@ test("self-update verifies and stages a newer package without renaming the runni
       fetchImpl: async (url) => {
         if (url.includes("bridge-latest.json")) {
           return new Response(JSON.stringify({
-            version: "0.13.5", url: "https://momoapi.us/install/packages/momoapi-proxy-0.13.5.tgz",
+            version: "0.13.6", url: "https://momoapi.us/install/packages/momoapi-proxy-0.13.6.tgz",
           }), { status: 200 });
         }
         if (url.includes("api.github.com")) {
           return new Response(JSON.stringify({
-            tag_name: "v0.13.5",
+            tag_name: "v0.13.6",
             assets: [{
-              name: "momoapi-proxy-0.13.5.tgz",
-              browser_download_url: "https://github.com/momo-api/momoapi-proxy/releases/download/v0.13.5/momoapi-proxy-0.13.5.tgz",
+              name: "momoapi-proxy-0.13.6.tgz",
+              browser_download_url: "https://github.com/momo-api/momoapi-proxy/releases/download/v0.13.6/momoapi-proxy-0.13.6.tgz",
               digest: `sha256:${checksum}`,
             }],
           }), { status: 200 });
@@ -287,10 +287,10 @@ test("self-update verifies and stages a newer package without renaming the runni
     });
     assert.equal(staged.updated, true);
     assert.equal(staged.staged, true);
-    assert.equal(staged.previous, "0.13.4");
-    assert.equal(staged.current, "0.13.5");
-    assert.equal(JSON.parse(readFileSync(join(staged.rootDir, "package.json"), "utf8")).version, "0.13.4");
-    assert.equal(JSON.parse(readFileSync(join(staged.stagingDir, "package.json"), "utf8")).version, "0.13.5");
+    assert.equal(staged.previous, "0.13.5");
+    assert.equal(staged.current, "0.13.6");
+    assert.equal(JSON.parse(readFileSync(join(staged.rootDir, "package.json"), "utf8")).version, "0.13.5");
+    assert.equal(JSON.parse(readFileSync(join(staged.stagingDir, "package.json"), "utf8")).version, "0.13.6");
     assert.equal(existsSync(staged.supervisorPath), true);
     assert.equal(readUpdateStatus({ MOMO_PROXY_HOME: proxyHome }).status, "awaiting_activation");
   } finally {

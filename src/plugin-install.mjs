@@ -1,13 +1,58 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { appHome } from "./config.mjs";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 export const BUNDLED_MARKETPLACE_ROOT = dirname(MODULE_DIR);
 export const IMAGE_PLUGIN_ID = "momo-image@momo-api";
 export const IMAGE_PLUGIN_NAME = "momo-image";
 export const IMAGE_MARKETPLACE_NAME = "momo-api";
+
+function bundledPluginVersion(root) {
+  try {
+    const version = JSON.parse(readFileSync(join(root, "plugins", IMAGE_PLUGIN_NAME, ".codex-plugin", "plugin.json"), "utf8")).version;
+    if (/^[0-9A-Za-z.-]+$/.test(String(version || ""))) return String(version);
+  } catch {}
+  return "unknown";
+}
+
+export function marketplaceMirrorRoot({ env = process.env, sourceRoot = BUNDLED_MARKETPLACE_ROOT } = {}) {
+  return join(appHome(env), "marketplaces", `momo-image-${bundledPluginVersion(sourceRoot)}`);
+}
+
+function validMarketplaceRoot(root) {
+  return existsSync(join(root, ".agents", "plugins", "marketplace.json"))
+    && existsSync(join(root, "plugins", IMAGE_PLUGIN_NAME, ".codex-plugin", "plugin.json"));
+}
+
+export function materializeMarketplaceMirror({ env = process.env, sourceRoot = BUNDLED_MARKETPLACE_ROOT } = {}) {
+  const resolvedSource = resolve(sourceRoot);
+  if (!validMarketplaceRoot(resolvedSource)) {
+    throw Object.assign(new Error("The MOMO Image plugin files are missing from this proxy installation."), { code: "bundled_marketplace_missing" });
+  }
+  const target = marketplaceMirrorRoot({ env, sourceRoot: resolvedSource });
+  if (validMarketplaceRoot(target)) return target;
+
+  const parent = dirname(target);
+  const staging = target + `.staging-${process.pid}-${Date.now()}`;
+  mkdirSync(join(staging, ".agents", "plugins"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(staging, "plugins"), { recursive: true, mode: 0o700 });
+  try {
+    cpSync(join(resolvedSource, ".agents", "plugins", "marketplace.json"), join(staging, ".agents", "plugins", "marketplace.json"));
+    cpSync(join(resolvedSource, "plugins", IMAGE_PLUGIN_NAME), join(staging, "plugins", IMAGE_PLUGIN_NAME), { recursive: true });
+    mkdirSync(parent, { recursive: true, mode: 0o700 });
+    try {
+      renameSync(staging, target);
+    } catch (error) {
+      if (!validMarketplaceRoot(target)) throw error;
+    }
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+  return target;
+}
 
 function executeCodex(args, { env = process.env, timeoutMs = 120_000 } = {}) {
   const result = spawnSync("codex", args, {
@@ -106,10 +151,26 @@ export function getImagePluginStatus({ env = process.env, runCodex = executeCode
 
 export function installImagePlugin({
   env = process.env,
-  marketplaceRoot = BUNDLED_MARKETPLACE_ROOT,
+  marketplaceRoot,
+  sourceRoot = BUNDLED_MARKETPLACE_ROOT,
   runCodex = executeCodex,
 } = {}) {
-  const resolvedRoot = resolve(marketplaceRoot);
+  let resolvedRoot;
+  try {
+    resolvedRoot = marketplaceRoot
+      ? resolve(marketplaceRoot)
+      : materializeMarketplaceMirror({ env, sourceRoot });
+  } catch (error) {
+    return {
+      attempted: true,
+      installed: false,
+      enabled: false,
+      pluginId: IMAGE_PLUGIN_ID,
+      marketplace: IMAGE_MARKETPLACE_NAME,
+      errorCode: error?.code || "bundled_marketplace_missing",
+      message: error?.message || "The MOMO Image plugin files are missing from this proxy installation.",
+    };
+  }
   const manifest = join(resolvedRoot, ".agents", "plugins", "marketplace.json");
   if (!existsSync(manifest)) {
     return {

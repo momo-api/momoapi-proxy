@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.5 - 2026-09-10
+
+- Mirror the bundled MOMO Image marketplace into a versioned directory outside the application tree so Codex can monitor plugin files without locking proxy self-updates.
+- When Windows blocks renaming the installed application directory, fall back to a transactional in-place activation: copy a complete backup, replace the verified program tree, validate the target version, health-check it, and restore the backup automatically on any failure.
+
 ## 0.13.4 - 2026-09-10
 
 - Stop only the exact Windows `node.exe .../app/bin/momoapi-proxy.mjs mcp image` processes managed by the installed MOMO image plugin before switching the application directory. This closes the remaining `EPERM` update lock without terminating Codex, unrelated Node processes, or other proxy commands.
