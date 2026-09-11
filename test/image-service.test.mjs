@@ -8,7 +8,7 @@ const publicLookup = async () => [{ address: "203.0.113.10", family: 4 }];
 
 test("advertises the verified model-specific capability matrix", () => {
   const byId = Object.fromEntries(IMAGE_CAPABILITIES.models.map((model) => [model.id, model]));
-  assert.equal(IMAGE_CAPABILITIES.version, 3);
+  assert.equal(IMAGE_CAPABILITIES.version, 4);
   assert.equal(byId["gpt-image-2"].limits.max_reference_images, 1);
   assert.equal(byId["gpt-image-2"].transports.edit, "images-generations-reference");
   assert.equal(byId["gpt-image-2-momoapi"].limits.max_reference_images, 4);
@@ -20,7 +20,7 @@ test("advertises the verified model-specific capability matrix", () => {
   assert.equal(byId["gpt-image-2.5-sunburst"].limits.max_n, 10);
   assert.equal(byId["gpt-image-2.5-sunburst"].mask_edits, true);
   assert.equal(byId["gpt-image-2.5-sunburst"].available, false);
-  assert.equal(byId["gpt-image-2.5-flare"].transports.edit, "images-edits-multipart");
+  assert.equal(byId["gpt-image-2.5-flare"].transports.edit, "images-edits-url-or-multipart");
 });
 
 test("enables GPT Image 2.5 only when the authenticated model catalog contains it", async () => {
@@ -108,6 +108,35 @@ test("uses the singular multipart image field for one GPT Image 2.5 reference", 
   });
   assert.equal(form.getAll("image").length, 1);
   assert.equal(form.getAll("image[]").length, 0);
+});
+
+test("passes 16 public GPT Image 2.5 reference URLs without downloading them", async () => {
+  const referenceUrls = Array.from({ length: 16 }, (_, index) => `https://assets.example/reference-${index + 1}.png?signature=test`);
+  const maskUrl = "https://assets.example/mask.png?signature=test";
+  const calls = [];
+  await generateImage({
+    settings, operation: "edit",
+    request: {
+      model: "gpt-image-2.5-flare", prompt: "edit", reference_images: referenceUrls,
+      mask: maskUrl, input_fidelity: "high",
+    },
+    lookupImpl: publicLookup,
+    fetchImpl: async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/v1/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-flare" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].url, "https://gateway.example/v1/images/edits");
+  assert.equal(calls[1].init.headers["content-type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    model: "gpt-image-2.5-flare", prompt: "edit", n: 1, size: "auto", quality: "auto",
+    output_format: "png", background: "auto", moderation: "auto", stream: false,
+    images: referenceUrls.map((image_url) => ({ image_url })), mask: { image_url: maskUrl }, input_fidelity: "high",
+  });
 });
 
 test("returns model_unavailable before calling a hidden GPT Image 2.5 route", async () => {
