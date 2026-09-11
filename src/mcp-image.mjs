@@ -103,7 +103,7 @@ export async function runImageMcp() {
     try { request = JSON.parse(line); } catch { continue; }
     if (request.method === "notifications/initialized" || request.method === "notifications/cancelled") continue;
     if (request.method === "initialize") {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.5.0" } } }) + "\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.5.1" } } }) + "\n");
       continue;
     }
     try {
