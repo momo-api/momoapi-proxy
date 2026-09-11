@@ -618,6 +618,88 @@ function geminiFilePart(file) {
   return null;
 }
 
+function geminiFunctionResultText(part) {
+  const response = part?.functionResponse?.response;
+  if (response && typeof response === "object" && Object.hasOwn(response, "result")) {
+    return typeof response.result === "string" ? response.result : safePartJson(response.result);
+  }
+  return safePartJson(response ?? part?.functionResponse ?? part);
+}
+
+export function sanitizeGeminiFunctionHistory(contents) {
+  const source = asArray(contents);
+  const sanitized = [];
+
+  for (let index = 0; index < source.length; index++) {
+    const content = source[index];
+    if (!content || typeof content !== "object") continue;
+    const parts = asArray(content.parts);
+    const calls = parts.filter((part) => part?.functionCall);
+
+    if (content.role !== "model" || calls.length === 0) {
+      const orphanResponses = parts.filter((part) => part?.functionResponse);
+      if (orphanResponses.length === 0) {
+        if (parts.length > 0) sanitized.push(content);
+        continue;
+      }
+      const safeParts = parts.flatMap((part) => part?.functionResponse
+        ? [{ text: `[unpaired tool result: ${part.functionResponse.name || "tool"}]\n${geminiFunctionResultText(part)}` }]
+        : [part]);
+      if (safeParts.length > 0) sanitized.push({ ...content, parts: safeParts });
+      continue;
+    }
+
+    const next = source[index + 1];
+    const nextParts = next?.role === "user" ? asArray(next.parts) : [];
+    const responses = nextParts.filter((part) => part?.functionResponse);
+    const usedResponses = new Set();
+    const keptCalls = [];
+    const keptResponses = [];
+
+    for (const callPart of calls) {
+      const call = callPart.functionCall;
+      let matchIndex = -1;
+      if (call?.id) {
+        matchIndex = responses.findIndex((part, responseIndex) =>
+          !usedResponses.has(responseIndex) && part.functionResponse?.id === call.id);
+      }
+      if (matchIndex < 0) {
+        matchIndex = responses.findIndex((part, responseIndex) =>
+          !usedResponses.has(responseIndex) && part.functionResponse?.name === call?.name);
+      }
+      if (matchIndex < 0) continue;
+
+      usedResponses.add(matchIndex);
+      keptCalls.push(callPart);
+      const responsePart = responses[matchIndex];
+      keptResponses.push({
+        ...responsePart,
+        functionResponse: {
+          ...responsePart.functionResponse,
+          name: call.name,
+          ...(call.id ? { id: call.id } : {}),
+        },
+      });
+    }
+
+    const nonCallParts = parts.filter((part) => !part?.functionCall);
+    const modelParts = [...nonCallParts, ...keptCalls];
+    if (modelParts.length > 0) sanitized.push({ ...content, parts: modelParts });
+
+    if (next?.role === "user") {
+      const nonResponseParts = nextParts.filter((part) => !part?.functionResponse);
+      const unmatchedResponses = responses.flatMap((part, responseIndex) => usedResponses.has(responseIndex)
+        ? []
+        : [{ text: `[unpaired tool result: ${part.functionResponse?.name || "tool"}]\n${geminiFunctionResultText(part)}` }]);
+      const userParts = [...keptResponses, ...unmatchedResponses, ...nonResponseParts];
+      if (userParts.length > 0) sanitized.push({ ...next, parts: userParts });
+      index += 1;
+    }
+  }
+
+  return sanitized.length ? sanitized : [{ role: "user", parts: [{ text: "Continue." }] }];
+}
+
 function claudeImagePart(image) {
   return {
     type: "image",
@@ -936,7 +1018,7 @@ export function buildGeminiContents(input, calls) {
 
 function geminiRequest(request, model, calls) {
   const functions = extractFunctions(request);
-  const contents = buildGeminiContents(request.input, calls);
+  const contents = sanitizeGeminiFunctionHistory(buildGeminiContents(request.input, calls));
   const body = { contents };
   if (request.instructions) body.systemInstruction = { parts: [{ text: safeTextValue(String(request.instructions)) }] };
   if (functions.length) body.tools = [{ functionDeclarations: functions.map(({ name, description, parameters }) => ({ name, description, parameters })) }];
