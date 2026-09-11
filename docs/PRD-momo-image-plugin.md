@@ -57,7 +57,7 @@ Both Image 2.5 adapters support:
 - `mask`: one data URL or HTTPS URL; when multiple references are sent, the mask applies to the first reference.
 - `input_fidelity`: `low` or `high` for editing.
 
-Generation uses JSON `POST /v1/images/generations`. Editing uses multipart `POST /v1/images/edits`, with `image` for one input and repeated `image[]` parts for multiple inputs.
+Generation uses JSON `POST /v1/images/generations`. GPT Image 2.5 editing uses JSON `POST /v1/images/edits` with `images[].image_url` and optional `mask.image_url` when every input is HTTPS. If any input requires local bytes, editing falls back to multipart on the same endpoint, with `image` for one input and repeated `image[]` file parts for multiple inputs. Multipart URL text is not treated as an uploaded file.
 
 ## Availability and failure behavior
 
