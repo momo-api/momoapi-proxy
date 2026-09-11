@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.13.11 - 2026-09-12
+
+- Repair Gemini function-call history before forwarding: pair tool results by call ID, correct mismatched result names such as `apply_patch` returned as `exec`, and safely omit orphaned function history that Gemini rejects.
+
 ## 0.13.10 - 2026-09-11
 
 - Default Codex history compaction to a bounded local checkpoint, advertise a 120K auto-compaction threshold, and prevent hidden multi-megabyte history from being replayed when switching models.
