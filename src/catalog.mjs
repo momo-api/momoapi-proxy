@@ -92,6 +92,7 @@ function getBundledTemplate() {
     priority: 100,
     context_window: 272000,
     max_context_window: 872000,
+    auto_compact_token_limit: 120000,
     effective_context_window_percent: 95,
     tool_mode: "code_mode_only",
     support_verbosity: true,

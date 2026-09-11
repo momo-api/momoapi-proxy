@@ -61,6 +61,9 @@ export function cleanConfigToml(content) {
       trimmed.startsWith("model =") ||
       trimmed.startsWith("model_reasoning_effort =") ||
       trimmed.startsWith("model_catalog_json =") ||
+      trimmed.startsWith("model_context_window =") ||
+      trimmed.startsWith("model_auto_compact_token_limit =") ||
+      trimmed.startsWith("model_auto_compact_token_limit_scope =") ||
       trimmed.startsWith("disable_response_storage =")
     ) {
       continue;
@@ -77,6 +80,9 @@ function managedConfig(catalog, port, defaultModel) {
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +
     'model_catalog_json = "' + catalog.replace(/\\/g, "/") + '"\n' +
+    'model_context_window = 272000\n' +
+    'model_auto_compact_token_limit = 120000\n' +
+    'model_auto_compact_token_limit_scope = "body_after_prefix"\n' +
     'disable_response_storage = false\n\n' +
     '[model_providers.momoapi-proxy]\n' +
     'name = "MOMO API Proxy"\n' +

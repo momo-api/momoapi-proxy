@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLocalCompactResponse, decodeLocalCompaction, prepareCompactPayload } from "../src/compaction.mjs";
+import { buildLocalCompactResponse, decodeLocalCompaction, prepareCompactPayload, prepareOversizedHistoryReplay } from "../src/compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
 
-const settings = { endpoint: "https://gateway.example", apiKey: "test_gateway_key", localToken: "test_local_token", host: "127.0.0.1", port: 0 };
+const settings = { endpoint: "https://gateway.example", apiKey: "test_gateway_key", localToken: "test_local_token", host: "127.0.0.1", port: 0, compactionMode: "upstream" };
 
 async function withServer(fetchImpl, run, overrides = {}) {
   const server = createMomoSwitch({ ...settings, ...overrides }, { fetchImpl });
@@ -42,6 +42,70 @@ test("compact preparation removes historical inline media before its independent
   assert.ok(prepared.trace.compactBytes < 1024 * 1024);
   assert.match(JSON.stringify(prepared.payload), /historical image omitted during compaction/);
   assert.doesNotMatch(JSON.stringify(prepared.payload), /AAAAAA/);
+});
+
+test("oversized hidden history becomes a bounded local checkpoint while preserving the current turn", () => {
+  const historicalImage = `data:image/png;base64,${"A".repeat(2 * 1024 * 1024)}`;
+  const history = [];
+  for (let index = 0; index < 80; index++) {
+    history.push({ role: "user", content: [{ type: "input_text", text: `old task ${index} ${"x".repeat(8192)}` }, { type: "input_image", image_url: historicalImage }] });
+    history.push({ role: "assistant", content: [{ type: "output_text", text: `old answer ${index}` }] });
+    history.push({ type: "custom_tool_call_output", call_id: `call_${index}`, output: "z".repeat(8192) });
+  }
+  const current = { role: "user", content: [{ type: "input_text", text: "CURRENT MODEL-SWITCH REQUEST" }] };
+  const payload = { model: "claude-opus-4-6-thinking", input: [...history, current] };
+  const result = prepareOversizedHistoryReplay(payload, { contextPolicy: { maxHistoricalReplayBytes: 128 * 1024 } });
+  assert.equal(result.rewritten, true);
+  assert.ok(result.originalBytes > 2 * 1024 * 1024);
+  assert.ok(result.outboundBytes < 256 * 1024);
+  assert.equal(result.payload.input.at(-1), current);
+  assert.match(JSON.stringify(result.payload.input), /CURRENT MODEL-SWITCH REQUEST/);
+  assert.doesNotMatch(JSON.stringify(result.payload.input), /data:image/);
+  assert.doesNotMatch(JSON.stringify(result.payload.input), /z{1000}/);
+});
+
+test("a tool-result-only continuation is current data and is never checkpointed away", () => {
+  const toolResult = { type: "custom_tool_call_output", call_id: "current_tool", output: "r".repeat(1024 * 1024) };
+  const payload = { model: "claude-opus-4-6-thinking", input: [toolResult] };
+  const result = prepareOversizedHistoryReplay(payload, { contextPolicy: { maxHistoricalReplayBytes: 128 * 1024 } });
+  assert.equal(result.rewritten, false);
+  assert.equal(result.payload.input[0], toolResult);
+});
+
+test("compact endpoint defaults to local checkpoint without an upstream model call", async () => {
+  let fetchCalls = 0;
+  await withServer(async () => { fetchCalls++; return new Response("unexpected", { status: 500 }); }, async (base) => {
+    const response = await fetch(`${base}/v1/responses/compact`, {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "keep this task" }] }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(JSON.stringify(await response.json()), /keep this task/);
+  }, { compactionMode: "local" });
+  assert.equal(fetchCalls, 0);
+});
+
+test("Claude model switch never sends a multi-megabyte replay upstream", async () => {
+  let captured;
+  const hugeHistory = [];
+  for (let index = 0; index < 200; index++) {
+    hugeHistory.push({ role: "user", content: `historic ${index} ${"h".repeat(8192)}` });
+    hugeHistory.push({ type: "custom_tool_call_output", call_id: `old_${index}`, output: "o".repeat(8192) });
+  }
+  hugeHistory.push({ role: "user", content: "solve only the new task" });
+  const fakeFetch = async (url, init) => {
+    captured = { url, body: init.body };
+    return new Response("data: {\"type\":\"message_stop\"}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "claude-opus-4-6-thinking", stream: true, input: hugeHistory }) });
+    assert.equal(response.status, 200);
+    await response.text();
+  }, { compactionMode: "local", contextPolicy: { maxHistoricalReplayBytes: 128 * 1024 } });
+  assert.equal(captured.url, "https://gateway.example/v1/messages");
+  assert.ok(Buffer.byteLength(captured.body, "utf8") < 256 * 1024);
+  assert.match(captured.body, /solve only the new task/);
+  assert.doesNotMatch(captured.body, /o{1000}/);
 });
 
 test("compact preparation never mutates integrity-protected encrypted_content", () => {
@@ -215,7 +279,9 @@ test("context_management compaction strips old inline media before ordinary admi
     assert.equal(response.status, 200);
     await response.text();
   });
-  assert.match(JSON.stringify(captured.input), /historical image omitted during compaction/);
+  assert.match(JSON.stringify(captured.input), /Historical binary attachments and oversized tool outputs were intentionally omitted/);
+  assert.match(JSON.stringify(captured.input), /continue/);
+  assert.doesNotMatch(JSON.stringify(captured.input), /data:image/);
   assert.deepEqual(captured.context_management, [{ type: "compaction", compact_threshold: 200000 }]);
 });
 
