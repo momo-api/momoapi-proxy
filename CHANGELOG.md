@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.13.6 - 2026-09-11
+
+- Send GPT Image 2.5 HTTPS reference images and masks through the current `/v1/images/edits` JSON `images[].image_url` protocol, so signed R2 URLs remain compact instead of being downloaded and expanded into Base64 or multipart uploads by the local proxy.
+- Keep the existing multipart file fallback for local asset IDs, data URLs, and mixed local/remote edit inputs.
+- Add regression coverage for sixteen signed HTTPS references plus a URL mask without any proxy-side image download.
+
 ## 0.13.5 - 2026-09-10
 
 - Mirror the bundled MOMO Image marketplace into a versioned directory outside the application tree so Codex can monitor plugin files without locking proxy self-updates.
