@@ -25,7 +25,7 @@ function localResourceContent(image) {
 
 const LEGACY_MODELS = ["gpt-image-2-momoapi", "gpt-image-2", "gemini-3.1-flash-image"];
 const COMMON_PROPERTIES = {
-  prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 10 },
+  prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 4 },
   aspect_ratio: { type: "string", enum: ["1:1", "3:2", "2:3", "16:9", "9:16"] },
   resolution: { type: "string", enum: ["1k", "2k", "4k"] },
   size: { type: "string", description: "GPT Image 2.5: auto or WIDTHxHEIGHT using official size constraints." },
@@ -34,7 +34,6 @@ const COMMON_PROPERTIES = {
   output_compression: { type: "integer", minimum: 0, maximum: 100 },
   background: { type: "string", enum: ["auto", "opaque", "transparent"] },
   moderation: { type: "string", enum: ["auto", "low"] },
-  stream: { type: "boolean" }, partial_images: { type: "integer", minimum: 0, maximum: 3 },
 };
 
 function toolDefs(capabilities) {
@@ -44,7 +43,7 @@ function toolDefs(capabilities) {
   return [
     { name: "image_capabilities", description: "List known MOMO image models, availability, operations, and limits.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     { name: "image_generate", description: "Generate one or more images through the local MOMO API Proxy. Call image_capabilities for model-specific limits.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES }, required: ["prompt"], additionalProperties: false } },
-    { name: "image_edit", description: "Edit up to the model-specific number of reference images. Use asset:<asset_id> to reuse a locally saved result without putting Base64 in history.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES, reference_images: { type: "array", items: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, minItems: 1, maxItems: 16 }, mask: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, input_fidelity: { type: "string", enum: ["low", "high"] } }, required: ["prompt", "reference_images"], additionalProperties: false } },
+    { name: "image_edit", description: "Edit up to the model-specific number of reference images. Use asset:<asset_id> to reuse a locally saved result without putting Base64 in history.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES, reference_images: { type: "array", items: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, minItems: 1, maxItems: 16 } }, required: ["prompt", "reference_images"], additionalProperties: false } },
     { name: "image_task_status", description: "Check an asynchronous MOMO image task. Completed images are saved locally and returned as compact references, never inline Base64.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false } },
     { name: "image_asset_get", description: "Get compact metadata for a locally saved image asset without returning inline Base64.", inputSchema: { type: "object", properties: { asset_id: { type: "string", pattern: "^img_[a-f0-9]{64}$" } }, required: ["asset_id"], additionalProperties: false } },
     { name: "image_asset_list", description: "List recently used images saved on this computer.", inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 1000, default: 100 } }, additionalProperties: false } },

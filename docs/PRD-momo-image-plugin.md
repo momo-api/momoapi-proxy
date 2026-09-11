@@ -34,8 +34,8 @@ The local proxy owns authentication, request validation, reference-image fetchin
 | `gpt-image-2` | Images generations | Images generations with `image_urls` | 1 | No | Current verified route |
 | `gpt-image-2-momoapi` | Images generations | Streaming multimodal Chat Completions | 4 | No | Current verified route |
 | `gemini-3.1-flash-image` | Images generations | Multimodal Chat Completions | 1 | No | Current verified route |
-| `gpt-image-2.5-sunburst` | Images generations | Multipart Images edits | 16 | Yes | Expose only when authenticated `/v1/models` contains it |
-| `gpt-image-2.5-flare` | Images generations | Multipart Images edits | 16 | Yes | Expose only when authenticated `/v1/models` contains it |
+| `gpt-image-2.5-sunburst` | Images generations | Same Images generations route with image_urls | 16 | No (not in APIMart contract) | Expose only when authenticated `/v1/models` contains it |
+| `gpt-image-2.5-flare` | Images generations | Same Images generations route with image_urls | 16 | No (not in APIMart contract) | Expose only when authenticated `/v1/models` contains it |
 
 Sunburst is preferred for editing precision. Flare is preferred for faster everyday generation. Presence in this PRD means protocol support, not proof that a production MOMO channel is currently available.
 
@@ -44,20 +44,17 @@ Sunburst is preferred for editing precision. Flare is preferred for faster every
 Both Image 2.5 adapters support:
 
 - `prompt`: required non-empty text, at most 32,000 characters in the proxy.
-- `n`: integer from 1 to 10.
+- `n`: integer from 1 to 4.
 - `size`: `auto` or `WIDTHxHEIGHT`; both edges divisible by 16, ratio from 1:3 to 3:1, each edge at most 3,840 pixels, and 655,360-8,294,400 total pixels.
 - `quality`: `auto`, `low`, `medium`, `high`, `xhigh`, or `max`.
 - `output_format`: `png`, `jpeg`, or `webp`.
 - `output_compression`: integer from 0 to 100 for JPEG or WebP.
 - `background`: `auto`, `opaque`, or `transparent`; transparent output requires PNG or WebP.
 - `moderation`: `auto` or `low`.
-- `stream`: boolean.
-- `partial_images`: integer from 0 to 3 and valid only with streaming.
-- `reference_images`: 1-16 data URLs or HTTPS URLs for editing.
-- `mask`: one data URL or HTTPS URL; when multiple references are sent, the mask applies to the first reference.
-- `input_fidelity`: `low` or `high` for editing.
+- `resolution`: `1k`, `2k`, or `4k`.
+- `reference_images`: 1-16 data URLs, opaque local asset IDs, or HTTPS URLs for editing. Local/data inputs are uploaded first.
 
-Generation uses JSON `POST /v1/images/generations`. GPT Image 2.5 editing uses JSON `POST /v1/images/edits` with `images[].image_url` and optional `mask.image_url` when every input is HTTPS. If any input requires local bytes, editing falls back to multipart on the same endpoint, with `image` for one input and repeated `image[]` file parts for multiple inputs. Multipart URL text is not treated as an uploaded file.
+Generation and editing both use JSON `POST /v1/images/generations`. Editing supplies `image_urls` as a string array. Public HTTPS references are forwarded directly; data URLs and local asset references are uploaded with multipart `POST /v1/uploads/images` (`file` field) and replaced by the returned temporary URL. The APIMart GPT Image 2.5 contract does not include `/v1/images/edits`, `images[].image_url`, `mask`, `input_fidelity`, `stream`, or `partial_images`; the adapter fails closed when those fields are requested.
 
 ## Availability and failure behavior
 

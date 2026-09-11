@@ -2,7 +2,7 @@ import { lookup } from "node:dns/promises";
 import { isImageAssetReference } from "./image-assets.mjs";
 
 const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
-const ASPECT_RATIOS = ["1:1", "3:2", "2:3", "16:9", "9:16"];
+const ASPECT_RATIOS = ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21", "3:1", "1:3"];
 const GPT_IMAGE_25_MODELS = new Set(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
 const GPT_IMAGE_25_QUALITY = ["auto", "low", "medium", "high", "xhigh", "max"];
 const OUTPUT_FORMATS = ["png", "jpeg", "webp"];
@@ -24,14 +24,14 @@ const MODEL_RULES = {
     generateTransport: "images-generations", editTransport: "chat-completions-multimodal",
   },
   "gpt-image-2.5-sunburst": {
-    maxN: 10, maxReferenceImages: 16, operations: ["generate", "edit"],
-    generateTransport: "images-generations", editTransport: "images-edits-url-or-multipart",
-    nativeControls: true, requiresCatalog: true, maskEdits: true,
+    maxN: 4, maxReferenceImages: 16, operations: ["generate", "edit"],
+    generateTransport: "images-generations", editTransport: "images-generations-image-urls",
+    nativeControls: true, requiresCatalog: true, maskEdits: false,
   },
   "gpt-image-2.5-flare": {
-    maxN: 10, maxReferenceImages: 16, operations: ["generate", "edit"],
-    generateTransport: "images-generations", editTransport: "images-edits-url-or-multipart",
-    nativeControls: true, requiresCatalog: true, maskEdits: true,
+    maxN: 4, maxReferenceImages: 16, operations: ["generate", "edit"],
+    generateTransport: "images-generations", editTransport: "images-generations-image-urls",
+    nativeControls: true, requiresCatalog: true, maskEdits: false,
   },
 };
 const IMAGE_MODELS = new Set(Object.keys(MODEL_RULES));
@@ -39,8 +39,8 @@ const IMAGE_MODELS = new Set(Object.keys(MODEL_RULES));
 function capability(model, displayName) {
   const rules = MODEL_RULES[model];
   const nativeParameters = [
-    "prompt", "n", "size", "quality", "reference_images", "mask", "input_fidelity",
-    "output_format", "output_compression", "background", "moderation", "stream", "partial_images",
+    "prompt", "n", "size", "resolution", "quality", "reference_images",
+    "output_format", "output_compression", "background", "moderation",
   ];
   return {
     id: model,
@@ -54,8 +54,8 @@ function capability(model, displayName) {
       ...(rules.aspectRatios ? { aspect_ratios: rules.aspectRatios } : {}),
       ...(rules.resolutions ? { resolutions: rules.resolutions } : {}),
       ...(rules.nativeControls ? {
-        sizes: { arbitrary: true, multiple_of: 16, aspect_ratio_range: "1:3 to 3:1", max_edge: 3840, min_pixels: 655360, max_pixels: 8294400 },
-        qualities: GPT_IMAGE_25_QUALITY, output_formats: OUTPUT_FORMATS, partial_images: { min: 0, max: 3 },
+        sizes: { ratios: ASPECT_RATIOS, arbitrary: true, multiple_of: 16, aspect_ratio_range: "1:3 to 3:1", max_edge: 3840, min_pixels: 655360, max_pixels: 8294400 },
+        qualities: GPT_IMAGE_25_QUALITY, output_formats: OUTPUT_FORMATS, partial_images: { supported: false },
       } : {}),
       max_reference_bytes_each: MAX_REFERENCE_BYTES,
     },
@@ -83,9 +83,10 @@ export const IMAGE_CAPABILITIES = {
     },
     gpt_resolution: "1k/2k/4k map to low/medium/high quality hints; they are not guaranteed output pixel dimensions.",
     gemini_resolution: "1k/2k/4k are sent as 1K/2K/4K image_size controls.",
-    mask_edits: "Not exposed until the public route is verified end to end.",
+    mask_edits: "APIMart GPT Image 2.5 does not document a mask field; edits use image_urls.",
     gpt_image_2_5: "Sunburst and Flare are advertised to tools only after the authenticated MOMO model catalog reports them.",
-    reference_url_transport: "GPT Image 2.5 HTTPS references use images[].image_url without proxy-side download; local assets and data URLs use multipart files.",
+    reference_url_transport: "APIMart GPT Image 2.5 edits use POST /v1/images/generations with image_urls (up to 16 public HTTP(S) URLs); the proxy does not download HTTPS references.",
+    apimart_tasks: "Generation returns data[0].task_id; poll /v1/tasks/{task_id} (MOMO compatibility also accepts /v1/images/generations/{task_id}).",
   },
 };
 
@@ -152,6 +153,7 @@ function gptQualityFrom(resolution) {
 function nativeSize(value) {
   const size = String(value || "auto").toLowerCase();
   if (size === "auto") return size;
+  if (ASPECT_RATIOS.includes(size)) return size;
   const match = /^(\d+)x(\d+)$/.exec(size);
   if (!match) throw fail("size must be auto or WIDTHxHEIGHT.");
   const width = Number(match[1]);
@@ -191,28 +193,26 @@ export function normalizeImageRequest(input, operation = "generate") {
   if (rules.nativeControls) {
     const legacyAspect = input.aspect_ratio || input.aspectRatio;
     if (legacyAspect && !ASPECT_RATIOS.includes(legacyAspect)) throw fail("Unsupported aspect_ratio for " + model + ": " + legacyAspect);
-    const requestedSize = input.size ?? (legacyAspect ? gptSizeFrom(legacyAspect) : "auto");
-    const legacyResolution = input.resolution || input.imageSize;
-    const quality = optionalEnum(input, "quality", GPT_IMAGE_25_QUALITY, legacyResolution ? gptQualityFrom(String(legacyResolution).toLowerCase()) : "auto");
+    const requestedSize = input.size ?? (legacyAspect || "auto");
+    const legacyResolution = input.resolution || input.imageSize || "1k";
+    resolution = String(legacyResolution).toLowerCase();
+    if (!["1k", "2k", "4k"].includes(resolution)) throw fail("resolution must be 1k, 2k, or 4k for " + model + ".");
+    const quality = optionalEnum(input, "quality", GPT_IMAGE_25_QUALITY, "auto");
     const outputFormat = optionalEnum(input, "output_format", OUTPUT_FORMATS, "png");
     const outputCompression = input.output_compression === undefined ? undefined : Number(input.output_compression);
     if (outputCompression !== undefined && (!Number.isInteger(outputCompression) || outputCompression < 0 || outputCompression > 100)) throw fail("output_compression must be an integer between 0 and 100.");
     if (outputCompression !== undefined && outputFormat === "png") throw fail("output_compression is supported only for jpeg or webp output.");
     const background = optionalEnum(input, "background", ["auto", "opaque", "transparent"], "auto");
     if (background === "transparent" && !["png", "webp"].includes(outputFormat)) throw fail("transparent background requires png or webp output.");
-    const moderation = optionalEnum(input, "moderation", ["auto", "low"], "auto");
+    const moderation = optionalEnum(input, "moderation", ["auto", "low"], "low");
     const inputFidelity = input.input_fidelity === undefined ? undefined : optionalEnum(input, "input_fidelity", ["low", "high"]);
-    if (operation !== "edit" && inputFidelity !== undefined) throw fail("input_fidelity is supported only for image_edit.");
-    const stream = input.stream === undefined ? false : input.stream;
-    if (typeof stream !== "boolean") throw fail("stream must be a boolean.");
-    const partialImages = input.partial_images === undefined ? undefined : Number(input.partial_images);
-    if (partialImages !== undefined && (!Number.isInteger(partialImages) || partialImages < 0 || partialImages > 3)) throw fail("partial_images must be an integer between 0 and 3.");
-    if (partialImages !== undefined && !stream) throw fail("partial_images requires stream=true.");
+    if (inputFidelity !== undefined) throw fail("input_fidelity is not supported by the APIMart GPT Image 2.5 protocol.");
+    if (input.stream !== undefined && input.stream !== false) throw fail("APIMart GPT Image 2.5 does not support streaming image output.");
+    if (input.partial_images !== undefined && Number(input.partial_images) !== 0) throw fail("APIMart GPT Image 2.5 does not support partial_images.");
     nativeControls = {
-      size: nativeSize(requestedSize), quality, output_format: outputFormat,
+      size: nativeSize(requestedSize), resolution, quality, output_format: outputFormat,
       ...(outputCompression !== undefined ? { output_compression: outputCompression } : {}),
-      background, moderation, ...(inputFidelity ? { input_fidelity: inputFidelity } : {}), stream,
-      ...(partialImages !== undefined ? { partial_images: partialImages } : {}),
+      background, moderation,
     };
   } else {
     const nativeOnly = ["size", "quality", "output_format", "output_compression", "background", "moderation", "input_fidelity", "stream", "partial_images"];
@@ -238,7 +238,7 @@ export function normalizeImageRequest(input, operation = "generate") {
   }
   const mask = input.mask || input.mask_image || input.maskImage;
   if (mask !== undefined && operation !== "edit") throw fail("mask is supported only for image_edit.");
-  if (mask !== undefined && !rules.maskEdits) throw fail("mask is not supported for " + model + ".");
+  if (mask !== undefined && !rules.maskEdits) throw fail("mask is not supported for " + model + " by the APIMart image protocol; use image_urls for reference editing.");
   if (mask !== undefined && (typeof mask !== "string" || (!asDataUrl(mask) && !/^https?:\/\//i.test(mask) && !isImageAssetReference(mask)))) throw fail("mask must be a local asset ID, image data URL, or HTTPS URL.");
   return { model, prompt, n, aspect_ratio: aspectRatio, resolution, reference_images: references, operation, ...nativeControls, ...(mask ? { mask } : {}) };
 }
@@ -351,11 +351,9 @@ async function resolveReferenceDataUrls(request, fetchImpl, signal, lookupImpl, 
 
 function nativeImageBody(request) {
   return {
-    model: request.model, prompt: request.prompt, n: request.n, size: request.size, quality: request.quality,
+    model: request.model, prompt: request.prompt, n: request.n, size: request.size, resolution: request.resolution, quality: request.quality,
     output_format: request.output_format, background: request.background, moderation: request.moderation,
-    stream: request.stream,
     ...(request.output_compression !== undefined ? { output_compression: request.output_compression } : {}),
-    ...(request.partial_images !== undefined ? { partial_images: request.partial_images } : {}),
   };
 }
 
@@ -375,47 +373,43 @@ function dataUrlFile(value, name) {
   return { blob: new Blob([bytes], { type: decoded.mimeType }), filename: `${name}.${subtype}` };
 }
 
-function nativeEditForm(request, references, maskDataUrl) {
+async function uploadApimartReference(dataUrl, endpoint, settings, fetchImpl, signal, name) {
+  const file = dataUrlFile(dataUrl, name);
   const form = new FormData();
-  const fields = nativeImageBody(request);
-  for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) form.append(key, String(value));
-  }
-  if (request.input_fidelity) form.append("input_fidelity", request.input_fidelity);
-  references.forEach((reference, index) => {
-    const file = dataUrlFile(reference, `reference-${index + 1}`);
-    form.append(references.length === 1 ? "image" : "image[]", file.blob, file.filename);
+  form.append("file", file.blob, file.filename);
+  const response = await fetchImpl(endpoint + "/v1/uploads/images", {
+    method: "POST",
+    headers: { authorization: "Bearer " + settings.apiKey },
+    body: form,
+    signal: imageSignal(signal, 60000),
   });
-  if (maskDataUrl) {
-    const file = dataUrlFile(maskDataUrl, "mask");
-    form.append("mask", file.blob, file.filename);
-  }
-  return form;
+  const payload = await readUpstreamPayload(response);
+  if (!response.ok) throw fail(payload?.error?.message || "APIMart image upload returned HTTP " + response.status, response.status >= 400 && response.status < 500 ? response.status : 502, "image_upload_error");
+  const url = [payload?.url, payload?.data?.url, payload?.data?.[0]?.url].find((value) => typeof value === "string" && /^https:\/\//i.test(value));
+  if (!url) throw fail("APIMart image upload returned no public URL.", 502, "image_upload_error");
+  return url;
 }
 
-async function nativeEditUrlBody(request, lookupImpl) {
-  const references = [];
-  for (const reference of request.reference_images) {
-    if (!/^https:\/\//i.test(reference)) return null;
-    const parsed = validateReferenceUrl(reference);
-    await assertPublicHostname(parsed, lookupImpl);
-    references.push({ image_url: parsed.href });
+async function apimartReferenceUrls(request, endpoint, settings, fetchImpl, signal, lookupImpl, assetResolver) {
+  const urls = [];
+  for (const [index, reference] of request.reference_images.entries()) {
+    if (/^https:\/\//i.test(reference)) {
+      const parsed = validateReferenceUrl(reference);
+      await assertPublicHostname(parsed, lookupImpl);
+      urls.push(parsed.href);
+      continue;
+    }
+    let dataUrl;
+    if (isImageAssetReference(reference)) {
+      if (typeof assetResolver !== "function") throw fail("Local image asset resolution is unavailable.", 500, "image_asset_unavailable");
+      dataUrl = await assetResolver(reference);
+    } else {
+      dataUrl = decodeDataUrl(reference)?.dataUrl;
+    }
+    if (!dataUrl) throw fail("APIMart reference images must be HTTPS URLs or valid image data URLs.", 400, "reference_image_error");
+    urls.push(await uploadApimartReference(dataUrl, endpoint, settings, fetchImpl, signal, `reference-${index + 1}`));
   }
-
-  let mask;
-  if (request.mask) {
-    if (!/^https:\/\//i.test(request.mask)) return null;
-    const parsed = validateReferenceUrl(request.mask);
-    await assertPublicHostname(parsed, lookupImpl);
-    mask = { image_url: parsed.href };
-  }
-
-  return {
-    ...nativeImageBody(request),
-    images: references,
-    ...(mask ? { mask } : {}),
-    ...(request.input_fidelity ? { input_fidelity: request.input_fidelity } : {}),
-  };
+  return urls;
 }
 
 function multimodalContent(prompt, references) {
@@ -474,6 +468,7 @@ function normalizeSsePayload(text) {
 export function extractImageResults(payload) {
   const images = [];
   const taskIds = [];
+  const statuses = [];
   const seen = new Set();
   const addDataUrls = (value) => {
     const pattern = /data:(image\/[A-Za-z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)/gi;
@@ -485,17 +480,24 @@ export function extractImageResults(payload) {
     if (typeof value === "string") { addDataUrls(value); return; }
     if (typeof value !== "object" || seen.has(value)) return;
     seen.add(value);
-    const url = [value.url, value.image_url, value.result_url].find((item) => typeof item === "string" && /^https?:\/\//i.test(item));
+    const urlCandidates = [value.url, value.image_url, value.result_url];
+    const url = urlCandidates.find((item) => typeof item === "string" && /^https?:\/\//i.test(item));
+    if (Array.isArray(value.url)) {
+      for (const item of value.url) {
+        if (typeof item === "string" && /^https?:\/\//i.test(item)) images.push({ url: item });
+      }
+    }
     const directBase64 = [value.b64_json, value.base64, value.image_base64, value.partial_image_b64].find((item) => typeof item === "string" && item.length > 0);
     const resultBase64 = typeof value.result === "string" && value.result.length > 256 && /^[A-Za-z0-9+/=\r\n]+$/.test(value.result) ? value.result : null;
     const b64Json = directBase64 || resultBase64;
     if (url || b64Json) images.push({ ...(url ? { url } : {}), ...(b64Json ? { b64_json: b64Json } : {}) });
     if (typeof value.task_id === "string") taskIds.push(value.task_id);
+    if (typeof value.status === "string") statuses.push(value.status);
     for (const child of Array.isArray(value) ? value : Object.values(value)) visit(child, depth + 1);
   };
   visit(payload);
   const uniqueImages = images.filter((image, index, list) => list.findIndex((item) => item.url === image.url && item.b64_json === image.b64_json) === index);
-  const rawStatus = typeof payload?.status === "string" ? payload.status : null;
+  const rawStatus = statuses[0] || null;
   const terminal = ["failed", "error", "cancelled", "canceled", "expired"].includes(String(rawStatus || "").toLowerCase());
   const rawError = payload?.error?.message || payload?.error || payload?.failure_reason || payload?.fail_reason;
   const error = typeof rawError === "string" ? rawError.replace(/[\r\n]+/g, " ").slice(0, 1000) : null;
@@ -568,17 +570,7 @@ export async function generateImage({ settings, request, fetchImpl = fetch, look
   if (operation === "generate") body = generationBody(normalized);
   else {
     if (GPT_IMAGE_25_MODELS.has(normalized.model)) {
-      path = "/v1/images/edits";
-      const urlBody = await nativeEditUrlBody(normalized, lookupImpl);
-      if (urlBody) body = urlBody;
-      else {
-        const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
-        const maskDataUrl = normalized.mask
-          ? (await resolveReferenceDataUrls({ reference_images: [normalized.mask] }, fetchImpl, signal, lookupImpl, assetResolver))[0]
-          : null;
-        body = nativeEditForm(normalized, references, maskDataUrl);
-        multipart = true;
-      }
+      body = { ...nativeImageBody(normalized), image_urls: await apimartReferenceUrls(normalized, endpoint, settings, fetchImpl, signal, lookupImpl, assetResolver) };
     }
     else {
       const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
@@ -604,7 +596,7 @@ export async function generateImage({ settings, request, fetchImpl = fetch, look
 export async function getImageTask({ settings, taskId, fetchImpl = fetch, lookupImpl = lookup, signal }) {
   if (!/^[A-Za-z0-9._:-]{1,256}$/.test(taskId || "")) throw fail("Invalid task_id.");
   const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
-  const upstream = await fetchImpl(endpoint + "/v1/images/generations/" + encodeURIComponent(taskId), {
+  const upstream = await fetchImpl(endpoint + "/v1/tasks/" + encodeURIComponent(taskId), {
     headers: { authorization: "Bearer " + settings.apiKey },
     signal: imageSignal(signal, 60000),
   });

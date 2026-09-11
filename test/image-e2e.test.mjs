@@ -15,7 +15,7 @@ test("image MCP end-to-end over a fake upstream", async () => {
     const target = String(url);
     if (target === "https://mock.gateway/v1/models") return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/images/generations") return new Response(JSON.stringify({ data: [{ url: "https://mock.gateway/generated/e2e.png", b64_json: pngBase64, task_id: "task-e2e" }] }), { status: 200, headers: { "content-type": "application/json" } });
-    if (target === "https://mock.gateway/v1/images/generations/task-e2e") return new Response(JSON.stringify({ data: [{ url: "https://mock.gateway/generated/e2e.png", b64_json: pngBase64 }] }), { status: 200, headers: { "content-type": "application/json" } });
+    if (target === "https://mock.gateway/v1/tasks/task-e2e") return new Response(JSON.stringify({ code: 200, data: { id: "task-e2e", status: "completed", result: { images: [{ url: ["https://mock.gateway/generated/e2e.png"] }] } } }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/chat/completions") {
       const body = JSON.parse(init.body);
       assert.match(body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
