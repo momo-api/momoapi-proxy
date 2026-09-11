@@ -24,8 +24,13 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.match(written, /name = "MOMO API Proxy"/);
     assert.match(written, /base_url = "http:\/\/127\.0\.0\.1:19999\/v1"/);
     assert.match(written, /requires_openai_auth = false/);
+    assert.match(written, /model_context_window = 272000/);
+    assert.match(written, /model_auto_compact_token_limit = 120000/);
+    assert.match(written, /model_auto_compact_token_limit_scope = "body_after_prefix"/);
     assert.match(written, /MOMOAPI_PROXY_MANAGED/);
-    assert.match(readFileSync(result.catalog, "utf8"), /gemini-3\.7-flash/);
+    const catalogText = readFileSync(result.catalog, "utf8");
+    assert.match(catalogText, /gemini-3\.7-flash/);
+    assert.match(catalogText, /"auto_compact_token_limit": 120000/);
     const settings = JSON.parse(readFileSync(result.settingsFile, "utf8"));
     assert.equal(settings.updateCheckEnabled, true);
     assert.equal(settings.updateMode, "automatic");

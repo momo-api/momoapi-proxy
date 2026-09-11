@@ -12,7 +12,7 @@ import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, parseS
 import { logRequest } from "./logger.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
-import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareContextManagedPayload } from "./compaction.mjs";
+import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay } from "./compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { createImageAssetStore, persistImageResult } from "./image-assets.mjs";
@@ -1171,6 +1171,11 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
   metricsState.compactRequests += 1;
   metricsState.activeCompactions += 1;
   try {
+    if (prefersLocalCompaction(settings)) {
+      const checkpoint = buildLocalCompactResponse(payload.model, payload.input);
+      response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
+      return compactJson(response, 200, checkpoint);
+    }
     const prepared = prepareCompactPayload(payload, settings);
     response.momoCompactTrace = prepared.trace;
     const upstream = await fetchImpl(settings.endpoint + "/v1/responses/compact", {
@@ -1218,6 +1223,20 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
   metricsState.compactRequests += 1;
   metricsState.activeCompactions += 1;
   try {
+    if (prefersLocalCompaction(settings)) {
+      const compacted = buildLocalCompactResponse(payload.model, compactPayload.input);
+      const encryptedContent = encodeRecoverableCompaction(payload.model, compactPayload.input, compacted.output);
+      const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
+      response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
+      initSseResponse(response);
+      const emitter = new ResponseStreamEmitter(response, payload.model);
+      emitter.start();
+      const index = emitter.outputIndex++;
+      emitter.outputItems.push(item);
+      response.write(`event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item })}\n\n`);
+      emitter.complete();
+      return;
+    }
     const prepared = prepareCompactPayload(compactPayload, settings);
     const upstream = await fetchImpl(settings.endpoint + "/v1/responses/compact", {
       method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify(prepared.payload), signal,
@@ -1664,7 +1683,11 @@ export function normalizeQwenSystemMessages(messages) {
 }
 
 export async function bridgeChatCompletionsToResponses(request, response, settings, payload, calls, fetchImpl, signal, existingAdmission = null) {
-  const prepared = existingAdmission || prepareMediaPayload(payload, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
+  const historyReplay = existingAdmission ? { payload, rewritten: false } : prepareOversizedHistoryReplay(payload, settings);
+  const prepared = existingAdmission || prepareMediaPayload(historyReplay.payload, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
+  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
+    prepared.trace.policyActions.push("local_history_checkpoint");
+  }
   const safePayload = prepared.payload;
   const functions = extractFunctions(safePayload);
   const builtMessages = buildOpenAIChatMessages(safePayload.input || [], safePayload.instructions);
@@ -1797,11 +1820,15 @@ async function forwardResponses(request, response, settings, payload, calls, fet
     ? await expandCurrentImageVisionReferences(nsBody, imageAssetStore, settings.localToken)
     : nsBody;
   const cleanPayload = normalizeResponsesPayload(visionPayload);
+  const historyReplay = prepareOversizedHistoryReplay(cleanPayload, settings);
   const managedPayload = Array.isArray(cleanPayload.context_management)
     && cleanPayload.context_management.some((item) => item?.type === "compaction")
     ? prepareContextManagedPayload(cleanPayload)
     : cleanPayload;
   const prepared = prepareMediaPayload({ ...managedPayload, stream: true }, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
+  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
+    prepared.trace.policyActions.push("local_history_checkpoint");
+  }
   const outboundBody = serializeOutboundBody(prepared.payload, settings, prepared.trace);
   // Attach trace for network-error logging, but defer metric finalization until
   // a possible Responses -> Chat fallback has passed its own final admission.
@@ -1922,7 +1949,11 @@ async function forwardResponses(request, response, settings, payload, calls, fet
 }
 
 async function bridgeGemini(response, settings, payload, calls, fetchImpl, signal) {
-  const prepared = prepareMediaPayload(payload, settings, { kind: "responses" });
+  const historyReplay = prepareOversizedHistoryReplay(payload, settings);
+  const prepared = prepareMediaPayload(historyReplay.payload, settings, { kind: "responses" });
+  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
+    prepared.trace.policyActions.push("local_history_checkpoint");
+  }
   const { body, functions } = geminiRequest(prepared.payload, prepared.payload.model, calls);
   const endpoint = settings.endpoint + "/v1beta/models/" + encodeURIComponent(payload.model) + ":streamGenerateContent?alt=sse";
   const outboundBody = serializeOutboundBody(body, settings, prepared.trace);
@@ -1968,7 +1999,11 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
 }
 
 async function bridgeClaude(response, settings, payload, calls, fetchImpl, signal) {
-  const prepared = prepareMediaPayload(payload, settings, { kind: "responses" });
+  const historyReplay = prepareOversizedHistoryReplay(payload, settings);
+  const prepared = prepareMediaPayload(historyReplay.payload, settings, { kind: "responses" });
+  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
+    prepared.trace.policyActions.push("local_history_checkpoint");
+  }
   const { body, functions } = claudeRequest(prepared.payload, prepared.payload.model, calls);
   const outboundBody = serializeOutboundBody(body, settings, prepared.trace);
   recordContextTrace(response, prepared.trace, true);

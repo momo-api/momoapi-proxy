@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Default Codex history compaction to a bounded local checkpoint, advertise a 120K auto-compaction threshold, and prevent hidden multi-megabyte history from being replayed when switching models.
+
+## Unreleased
+
 ## 0.13.9 - 2026-09-11
 
 - Bump the bundled MOMO Image plugin to 0.5.1 so Codex refreshes the corrected APIMart GPT Image 2.5 Skill and MCP metadata instead of retaining the 0.5.0 cache.
