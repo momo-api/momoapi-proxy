@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.13.7 - 2026-09-11
+
+- Accept GitHub release downloads after they resolve to GitHub's signed `release-assets.githubusercontent.com` or `objects.githubusercontent.com` hosts.
+- Preserve the full update trust chain: the versioned GitHub release asset remains the discovery source, GitHub's digest or release SHA-256 remains mandatory, downloaded bytes are rehashed, and archive path/type/size plus package-version validation still run before activation.
+- Add an end-to-end regression for the signed GitHub release redirect used by real release downloads.
+
 ## 0.13.6 - 2026-09-11
 
 - Send GPT Image 2.5 HTTPS reference images and masks through the current `/v1/images/edits` JSON `images[].image_url` protocol, so signed R2 URLs remain compact instead of being downloaded and expanded into Base64 or multipart uploads by the local proxy.
