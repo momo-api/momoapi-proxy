@@ -25,12 +25,12 @@ const MODEL_RULES = {
   },
   "gpt-image-2.5-sunburst": {
     maxN: 10, maxReferenceImages: 16, operations: ["generate", "edit"],
-    generateTransport: "images-generations", editTransport: "images-edits-multipart",
+    generateTransport: "images-generations", editTransport: "images-edits-url-or-multipart",
     nativeControls: true, requiresCatalog: true, maskEdits: true,
   },
   "gpt-image-2.5-flare": {
     maxN: 10, maxReferenceImages: 16, operations: ["generate", "edit"],
-    generateTransport: "images-generations", editTransport: "images-edits-multipart",
+    generateTransport: "images-generations", editTransport: "images-edits-url-or-multipart",
     nativeControls: true, requiresCatalog: true, maskEdits: true,
   },
 };
@@ -67,7 +67,7 @@ function capability(model, displayName) {
 }
 
 export const IMAGE_CAPABILITIES = {
-  version: 3,
+  version: 4,
   models: [
     capability("gpt-image-2", "GPT Image 2"),
     capability("gpt-image-2-momoapi", "GPT Image 2 MOMO"),
@@ -85,6 +85,7 @@ export const IMAGE_CAPABILITIES = {
     gemini_resolution: "1k/2k/4k are sent as 1K/2K/4K image_size controls.",
     mask_edits: "Not exposed until the public route is verified end to end.",
     gpt_image_2_5: "Sunburst and Flare are advertised to tools only after the authenticated MOMO model catalog reports them.",
+    reference_url_transport: "GPT Image 2.5 HTTPS references use images[].image_url without proxy-side download; local assets and data URLs use multipart files.",
   },
 };
 
@@ -392,6 +393,31 @@ function nativeEditForm(request, references, maskDataUrl) {
   return form;
 }
 
+async function nativeEditUrlBody(request, lookupImpl) {
+  const references = [];
+  for (const reference of request.reference_images) {
+    if (!/^https:\/\//i.test(reference)) return null;
+    const parsed = validateReferenceUrl(reference);
+    await assertPublicHostname(parsed, lookupImpl);
+    references.push({ image_url: parsed.href });
+  }
+
+  let mask;
+  if (request.mask) {
+    if (!/^https:\/\//i.test(request.mask)) return null;
+    const parsed = validateReferenceUrl(request.mask);
+    await assertPublicHostname(parsed, lookupImpl);
+    mask = { image_url: parsed.href };
+  }
+
+  return {
+    ...nativeImageBody(request),
+    images: references,
+    ...(mask ? { mask } : {}),
+    ...(request.input_fidelity ? { input_fidelity: request.input_fidelity } : {}),
+  };
+}
+
 function multimodalContent(prompt, references) {
   return [{ type: "text", text: prompt }, ...references.map((url) => ({ type: "image_url", image_url: { url } }))];
 }
@@ -541,18 +567,25 @@ export async function generateImage({ settings, request, fetchImpl = fetch, look
   let multipart = false;
   if (operation === "generate") body = generationBody(normalized);
   else {
-    const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
     if (GPT_IMAGE_25_MODELS.has(normalized.model)) {
       path = "/v1/images/edits";
-      const maskDataUrl = normalized.mask
-        ? (await resolveReferenceDataUrls({ reference_images: [normalized.mask] }, fetchImpl, signal, lookupImpl, assetResolver))[0]
-        : null;
-      body = nativeEditForm(normalized, references, maskDataUrl);
-      multipart = true;
+      const urlBody = await nativeEditUrlBody(normalized, lookupImpl);
+      if (urlBody) body = urlBody;
+      else {
+        const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
+        const maskDataUrl = normalized.mask
+          ? (await resolveReferenceDataUrls({ reference_images: [normalized.mask] }, fetchImpl, signal, lookupImpl, assetResolver))[0]
+          : null;
+        body = nativeEditForm(normalized, references, maskDataUrl);
+        multipart = true;
+      }
     }
-    else if (normalized.model === "gpt-image-2") body = { ...generationBody(normalized), image_urls: references };
-    else if (normalized.model === "gpt-image-2-momoapi") { path = "/v1/chat/completions"; body = gptMomoEditBody(normalized, references); }
-    else { path = "/v1/chat/completions"; body = geminiEditBody(normalized, references); }
+    else {
+      const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
+      if (normalized.model === "gpt-image-2") body = { ...generationBody(normalized), image_urls: references };
+      else if (normalized.model === "gpt-image-2-momoapi") { path = "/v1/chat/completions"; body = gptMomoEditBody(normalized, references); }
+      else { path = "/v1/chat/completions"; body = geminiEditBody(normalized, references); }
+    }
   }
   const upstream = await fetchImpl(endpoint + path, {
     method: "POST",
