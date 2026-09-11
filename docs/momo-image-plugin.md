@@ -9,7 +9,7 @@ plugins/momo-image packages the Codex-facing image feature for MOMO API Proxy. T
       -> momoapi-proxy authenticated 127.0.0.1 image endpoints
       -> model-specific MOMO API route
 
-The MCP tools are image_capabilities, image_generate, image_edit, image_task_status, image_asset_get, and image_asset_list. Reference and mask URLs must use HTTPS, literal and DNS-resolved loopback/private-address targets are rejected, redirects are not followed, and each downloaded or inline image is limited to 20 MiB.
+The MCP tools are image_capabilities, image_generate, image_edit, image_task_status, image_asset_get, and image_asset_list. Reference and mask URLs must use HTTPS, and literal or DNS-resolved loopback/private-address targets are rejected. GPT Image 2.5 passes approved HTTPS references directly as URL objects without downloading them. Routes that need local files or inline data do not follow redirects while resolving remote content, and each downloaded or inline image is limited to 20 MiB.
 
 ## Local image asset library
 
@@ -49,12 +49,14 @@ Optional non-secret settings:
 | gpt-image-2 | POST /v1/images/generations | Same endpoint with image_urls; asynchronous task_id is supported | 1 | 1 | 1:1; 3:2/2:3; 16:9/9:16 aliases; 1k/2k/4k quality hints |
 | gpt-image-2-momoapi | POST /v1/images/generations | Streaming multimodal POST /v1/chat/completions | 1-4 | 1-4 | Same GPT mapping; the prompt carries the requested output hint |
 | gemini-3.1-flash-image | POST /v1/images/generations | Multimodal POST /v1/chat/completions with modalities and extra_body.google.image_config | 1 | 1 | aspect_ratio plus 1K/2K/4K image_size |
-| gpt-image-2.5-sunburst | POST /v1/images/generations | Multipart POST /v1/images/edits | 1-10 | 1-16 | Native quality, arbitrary valid WIDTHxHEIGHT, format, compression, background, moderation, streaming |
-| gpt-image-2.5-flare | POST /v1/images/generations | Multipart POST /v1/images/edits | 1-10 | 1-16 | Same native controls; optimized for faster everyday generation |
+| gpt-image-2.5-sunburst | POST /v1/images/generations | JSON URL objects or multipart files via POST /v1/images/edits | 1-10 | 1-16 | Native quality, arbitrary valid WIDTHxHEIGHT, format, compression, background, moderation, streaming |
+| gpt-image-2.5-flare | POST /v1/images/generations | JSON URL objects or multipart files via POST /v1/images/edits | 1-10 | 1-16 | Same native controls; optimized for faster everyday generation |
 
 For GPT models, 16:9 maps to the available 1536x1024 canvas, whose physical ratio is 3:2; 9:16 maps to 1024x1536, whose physical ratio is 2:3. The resolution labels sent to GPT are low/medium/high quality hints and do not guarantee an exact pixel count. Gemini receives size as the aspect ratio and quality as 1K, 2K, or 4K on its Images generation route.
 
 Mask input remains disabled for the three legacy routes. The GPT Image 2.5 protocol adapter supports mask input and `input_fidelity=low/high`. Its native output controls are `quality=auto/low/medium/high/xhigh/max`, `output_format=png/jpeg/webp`, `output_compression=0-100` for JPEG/WebP, `background=auto/opaque/transparent`, `moderation=auto/low`, `stream`, and `partial_images=0-3`. Custom dimensions must use multiples of 16, stay between 1:3 and 3:1, keep each edge at or below 3840 pixels, and contain 655,360-8,294,400 total pixels.
+
+For GPT Image 2.5, an edit whose references and optional mask are all HTTPS is sent as JSON using `images[].image_url` and `mask.image_url`. The image upstream fetches those short-lived R2 URLs, so the local proxy does not expand them into Base64 or multipart data. If any input is an `asset:` reference, a data URL, or otherwise requires local bytes, the whole edit falls back to real multipart file parts for compatibility. A URL string placed in a multipart `image` field is not a file and is not supported.
 
 GPT Image 2.5 is catalog-gated. The plugin keeps Sunburst and Flare out of the MCP model enum until the authenticated MOMO `/v1/models` response actually contains them. `image_capabilities` still reports both as known protocol adapters with `available: false`, so operators can distinguish "implemented but upstream unavailable" from "unsupported by the plugin". Live generation/editing must not be claimed until a MOMO channel is present and the end-to-end matrix passes.
 
