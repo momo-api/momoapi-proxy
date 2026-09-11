@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildClaudeMessages, buildGeminiContents, buildOpenAIChatMessages, createMomoSwitch, normalizeResponsesPayload } from "../src/server.mjs";
+import { buildClaudeMessages, buildGeminiContents, buildOpenAIChatMessages, createMomoSwitch, normalizeResponsesPayload, sanitizeGeminiFunctionHistory } from "../src/server.mjs";
 import { startAutoSync } from "../src/sync.mjs";
 import { ImageAssetStore } from "../src/image-assets.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -424,6 +424,30 @@ test("replays a Gemini batch with matching names and ids for every tool result",
     ["exec", "call_a"],
     ["view_image", "call_b"],
   ]);
+});
+
+test("repairs a Gemini function response whose name disagrees with the matching call id", () => {
+  const contents = sanitizeGeminiFunctionHistory([
+    { role: "model", parts: [{ functionCall: { id: "call_patch", name: "apply_patch", args: { input: "*** Begin Patch" } } }] },
+    { role: "user", parts: [{ functionResponse: { id: "call_patch", name: "exec", response: { result: "Done" } } }] },
+  ]);
+
+  assert.equal(contents[0].parts[0].functionCall.name, "apply_patch");
+  assert.equal(contents[1].parts[0].functionResponse.name, "apply_patch");
+  assert.equal(contents[1].parts[0].functionResponse.id, "call_patch");
+});
+
+test("drops dangling Gemini calls and degrades orphan results to text", () => {
+  const contents = sanitizeGeminiFunctionHistory([
+    { role: "model", parts: [{ text: "working" }, { functionCall: { id: "call_patch", name: "apply_patch", args: {} } }] },
+    { role: "user", parts: [{ functionResponse: { id: "call_exec", name: "exec", response: { result: "other result" } } }] },
+    { role: "user", parts: [{ text: "continue" }] },
+  ]);
+
+  assert.deepEqual(contents[0], { role: "model", parts: [{ text: "working" }] });
+  assert.match(contents[1].parts[0].text, /unpaired tool result: exec/);
+  assert.equal(contents.some((content) => content.parts.some((part) => part.functionCall || part.functionResponse)), false);
+  assert.deepEqual(contents[2], { role: "user", parts: [{ text: "continue" }] });
 });
 
 test("pairs replayed Gemini custom-tool results by call_id and sends images as inline data", () => {
