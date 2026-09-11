@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.13.9 - 2026-09-11
+
+- Bump the bundled MOMO Image plugin to 0.5.1 so Codex refreshes the corrected APIMart GPT Image 2.5 Skill and MCP metadata instead of retaining the 0.5.0 cache.
+
 ## 0.13.8 - 2026-09-11
 
 - Correct the GPT Image 2.5 adapter for APIMart/NewAPI channel 4: generation and editing use `POST /v1/images/generations` with `image_urls` string arrays, not `/v1/images/edits` or OpenAI `images[].image_url`.
