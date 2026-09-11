@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.10 - 2026-09-11
+
 - Default Codex history compaction to a bounded local checkpoint, advertise a 120K auto-compaction threshold, and prevent hidden multi-megabyte history from being replayed when switching models.
 
 ## Unreleased
