@@ -17,10 +17,10 @@ test("advertises the verified model-specific capability matrix", () => {
   assert.equal(byId["gemini-3.1-flash-image"].transports.edit, "chat-completions-multimodal");
   assert.equal(byId["gemini-3.1-flash-image"].mask_edits, false);
   assert.equal(byId["gpt-image-2.5-sunburst"].limits.max_reference_images, 16);
-  assert.equal(byId["gpt-image-2.5-sunburst"].limits.max_n, 10);
-  assert.equal(byId["gpt-image-2.5-sunburst"].mask_edits, true);
+  assert.equal(byId["gpt-image-2.5-sunburst"].limits.max_n, 4);
+  assert.equal(byId["gpt-image-2.5-sunburst"].mask_edits, false);
   assert.equal(byId["gpt-image-2.5-sunburst"].available, false);
-  assert.equal(byId["gpt-image-2.5-flare"].transports.edit, "images-edits-url-or-multipart");
+  assert.equal(byId["gpt-image-2.5-flare"].transports.edit, "images-generations-image-urls");
 });
 
 test("enables GPT Image 2.5 only when the authenticated model catalog contains it", async () => {
@@ -37,17 +37,21 @@ test("enables GPT Image 2.5 only when the authenticated model catalog contains i
 test("validates GPT Image 2.5 native controls and 16 references", () => {
   const references = Array.from({ length: 16 }, () => tinyPng);
   const request = normalizeImageRequest({
-    model: "gpt-image-2.5-sunburst", prompt: "x", n: 10, size: "1536x864", quality: "max",
-    reference_images: references, mask: tinyPng, input_fidelity: "high", output_format: "webp",
-    output_compression: 70, background: "transparent", moderation: "low", stream: true, partial_images: 3,
+    model: "gpt-image-2.5-sunburst", prompt: "x", n: 4, size: "1536x864", quality: "max",
+    reference_images: references, output_format: "webp",
+    output_compression: 70, background: "transparent", moderation: "low",
   }, "edit");
   assert.equal(request.reference_images.length, 16);
   assert.equal(request.size, "1536x864");
   assert.equal(request.quality, "max");
-  assert.equal(request.input_fidelity, "high");
+  assert.equal(request.resolution, "1k");
+  assert.equal(request.mask, undefined);
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", size: "1025x1024" }), /multiples of 16/);
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", background: "transparent", output_format: "jpeg" }), /requires png or webp/);
-  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", partial_images: 1 }), /requires stream=true/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", stream: true }), /does not support streaming/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", partial_images: 1 }), /does not support partial_images/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", input_fidelity: "high" }, "edit"), /input_fidelity is not supported/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", mask: tinyPng, reference_images: [tinyPng] }, "edit"), /mask is not supported/);
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", reference_images: [...references, tinyPng] }, "edit"), /at most 16/);
 });
 
@@ -55,70 +59,68 @@ test("routes GPT Image 2.5 generation with all native JSON controls", async () =
   const calls = [];
   const result = await generateImage({
     settings,
-    request: { model: "gpt-image-2.5-flare", prompt: "a tree", n: 2, size: "1536x864", quality: "xhigh", output_format: "jpeg", output_compression: 55, background: "opaque", moderation: "low", stream: true, partial_images: 2 },
+    request: { model: "gpt-image-2.5-flare", prompt: "a tree", n: 2, size: "1536x864", resolution: "2k", quality: "xhigh", output_format: "jpeg", output_compression: 55, background: "opaque", moderation: "low" },
     fetchImpl: async (url, init = {}) => {
       calls.push({ url: String(url), init });
       if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-flare" }] }), { status: 200, headers: { "content-type": "application/json" } });
-      return new Response([
-        "data: " + JSON.stringify({ type: "image_generation.partial_image", partial_image_b64: "cGFydGlhbA==" }),
-        "", "data: " + JSON.stringify({ type: "image_generation.completed", b64_json: "ZmluYWw=" }), "", "data: [DONE]", "",
-      ].join("\n"), { status: 200, headers: { "content-type": "text/event-stream" } });
+      return new Response(JSON.stringify({ code: 200, data: [{ status: "submitted", task_id: "task-25" }] }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
   assert.equal(calls[1].url, "https://gateway.example/v1/images/generations");
   assert.deepEqual(JSON.parse(calls[1].init.body), {
-    model: "gpt-image-2.5-flare", prompt: "a tree", n: 2, size: "1536x864", quality: "xhigh",
-    output_format: "jpeg", background: "opaque", moderation: "low", stream: true, output_compression: 55, partial_images: 2,
+    model: "gpt-image-2.5-flare", prompt: "a tree", n: 2, size: "1536x864", resolution: "2k", quality: "xhigh",
+    output_format: "jpeg", background: "opaque", moderation: "low", output_compression: 55,
   });
-  assert.equal(result.images.length, 2);
-  assert.equal(result.images[0].mime_type, "image/jpeg");
+  assert.equal(result.task_id, "task-25");
 });
 
-test("routes GPT Image 2.5 editing as multipart with 16 images and mask", async () => {
-  const references = Array.from({ length: 16 }, () => tinyPng);
+test("routes GPT Image 2.5 editing with 16 public image_urls", async () => {
+  const referenceUrls = Array.from({ length: 16 }, (_, index) => "https://assets.example/reference-" + (index + 1) + ".png");
   let call;
   await generateImage({
     settings, operation: "edit",
-    request: { model: "gpt-image-2.5-sunburst", prompt: "preserve the subject", reference_images: references, mask: tinyPng, input_fidelity: "high", size: "1024x1024", quality: "max", output_format: "png" },
+    request: { model: "gpt-image-2.5-sunburst", prompt: "preserve the subject", reference_images: referenceUrls, size: "1:1", resolution: "2k", quality: "max", output_format: "png" },
+    lookupImpl: publicLookup,
     fetchImpl: async (url, init = {}) => {
       if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-sunburst" }] }), { status: 200, headers: { "content-type": "application/json" } });
       call = { url: String(url), init };
-      return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ code: 200, data: [{ status: "submitted", task_id: "task-edit-25" }] }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
-  assert.equal(call.url, "https://gateway.example/v1/images/edits");
-  assert.equal(call.init.headers["content-type"], undefined);
-  assert.equal(call.init.body.getAll("image[]").length, 16);
-  assert.equal(call.init.body.get("model"), "gpt-image-2.5-sunburst");
-  assert.equal(call.init.body.get("mask") instanceof Blob, true);
-  assert.equal(call.init.body.get("input_fidelity"), "high");
-  assert.equal(call.init.body.get("quality"), "max");
+  assert.equal(call.url, "https://gateway.example/v1/images/generations");
+  assert.equal(call.init.headers["content-type"], "application/json");
+  assert.deepEqual(JSON.parse(call.init.body), {
+    model: "gpt-image-2.5-sunburst", prompt: "preserve the subject", n: 1, size: "1:1", resolution: "2k", quality: "max",
+    output_format: "png", background: "auto", moderation: "low", image_urls: referenceUrls,
+  });
 });
 
-test("uses the singular multipart image field for one GPT Image 2.5 reference", async () => {
-  let form;
+test("uploads data URL references to APIMart before GPT Image 2.5 editing", async () => {
+  const calls = [];
   await generateImage({
     settings, operation: "edit",
     request: { model: "gpt-image-2.5-flare", prompt: "edit", reference_images: [tinyPng] },
     fetchImpl: async (url, init = {}) => {
       if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-flare" }] }), { status: 200, headers: { "content-type": "application/json" } });
-      form = init.body;
-      return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/v1/uploads/images")) return new Response(JSON.stringify({ url: "https://upload.apimart.ai/f/image/reference.png" }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ code: 200, data: [{ status: "submitted", task_id: "task-upload-25" }] }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
-  assert.equal(form.getAll("image").length, 1);
-  assert.equal(form.getAll("image[]").length, 0);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, "https://gateway.example/v1/uploads/images");
+  assert.equal(calls[0].init.body.get("file") instanceof Blob, true);
+  assert.equal(calls[1].url, "https://gateway.example/v1/images/generations");
+  assert.deepEqual(JSON.parse(calls[1].init.body).image_urls, ["https://upload.apimart.ai/f/image/reference.png"]);
 });
 
 test("passes 16 public GPT Image 2.5 reference URLs without downloading them", async () => {
   const referenceUrls = Array.from({ length: 16 }, (_, index) => `https://assets.example/reference-${index + 1}.png?signature=test`);
-  const maskUrl = "https://assets.example/mask.png?signature=test";
   const calls = [];
   await generateImage({
     settings, operation: "edit",
     request: {
       model: "gpt-image-2.5-flare", prompt: "edit", reference_images: referenceUrls,
-      mask: maskUrl, input_fidelity: "high",
     },
     lookupImpl: publicLookup,
     fetchImpl: async (url, init = {}) => {
@@ -130,13 +132,36 @@ test("passes 16 public GPT Image 2.5 reference URLs without downloading them", a
     },
   });
   assert.equal(calls.length, 2);
-  assert.equal(calls[1].url, "https://gateway.example/v1/images/edits");
+  assert.equal(calls[1].url, "https://gateway.example/v1/images/generations");
   assert.equal(calls[1].init.headers["content-type"], "application/json");
   assert.deepEqual(JSON.parse(calls[1].init.body), {
-    model: "gpt-image-2.5-flare", prompt: "edit", n: 1, size: "auto", quality: "auto",
-    output_format: "png", background: "auto", moderation: "auto", stream: false,
-    images: referenceUrls.map((image_url) => ({ image_url })), mask: { image_url: maskUrl }, input_fidelity: "high",
+    model: "gpt-image-2.5-flare", prompt: "edit", n: 1, size: "auto", resolution: "1k", quality: "auto",
+    output_format: "png", background: "auto", moderation: "low", image_urls: referenceUrls,
   });
+});
+
+test("polls APIMart GPT Image 2.5 tasks and extracts result.images[].url[]", async () => {
+  const calls = [];
+  const result = await generateImage({
+    settings,
+    request: { model: "gpt-image-2.5-flare", prompt: "a tree" },
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "gpt-image-2.5-flare" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ code: 200, data: [{ status: "submitted", task_id: "task-poll-25" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(result.task_id, "task-poll-25");
+  const { getImageTask } = await import("../src/image-service.mjs");
+  const task = await getImageTask({
+    settings, taskId: result.task_id,
+    fetchImpl: async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify({ code: 200, data: { id: "task-poll-25", status: "completed", result: { images: [{ url: ["https://upload.apimart.ai/f/image/result.png"] }] } } }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(calls[0].url, "https://gateway.example/v1/tasks/task-poll-25");
+  assert.equal(task.raw_status, "completed");
+  assert.deepEqual(task.images, [{ url: "https://upload.apimart.ai/f/image/result.png" }]);
 });
 
 test("returns model_unavailable before calling a hidden GPT Image 2.5 route", async () => {

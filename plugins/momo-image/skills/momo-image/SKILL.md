@@ -36,6 +36,6 @@ Do not send a mask to the three legacy routes: mask editing remains unverified t
 ## GPT Image 2.5 experimental adapter
 
 - `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` appear in tool model enums only when MOMO's authenticated model catalog contains them.
-- Both protocol adapters support generation and multipart editing, up to 16 reference images, mask input, `input_fidelity`, `n=1-10`, native quality through `max`, custom valid dimensions, output format/compression, background, moderation, and partial-image streaming.
+- Both adapters support generation and editing through APIMart's asynchronous `/v1/images/generations` route, up to 16 `image_urls`, `n=1-4`, native quality through `max`, `resolution=1k/2k/4k`, custom valid dimensions, output format/compression, background, and moderation. APIMart does not support `/v1/images/edits`, mask, `input_fidelity`, or partial-image streaming for these models.
 - Sunburst is the precision/editing choice; Flare is the faster everyday-generation choice.
 - These are protocol-tested but not live-verified while MOMO has no usable channel. Never state that a live Image 2.5 request succeeded unless it actually did.
