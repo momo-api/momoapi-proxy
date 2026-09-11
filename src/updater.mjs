@@ -51,6 +51,18 @@ export function isTrustedVersionedPackageUrl(value, version) {
   }
 }
 
+export function isTrustedResolvedPackageUrl(value, version) {
+  if (isTrustedVersionedPackageUrl(value, version)) return true;
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    return url.protocol === "https:" && !url.username && !url.password &&
+      (hostname === "objects.githubusercontent.com" || hostname === "release-assets.githubusercontent.com");
+  } catch {
+    return false;
+  }
+}
+
 function isTrustedManifestUrl(value) {
   try {
     const url = new URL(value);
@@ -353,7 +365,7 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
       try {
         const res = await fetchImpl(url);
         if (res.ok) {
-          if (res.url && !isTrustedVersionedPackageUrl(res.url, info.latest)) {
+          if (res.url && !isTrustedResolvedPackageUrl(res.url, info.latest)) {
             throw archiveError("Update download redirected to an untrusted host.", "update_source_untrusted");
           }
           const buffer = await readResponseBodyLimited(res, MAX_UPDATE_ARCHIVE_BYTES);

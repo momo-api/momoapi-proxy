@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertSafeArchiveListing, checkAndRecordLatestVersion, checkLatestVersion, getCurrentVersion, isNewer, isTrustedUpdateUrl, isTrustedVersionedPackageUrl, readUpdateStatus, updateSelf } from "../src/updater.mjs";
+import { assertSafeArchiveListing, checkAndRecordLatestVersion, checkLatestVersion, getCurrentVersion, isNewer, isTrustedResolvedPackageUrl, isTrustedUpdateUrl, isTrustedVersionedPackageUrl, readUpdateStatus, updateSelf } from "../src/updater.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -204,6 +204,56 @@ test("update packages require HTTPS and an official download host", () => {
   assert.equal(isTrustedVersionedPackageUrl("https://momoapi.us/install/packages/momoapi-proxy-0.12.1.tgz", "0.12.1"), true);
   assert.equal(isTrustedVersionedPackageUrl("https://momoapi.us/install/packages/momoapi-proxy-latest.tgz", "0.12.1"), false);
   assert.equal(isTrustedVersionedPackageUrl("https://momoapi.us/install/packages/momoapi-proxy-0.12.0.tgz", "0.12.1"), false);
+  assert.equal(isTrustedResolvedPackageUrl("https://release-assets.githubusercontent.com/github-production-release-asset/123/file?sig=test", "0.12.1"), true);
+  assert.equal(isTrustedResolvedPackageUrl("https://objects.githubusercontent.com/github-production-release-asset/123/file?sig=test", "0.12.1"), true);
+  assert.equal(isTrustedResolvedPackageUrl("https://attacker.example/github-production-release-asset/123/file?sig=test", "0.12.1"), false);
+  assert.equal(isTrustedResolvedPackageUrl("http://release-assets.githubusercontent.com/github-production-release-asset/123/file?sig=test", "0.12.1"), false);
+});
+
+test("self-update accepts GitHub's signed release-asset redirect", async () => {
+  const fixture = mkdtempSync(join(tmpdir(), "momo-updater-github-redirect-"));
+  const source = join(fixture, "source", "momoapi-proxy");
+  const archive = join(fixture, "momoapi-proxy-0.13.7.tgz");
+  const proxyHome = join(fixture, "home");
+  mkdirSync(join(source, "bin"), { recursive: true });
+  mkdirSync(join(source, "src"), { recursive: true });
+  writeFileSync(join(source, "package.json"), JSON.stringify({ version: "0.13.7" }));
+  writeFileSync(join(source, "bin", "momoapi-proxy.mjs"), "// staged CLI\n");
+  writeFileSync(join(source, "src", "update-supervisor.mjs"), "// staged supervisor\n");
+  execFileSync("tar", ["-czf", archive, "-C", join(fixture, "source"), "momoapi-proxy"]);
+  const bytes = readFileSync(archive);
+  const checksum = createHash("sha256").update(bytes).digest("hex");
+  let staged;
+  try {
+    staged = await updateSelf({
+      env: { MOMO_PROXY_HOME: proxyHome },
+      fetchImpl: async (url) => {
+        if (url.includes("bridge-latest.json")) return new Response("missing", { status: 404 });
+        if (url.includes("api.github.com")) {
+          return new Response(JSON.stringify({
+            tag_name: "v0.13.7",
+            assets: [{
+              name: "momoapi-proxy-0.13.7.tgz",
+              browser_download_url: "https://github.com/momo-api/momoapi-proxy/releases/download/v0.13.7/momoapi-proxy-0.13.7.tgz",
+              digest: `sha256:${checksum}`,
+            }],
+          }), { status: 200 });
+        }
+        const response = new Response(bytes, { status: 200, headers: { "content-length": String(bytes.length) } });
+        return {
+          ok: response.ok, status: response.status, headers: response.headers, body: response.body,
+          url: "https://release-assets.githubusercontent.com/github-production-release-asset/123/signed-object?sig=test",
+          arrayBuffer: () => response.arrayBuffer(),
+        };
+      },
+    });
+    assert.equal(staged.updated, true);
+    assert.equal(staged.current, "0.13.7");
+  } finally {
+    if (staged?.stagingDir) rmSync(staged.stagingDir, { recursive: true, force: true });
+    if (staged?.supervisorPath) rmSync(staged.supervisorPath, { force: true });
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test("archive admission rejects traversal, links, and special files", () => {
