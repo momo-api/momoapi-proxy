@@ -152,19 +152,36 @@ export function prepareCompactPayload(payload, settings = {}) {
 
   const limitBytes = configuredCompactLimit(settings);
   let bytes = serializedBodyBytes(body);
+  const oversized = bytes > limitBytes;
+  let trackedBytes = bytes;
+  const replaceInput = (index, item) => {
+    // Request-scoped JSON data: array slots serialize undefined/holes as null.
+    // Only measure the replaced slot, not the rest of a multi-MiB request.
+    const slotBytes = (value) => Buffer.byteLength(JSON.stringify(value) ?? "null", "utf8");
+    if (index < body.input.length) {
+      trackedBytes += slotBytes(item) - slotBytes(body.input[index]);
+    } else {
+      const gaps = index - body.input.length;
+      trackedBytes += slotBytes(item) + gaps * 5 + (body.input.length ? 1 : 0);
+    }
+    body.input[index] = item;
+  };
   let markerizedItems = 0;
   if (bytes > limitBytes) {
     for (let index = 0; index < boundary && bytes > limitBytes; index++) {
       const marker = markerForHistoricalItem(body.input[index]);
       if (!marker) continue;
-      body.input[index] = marker;
+      replaceInput(index, marker);
       markerizedItems += 1;
-      if (markerizedItems % 8 === 0) bytes = serializedBodyBytes(body);
+      // Preserve the legacy eight-marker checkpoint: stopping after each slot
+      // would retain a different set of historical items near the boundary.
+      if (markerizedItems % 8 === 0) bytes = trackedBytes;
     }
-    bytes = serializedBodyBytes(body);
+    bytes = trackedBytes;
   }
   if (bytes > limitBytes) {
     if (body.input.some((item) => hasIntegrityProtectedOpaqueState(item))) {
+      bytes = serializedBodyBytes(body);
       const error = new Error(`Compact request contains integrity-protected opaque state and remains ${bytes} bytes, above the ${limitBytes}-byte compact limit.`);
       error.statusCode = 413;
       error.code = "compact_budget_exceeded";
@@ -172,10 +189,14 @@ export function prepareCompactPayload(payload, settings = {}) {
       throw error;
     }
     for (let index = Math.max(0, boundary); index < body.input.length && bytes > limitBytes; index++) {
-      body.input[index] = compactValue(body.input[index], { aggressive: true });
-      bytes = serializedBodyBytes(body);
+      replaceInput(index, compactValue(body.input[index], { aggressive: true }));
+      bytes = trackedBytes;
     }
   }
+
+  // Final exact accounting remains the safety gate and trace source; no size
+  // estimate can admit a request above the compact limit.
+  if (oversized) bytes = serializedBodyBytes(body);
 
   if (bytes > limitBytes) {
     const error = new Error(`Compact request remains ${bytes} bytes after safe history cleanup, above the ${limitBytes}-byte compact limit.`);
