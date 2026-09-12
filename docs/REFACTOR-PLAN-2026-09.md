@@ -45,7 +45,7 @@
 | P4b | P1 | 日志有界异步队列、轮转、尾读、退出刷新 | P4a | 过载丢弃计数、磁盘失败/关停测试；不输出敏感内容 | 进行中（P4b1/P4b2） |
 | P4b1 | P1 | 普通/诊断日志及启动失败摘要的有界尾读 | P4a | 字节/行上限、Unicode、短读/截断、CLI 提示、旧结果等价 | 已合并（未发布） |
 | P4b2 | P1 | 异步写队列、轮转、丢弃计数、退出刷新 | P4b1 | 多 writer/磁盘失败/限时刷新；不影响模型工具流 | 进行中（核心与接入分开） |
-| P4b2a | P1 | 独立有界队列与受锁保护的轮转文件 sink | P4b1 | 队列/等待者有界；故障不重放；跨进程/轮转/退出期限测试 | 本地验证通过，待最终 CI |
+| P4b2a | P1 | 独立有界队列与受锁保护的轮转文件 sink | P4b1 | 队列/等待者有界；故障不重放；跨进程/轮转/退出期限测试 | 已合并（未接入/未发布） |
 | P4b2b | P1 | 日志格式边界、专用新路径、daemon/CLI 接入与退出刷新 | P4b2a | 旧日志不迁移/删除；指标区分接收/写入；进程退出与工具 wire 回归 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
@@ -184,7 +184,7 @@
 1. P3a 已通过本地/CI 并合并 PR #44；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
 2. P3b 已通过本地/CI 并合并 PR #46。上游 compact 增量计量并最后精确序列化；本地 checkpoint 已有逐项预算，保留算法不改，新增完整结果 golden 验证。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
-4. P4a 已合并 PR #48；P4b1 尾读已合并 PR #50；P4b2a 写入核心本地通过，待最终 CI；之后 P4b2b 日志/退出刷新接入、P5 拆分、P6 发布。当前没有挂起的发布或自动更新任务。
+4. P4a 已合并 PR #48；P4b1 尾读已合并 PR #50；P4b2a 写入核心通过最终 CI 并合并 PR #52；下一步 P4b2b 日志/退出刷新接入、P5 拆分、P6 发布。当前没有挂起的发布或自动更新任务。
 
 ## P3a 增量流状态（2026-09-12）
 
@@ -342,4 +342,6 @@ P4b1 已合并、未发布/未安装；P4b2 同步 append/诊断压缩、异步�
 - Windows 全量 332 项：330 passed、2 POSIX 专用项 skip、0 failed；Node 24 Alpine 构建与运行各 332/332；Windows tray 11 断言。仅临时合成文件；未读真实日志/会话/账户/密钥，未发送模型请求，未更换运行实例。
 - 没有性能提速结论：这批核心尚未接入，请求同步写入的实际成本没有变化。队列逻辑字节不等于 RSS 硬上限；组合 sink 另有最多一批合并 Buffer。
 
-当前核心本地验收通过，待提交/Secret scan/PR 最终 CI；P4b2b 接入、P5、P6 未完成。下一步先确定新专用日志路径与旧日志只读 fallback、严格格式/脱敏边界和可见失败指标，再接入 daemon/CLI 并验证 HTTP shutdown、SIGINT/SIGTERM、启动失败及限时退出；不直接轮转历史 proxy.log/daemon.log/diagnostic-events.jsonl。
+验收：实现 f3ffa92 的 Node/container/windows-tray/secret-scan 全绿（[最终 CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34691452757)），已合并 [PR #52](https://github.com/momo-api/momoapi-proxy/pull/52)，main a12cfbd。最终 Windows 330 passed + 2 POSIX skips，Alpine 构建/运行各 332/332，tray 11 断言；完整历史 143 commits、工作树和暂存区 Secret scan 无泄漏。
+
+P4b2a 已合并，未接入/未发布/未安装；P4b2b 接入、P5、P6 未完成。下一步先确定新专用日志路径与旧日志只读 fallback、严格格式/脱敏边界和可见失败指标，再接入 daemon/CLI 并验证 HTTP shutdown、SIGINT/SIGTERM、启动失败及限时退出；不直接轮转历史 proxy.log/daemon.log/diagnostic-events.jsonl。
