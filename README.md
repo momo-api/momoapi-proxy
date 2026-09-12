@@ -32,7 +32,7 @@ It implements a focused subset of OpenCodex-inspired protocol compatibility; it 
 - The server binds only to `127.0.0.1`.
 - Codex receives a random **local** bearer token. The MOMO key is not written into `~/.codex/auth.json` after setup.
 - The MOMO key is stored in the Bridge settings file under the user's profile and never logged.
-- Diagnostic events remain on the local machine in `~/.momoapi-proxy/diagnostic-events.jsonl` (bounded to 2 MiB / 1,000 retained lines) and are never uploaded automatically.
+- Diagnostic events remain on the local machine in `~/.momoapi-proxy/diagnostic-events-v2.jsonl` with one bounded `.1` generation and are never uploaded automatically. The legacy `diagnostic-events.jsonl` is read-only fallback when no new log exists.
 - `rollback` restores the backed-up Codex configuration and auth file.
 
 ## CLI Usage
@@ -159,18 +159,28 @@ truncated and byteLimitReached without raw exception paths or contents.
 
 One descriptor and size snapshot exclude later appends and avoid reopening a
 different file after rotation. This is not an atomic snapshot of in-place edits
-or a disk-latency deadline. Regular-file I/O remains synchronous but byte-bounded;
-POSIX FIFO paths are rejected without waiting for a writer. This only improves
-inspection: request append, diagnostic compaction, retention and shutdown remain
-unchanged pending the separate async log-writer phase. Existing local logs are
-neither migrated nor removed. Run node scripts/benchmark-log-tail.mjs
---baseline-root=<clean baseline tree> for the synthetic old/new read benchmark.
+or a disk-latency deadline. Regular-file tail inspection remains synchronous but
+byte-bounded; POSIX FIFO paths are rejected without waiting for a writer. Run
+node scripts/benchmark-log-tail.mjs --baseline-root=<clean baseline tree> for the
+synthetic old/new read benchmark.
 
-Developer note: src/log-writer.mjs and src/log-file-sink.mjs provide a tested,
-not-yet-integrated async logging core. No command or server imports them yet.
-See docs/REFACTOR-PLAN-2026-09.md (P4b2a/P4b2b) for ownership, failure semantics,
-limits and remaining lifecycle integration. Their presence does not mean current
-request writes, stdout mirroring or daemon shutdown have been optimized.
+Request and diagnostic writes use independent bounded asynchronous queues and
+dedicated files: request-events.jsonl and diagnostic-events-v2.jsonl. Each file
+is capped at 8 MiB with one 8 MiB .1 generation. Each queue accepts at most 1 MiB
+or 1,024 pending records; an individual JSON line is capped at 64 KiB. Saturation
+or disk failure drops whole new records and increments logging metrics; failed or
+possibly partial writes are never replayed. Existing proxy.log, daemon.log and
+diagnostic-events.jsonl are not migrated, deleted or rotated by this subsystem.
+The logs/diagnostics commands use them only as fallback when neither new generation
+exists.
+
+Background daemon and autostart launchers disable request-log stdout mirroring, so
+daemon.log does not duplicate every request. Foreground serve keeps mirroring by
+default for live debugging; set MOMO_PROXY_CONSOLE_MIRROR=0 to disable it. Graceful
+HTTP and SIGINT/SIGTERM shutdowns wait for accepted log prefixes only within a hard
+deadline; completion does not imply fsync or power-loss durability. status reports
+the installed CLI version separately from runtimeVersion and reads the running
+daemon's logging/diagnostic counters through authenticated loopback metrics.
 
 ### Local request metrics
 

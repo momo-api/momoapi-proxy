@@ -72,3 +72,34 @@ export function readLogTail(target, lines = 100, { io = fs } = {}) {
     if (descriptor !== undefined) { try { io.closeSync(descriptor); } catch {} }
   }
 }
+
+// A dedicated rotating target has at most two generations. The current file is
+// newer than .1. A legacy fallback is used only when neither new generation
+// exists; existing but unreadable new logs are reported instead of hidden.
+export function readRotatingLogTail(target, lines = 100, { legacyTarget, io = fs } = {}) {
+  const count = logTailLineCount(lines);
+  const current = readLogTail(target, count, { io });
+  if (!current.available && current.error !== "not_found") return current;
+
+  let archive = null;
+  if (!current.available || current.lines.length < count) {
+    archive = readLogTail(target + ".1", count - current.lines.length, { io });
+    if (!archive.available && archive.error !== "not_found") return archive;
+  }
+
+  if (!current.available && !archive?.available) {
+    return legacyTarget ? readLogTail(legacyTarget, count, { io }) : current;
+  }
+
+  const combined = [...(archive?.lines || []), ...current.lines];
+  return {
+    available: true,
+    lines: combined.slice(-count),
+    bytesRead: current.bytesRead + (archive?.bytesRead || 0),
+    maxBytes: current.maxBytes + (archive?.maxBytes || 0),
+    lineLimit: count,
+    truncated: Boolean(current.truncated || archive?.truncated || combined.length > count),
+    byteLimitReached: Boolean(current.byteLimitReached || archive?.byteLimitReached),
+    error: null,
+  };
+}

@@ -31,4 +31,12 @@ if ($Embed) {
   & node (Join-Path $PSScriptRoot 'embed-tray.mjs')
   if ($LASTEXITCODE -ne 0) { throw 'Tray embedding failed' }
 }
-[pscustomobject]@{ path=$output; version=$version; sha256=(Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json
+$stream = [IO.File]::OpenRead($output)
+$sha256 = [Security.Cryptography.SHA256]::Create()
+try {
+  $digest = ([BitConverter]::ToString($sha256.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+} finally {
+  $sha256.Dispose()
+  $stream.Dispose()
+}
+[pscustomobject]@{ path=$output; version=$version; sha256=$digest } | ConvertTo-Json

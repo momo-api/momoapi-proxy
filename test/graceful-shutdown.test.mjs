@@ -5,6 +5,11 @@ import { createMomoSwitch } from "../src/server.mjs";
 test("graceful shutdown: draining state, 503 responses, and incomplete SSE on deadline", async () => {
   const localToken = "shutdown_test_token_xyz";
   let upstreamSignal;
+  let loggingCloses = 0;
+  let markExited;
+  const exited = new Promise((resolve) => { markExited = resolve; });
+  const loggingRuntime = { env: process.env, enqueueRequest: () => true, enqueueDiagnostic: () => true,
+    snapshot: () => ({ request: {}, diagnostic: {} }), close: async () => { loggingCloses++; return { completed: true }; } };
 
   const fakeFetch = async (_url, init) => {
     upstreamSignal = init.signal;
@@ -34,7 +39,7 @@ test("graceful shutdown: draining state, 503 responses, and incomplete SSE on de
       localToken,
       drainTimeoutMs: 300,
     },
-    { fetchImpl: fakeFetch, exitImpl: () => {} }
+    { fetchImpl: fakeFetch, exitImpl: markExited, loggingRuntime }
   );
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -84,6 +89,8 @@ test("graceful shutdown: draining state, 503 responses, and incomplete SSE on de
     assert.match(sseOutput, /Server shutting down gracefully/);
 
     assert.ok(upstreamSignal && upstreamSignal.aborted);
+    await exited;
+    assert.equal(loggingCloses, 1);
   } finally {
     server.close();
   }
@@ -94,6 +101,11 @@ test("graceful shutdown lets an active request finish naturally before the deadl
   let upstreamAborted = false;
   let releaseUpstream;
   let markUpstreamEntered;
+  let loggingCloses = 0;
+  let markExited;
+  const exited = new Promise((resolve) => { markExited = resolve; });
+  const loggingRuntime = { env: process.env, enqueueRequest: () => true, enqueueDiagnostic: () => true,
+    snapshot: () => ({ request: {}, diagnostic: {} }), close: async () => { loggingCloses++; return { completed: true }; } };
   const upstreamGate = new Promise((resolve) => { releaseUpstream = resolve; });
   const upstreamEntered = new Promise((resolve) => { markUpstreamEntered = resolve; });
 
@@ -116,7 +128,7 @@ test("graceful shutdown lets an active request finish naturally before the deadl
       localToken,
       drainTimeoutMs: 1000,
     },
-    { fetchImpl: fakeFetch, exitImpl: () => {} }
+    { fetchImpl: fakeFetch, exitImpl: markExited, loggingRuntime }
   );
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -141,4 +153,27 @@ test("graceful shutdown lets an active request finish naturally before the deadl
   assert.equal(completedResponse.status, 200);
   assert.deepEqual(await completedResponse.json(), { data: [{ id: "model_after_drain" }] });
   assert.equal(upstreamAborted, false);
+  await exited;
+  assert.equal(loggingCloses, 1);
+});
+
+test("HTTP shutdown logging close cannot extend the configured drain deadline indefinitely", async () => {
+  const localToken = "shutdown_hard_logging_deadline";
+  let markExited;
+  const exited = new Promise((resolve) => { markExited = resolve; });
+  const loggingRuntime = { env: process.env, enqueueRequest: () => true, enqueueDiagnostic: () => true,
+    snapshot: () => ({ request: {}, diagnostic: {} }), close: () => new Promise(() => {}) };
+  const server = createMomoSwitch({ apiKey: "momo_key", endpoint: "https://mock.momo", port: 0, host: "127.0.0.1",
+    localToken, drainTimeoutMs: 80 }, { exitImpl: markExited, loggingRuntime });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const started = Date.now();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/internal/shutdown`, { method: "POST", headers: { "x-local-token": localToken } });
+    assert.equal(response.status, 200);
+    await exited;
+    assert.ok(Date.now() - started < 500);
+  } finally {
+    server.close();
+  }
 });
