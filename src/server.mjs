@@ -44,10 +44,8 @@ import { initSseResponse, streamSseLines, upstreamErrorMessage, writeResponsesFa
 import { expandCurrentImageVisionReferences, withImageVisionReferences } from "./image-vision.mjs";
 import { asArray, authorized, json, openCodeUpstreamHeaders, upstreamHeaders, writeSse } from "./http-lifecycle.mjs";
 import { isChatCompletionsRoute, isCompactRoute, isModelsRoute, isResponsesRoute } from "./route-dispatch.mjs";
+import { resolveTargetModel as resolveModelRoute } from "./model-routing.mjs";
 
-const GEMINI_PREFIX = /^gemini-/;
-const CLAUDE_PREFIX = /^claude-/;
-const MUSE_PREFIX = /^muse-/;
 export const metricsState = {
   startedAt: Date.now(),
   resetTime: new Date().toISOString(),
@@ -103,12 +101,7 @@ export function resetMetrics() {
 }
 
 export function resolveTargetModel(model) {
-  if (GEMINI_PREFIX.test(model)) return { targetModel: model, protocol: "gemini" };
-  if (CLAUDE_PREFIX.test(model)) return { targetModel: model, protocol: "claude" };
-  if (MUSE_PREFIX.test(model) || model === "gpt-5.6-sol" || model === "gpt-5.6-luna" || model.endsWith("-sol") || model.endsWith("-luna") || model.endsWith("-responses")) {
-    return { targetModel: model, protocol: "responses" };
-  }
-  return { targetModel: model, protocol: "chat" };
+  return resolveModelRoute(model);
 }
 
 function recordContextTrace(response, trace, admitted = true) {
