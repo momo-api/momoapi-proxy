@@ -233,8 +233,11 @@ and accepted tool call/result semantics are covered by synthetic regressions.
 
 These budgets do not cover GET routes, image-result processing, every transient
 allocation, or model/SSE idle timeouts. See the plan for remaining performance
-work, notably repeated full-text DSML/custom argument scans and legacy bare-text
-custom-input classification.
+work, notably repeated full-text DSML/custom argument scans. Chat/Gemini/Claude
+custom-input normalization recognizes unified-exec host helper calls such as
+text(...), image(...), and store(...) as JavaScript rather than wrapping them as
+shell; bare shell compatibility is retained. This classification is not a full
+JavaScript parser and never executes code inside the proxy.
 
 ### Upstream context admission
 

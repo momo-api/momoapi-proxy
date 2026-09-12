@@ -199,3 +199,45 @@ test("four simultaneous overflowing streams release all ingress reservations and
     assert.equal(released, 4);
   });
 });
+
+test("Chat, Gemini and Claude preserve host-helper JavaScript instead of wrapping it as shell", async () => {
+  const sources = [
+    "text('中文😀')",
+    "text(await tools.exec_command({cmd:'synthetic-only'}));",
+    "image('data:image/png;base64,synthetic')",
+    "audio('synthetic')", "generatedImage({image_url:'synthetic'})",
+    "store('synthetic', 1); text(load('synthetic'));",
+    "load('synthetic')", "notify('synthetic')", "exit()",
+    "setTimeout(() => text('synthetic'), 1)", "clearTimeout(1)", "yield_control()",
+    "text /* comment */ ('synthetic')",
+  ];
+  for (const model of ["grok-4.5", "gemini-3.1-pro-preview", "claude-sonnet-4-6"]) await withServer(async () => {
+    const events = sources.flatMap((input, index) => {
+      const id = "call_helpers_" + index;
+      const args = { input };
+      if (model.startsWith("grok")) return [{ choices: [{ delta: { tool_calls: [{ index, id, function: { name: "exec", arguments: JSON.stringify(args) } }] } }] }];
+      if (model.startsWith("gemini")) return [{ candidates: [{ content: { parts: [{ functionCall: { id, name: "exec", args } }] } }] }];
+      return [
+        { type: "content_block_start", index, content_block: { type: "tool_use", id, name: "exec", input: args } },
+        { type: "content_block_stop", index },
+      ];
+    });
+    return new Response(Buffer.concat(events.map(block)));
+  }, async (base) => {
+    const events = parseSse(await (await request(base, { ...payload, model, tools: [{ type: "custom", name: "exec" }] })).text());
+    const calls = events.filter((item) => item.type === "response.output_item.done" && item.item.type === "custom_tool_call");
+    assert.deepEqual(calls.map((item) => item.item.input), sources, model);
+    assert.deepEqual(calls.map((item) => item.item.call_id), sources.map((_, i) => "call_helpers_" + i));
+  });
+});
+
+test("helper-like command prefixes remain shell-compatible instead of being treated as JS", async () => {
+  const sources = ["echo synthetic", "text-file synthetic", "image synthetic.png", "notify-send synthetic", "exit 0", "text_helper('synthetic')"];
+  await withServer(async () => new Response(Buffer.concat(sources.map((input, index) => block({
+    candidates: [{ content: { parts: [{ functionCall: { id: "call_shell_" + index, name: "exec", args: { input } } }] } }],
+  })))), async (base) => {
+    const events = parseSse(await (await request(base, { ...payload, model: "gemini-3.1-pro-preview", tools: [{ type: "custom", name: "exec" }] })).text());
+    const calls = events.filter((item) => item.type === "response.output_item.done" && item.item.type === "custom_tool_call");
+    assert.deepEqual(calls.map((item) => item.item.input), sources.map((input) => "await tools.exec_command({ cmd: " + JSON.stringify(input) + " });"));
+  });
+});

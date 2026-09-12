@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve unified-exec JavaScript helper calls (text/image/audio/generatedImage/store/load/notify/exit/timers/yield_control) on Chat/Gemini/Claude bridges instead of incorrectly wrapping them as shell commands; preserve existing bare-shell compatibility.
+
 - Bound model output wire bytes/event counts, retained text/tool/output accumulators and whole-entry continuation cache; fail explicitly and abort upstream instead of emitting false completion after overflow.
 - Preserve the active response ID on streaming failure, reject unresolved native tool arguments at terminal/EOF, and handle identities first supplied in a terminal snapshot.
 - Require full provider-aware history or an explicit handoff for missing/evicted Gemini/Claude result-only continuations; document limits, measurements and remaining performance work. No package version or live runtime change.
