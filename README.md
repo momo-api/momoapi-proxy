@@ -233,7 +233,13 @@ and accepted tool call/result semantics are covered by synthetic regressions.
 
 These budgets do not cover GET routes, image-result processing, every transient
 allocation, or model/SSE idle timeouts. See the plan for remaining performance
-work, notably compact/checkpoint repeated serialization and terminal copies.
+work, notably synchronous JSON parsing and terminal copies. Upstream compact
+preparation tracks exact per-slot JSON byte deltas, preserving the eight-marker
+selection cadence, with an exact final whole-request size gate (at most two full
+measurements). Default local checkpoints already use incremental item budgets;
+their selection rules and explicit required-state failures are unchanged. Run
+npm run benchmark:compact -- --baseline-root=... for synthetic differential
+measurements, including full body/trace/error hashes against a clean baseline.
 DSML marker detection now inspects only new text plus an 11-code-unit boundary;
 native custom-input decoding carries prefix/escape state across chunks. Pending
 arguments use ID/index buckets with stable arrival order, without scanning other

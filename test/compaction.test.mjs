@@ -3,6 +3,7 @@ import test from "node:test";
 import { buildLocalCompactResponse, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareOversizedHistoryReplay } from "../src/compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
+import { compactFixture } from "../scripts/compact-fixtures.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "test_gateway_key", localToken: "test_local_token", host: "127.0.0.1", port: 0, compactionMode: "upstream" };
 
@@ -238,6 +239,38 @@ test("POST /v1/responses/compact forwards the sanitized canonical request", asyn
   });
   assert.equal(captured.url, "https://gateway.example/v1/responses/compact");
   assert.equal(captured.body.stream, undefined);
+});
+
+test("large compact HTTP request forwards exactly the incrementally budgeted body", async () => {
+  const { body } = compactFixture("marker-420");
+  const overrides = { compactionMode: "upstream", contextPolicy: { compactBodyLimitMb: 18 } };
+  const expected = JSON.stringify(prepareCompactPayload(structuredClone(body), overrides).payload);
+  let calls = 0;
+  await withServer(async (url, init) => {
+    calls++;
+    assert.equal(url, "https://gateway.example/v1/responses/compact");
+    assert.equal(init.body, expected);
+    assert.ok(Buffer.byteLength(init.body) <= 18 * 1048576);
+    return Response.json({ object: "response.compaction", output: [] });
+  }, async (base) => {
+    const response = await fetch(base + "/v1/responses/compact", { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).object, "response.compaction");
+  }, overrides);
+  assert.equal(calls, 1);
+});
+
+test("opaque compact budget failure still falls back locally without touching upstream", async () => {
+  const { body } = compactFixture("opaque");
+  let calls = 0;
+  await withServer(async () => { calls++; return Response.json({ error: "unexpected" }, { status: 500 }); }, async (base) => {
+    const response = await fetch(base + "/v1/responses/compact", { method: "POST", headers: authHeaders(), body: JSON.stringify(body) });
+    assert.equal(response.status, 200);
+    const compacted = await response.json();
+    assert.equal(compacted.object, "response.compaction");
+    assert.ok(compacted.output.some((item) => item.role === "user" && item.content?.[0]?.text === "current"));
+  }, { compactionMode: "upstream", contextPolicy: { compactBodyLimitMb: 18 } });
+  assert.equal(calls, 0);
 });
 
 test("compact rejects an upstream 200 that is not a response.compaction object", async () => {

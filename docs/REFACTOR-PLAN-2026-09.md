@@ -39,7 +39,7 @@
 | T1 | P0 | 修复 JS host-helper 被 customInput 当作 shell 的分类缺陷 | P2b 发现 | 13 样例 × 3 adapter 原样；call_id 不变；shell 反向回归 | 已合并 |
 | P3 | P1 | 流累计增量处理 + compact/checkpoint 增量预算，末尾精确序列化 | P0/P2 | 状态与工具 wire 等价；避免逐片段/删项全量重扫 | 进行中 |
 | P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 已合并 |
-| P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 待开始 |
+| P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 本地验证通过 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
@@ -176,7 +176,7 @@
 ## 下一批执行顺序
 
 1. P3a 已通过本地/CI 并合并 PR #44；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
-2. P3b：compact/checkpoint 增量字节预算，最后精确序列化；约束、当前任务、pending call/result 与动态工具保留语义不变。
+2. P3b 本地验证通过，待 PR/CI。上游 compact 增量计量并最后精确序列化；本地 checkpoint 已有逐项预算，保留算法不改，新增完整结果 golden 验证。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
 4. P4 指标/日志、P5 生命周期/适配器拆分、P6 包发布与安装验收仍未完成。当前没有挂起的发布或自动更新任务。
 
@@ -217,3 +217,34 @@
 最后一行不是提前拒绝换性能：新旧均产生 4097 个 delta，客户端均收到 17,007,261 bytes、response.failed，无 completed。正常场景分别同为 16,774 / 1,063,078 bytes；所有上游 iterator 释放、18 进程正常结束。OS 峰值含启动，结束 heap 不当峰值；3 样本不外推生产容量，不声称 RSS 硬上限。报告保留 Git 外。
 
 剩余：P3b 重复序列化；P4 指标/日志；P5 生命周期与终态背压/多副本；P6 发布。既有 DSML 在 marker 完成前可能已经输出前缀、之后补发清理文本的行为，本批刻意不改变，应另用语义修复 PR 处理。
+
+## P3b compact 增量预算（2026-09-12）
+
+基线为干净 main 8f45a9d（PR #45）；分支 feat/incremental-compact-budget。仅改 compact 准备过程的字节计量，不改模型路由、认证、上下文选取政策、版本或运行实例。本地 checkpoint 的选取已经按项目累计预算，因此没有为重构而改其算法。
+
+- 两项性能红测在原版分别观察到 19 / 21 次完整请求序列化；新版准备过程最多 2 次（初始 + 最终精确检查），每次替换只序列化新旧条目计算 UTF-8 JSON 字节差。
+- 保留每 8 个 marker 才更新历史循环停止条件的既有规则；不能每条提前停止，否则会改变被保留的内容。考虑 marker 比原文更大、空值和数组扩展标点；最终精确测量仍是准入/错误信息依据。
+- 未修改 encrypted_content、历史替代文本、aggressive current cleanup、trigger 过滤索引行为或 compact_budget_exceeded 的回退输入。这里的 current cleanup 是原有上游 compact 行为，不等于普通本地 checkpoint 丢弃当前任务。
+- 14 组从干净旧提交生成的 SHA-256 golden：小请求、420 条历史、多条当前工具结果、门限 -1/0/+1、marker 变大、opaque、不可压缩顶层 schema、trigger、Unicode/转义/孤立代理项、混合条目、本地 replay 与 required overflow。哈希覆盖完整 body/trace/error，不包含真实会话或秘密。
+- 新增 20 项测试；Windows 272/272，Node 24 Alpine 构建/运行各 272/272，tray 11 断言。额外 HTTP 回归确认 26MiB 请求转发精确结果，opaque 超预算回退不访问上游。首次容器加载夹具失败，已通过 Dockerfile 精确复制一个合成 fixture 修正，未宽泛复制 scripts。
+- 默认 local checkpoint 沿用两次完整请求计量；原 system/developer、用户任务、动态工具、pending call、跨边界 result 和最近证据的保留，以及 required_state 超限 413，均通过原有/新增回归。不能宣称本批改善了所有超大会话延迟。
+
+### 隔离 A/B 记录
+
+命令 npm run benchmark:compact -- --baseline-root=<8f45a9d clean tree> --rounds=5 --cases=small,marker-420,current-64,replay,required-overflow。Windows x64 / Node v24.16.0 / Xeon E5-2696 v3；最终完整 5 轮、50 个全新子进程，交错新旧、顺序运行，不并行测试/构建，无模型调用。前期 14-case 差分与探索批次不计入此表。
+
+| 场景 | 完整请求序列化（旧 → 新） | 旧 P50 / P95 ms | 新 P50 / P95 ms | OS maxRSS MiB 中位数（旧 → 新） |
+| --- | --- | --- | --- | --- |
+| 小请求 | 1 → 1 | 1.264 / 1.322 | 1.280 / 1.845 | 49.80 → 49.80 |
+| 420 条历史、约 26.3MiB | 19 → 2 | 2254.069 / 2366.232 | 246.950 / 272.117 | 261.36 → 236.62 |
+| 当前 64 个结果、约 24.0MiB | 21 → 2 | 1045.566 / 1092.246 | 121.885 / 135.711 | 130.89 → 115.47 |
+| 默认 local replay、约 8MiB | 2 → 2 | 45.169 / 67.599 | 48.013 / 59.383 | 107.47 → 107.50 |
+| required overflow 拒绝 | 1 → 1 | 5.595 / 14.521 | 5.468 / 6.072 | 54.55 → 54.55 |
+
+所有样本完整 outcome 哈希一致；420 条场景同为 136 个 marker、18,639,502 bytes，当前结果场景同为 18,524,615 bytes。本地 replay 同为 66,073 bytes；拒绝场景同为 checkpoint_state_budget_exceeded，不以少做工作或更早拒绝换速度。默认 local replay 中位数稍有回退，本批不宣称该路径提速。
+
+420 条场景 GC 总耗时中位数 87.72 → 6.30ms、事件循环 max 中位数 2256.54 → 248.38ms；64 个结果为 36.01 → 3.28ms、1061.68 → 126.88ms。GC/loop 观察含操作前后短暂 timer settling；小操作 loop 更易受调度影响。每个进程冷运行；5 样本 P95 是最大值，不是可靠生产分位数。
+
+OS maxRSS 采集于校验哈希前，但包含启动、fixture 构造和初始字节测量；heap/external 为操作结束值，不当真实瞬时峰值。此表是同步准备函数微基准，不是端到端模型延迟或 RSS 承诺。原始合成报告保留 Git 外。
+
+下一步 P4：业务与健康指标分离、分段耗时，以及有界日志队列/轮转/尾读；P5/P6 仍未完成。当前 P3b 待 PR/CI，未发布/未安装。

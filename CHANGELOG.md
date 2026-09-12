@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Track compact request byte deltas per replaced input slot instead of repeatedly serializing the whole request; retain the existing eight-marker selection cadence and exact final size gate. Local checkpoint retention policy is unchanged and covered by clean-baseline golden tests.
+
 - Incrementally detect DSML markers and decode native custom-tool partial inputs; index pending argument events by item ID/output index while retaining arrival order. Keep output budgets and tool-wire semantics unchanged; add differential benchmarks and streaming regressions.
 
 - Preserve unified-exec JavaScript helper calls (text/image/audio/generatedImage/store/load/notify/exit/timers/yield_control) on Chat/Gemini/Claude bridges instead of incorrectly wrapping them as shell commands; preserve existing bare-shell compatibility.

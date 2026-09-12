@@ -1,0 +1,20 @@
+{
+  "baseline": "8f45a9ded82f76cad58cb4d7cd8e461325ef60b3",
+  "description": "SHA-256 of exact synthetic compactOutcome JSON from clean baseline, including payload/trace/error. No real session or secret data.",
+  "hashes": {
+    "small": "316a406d6a2a65e52614689062a1dd900a8d1cb85c7bc60f89bf478194093eaa",
+    "marker-420": "6c454defba8081a1a129345c2552fea69b96fd36955ead126af58e56b59247fd",
+    "current-64": "c59511c533ff2ba868e64f8ae66ee8e4b25740bdf6b2e21b08fca3b87bea360c",
+    "boundary-minus": "1629b90c55a16619acba181e8003c48c0ff23cb72b6077dc720a2fe6717354de",
+    "boundary-exact": "97f81067ae7fa11f5021d368a801804836e3a5ccb4d0008bb53398fcf969c902",
+    "boundary-plus": "c9e5f993e62388aed40946375aa3b20c82cc2a6440ade3cb197d48260c0d2183",
+    "marker-growth": "fec65b6d0fa1efaa2e2151650c730a0a41ddfa38d309e85c6c8038a17bf19126",
+    "opaque": "cc36e947531e6ca5f1f26d25a2dcb0a729a54c0057bb52bf8efb63a5a141241d",
+    "unshrinkable": "af10afdc4997fcbbf8d961971f175103a07c7086c88329f3152f19fe8db835cb",
+    "filtered-trigger": "ec6e021d86df210f8e8fc05fecf09ba6c80a3d3c438dcebba6ba1f436af7e729",
+    "unicode": "a7952cc5c1a4c1e2c1389b94515d6b088458f87f66e696a193bd1bb41ada2800",
+    "mixed": "1d3de8addcbfd8255fa3062c54b7d967ce84b1cc9f2b11c37592373e79598180",
+    "replay": "ad1065fd0c26db220a818cf2ad6b4833c4ebc88c4cda593588c249b3ea1d2e1e",
+    "required-overflow": "55b34f1e32d97dd9a47749af3b52f4bb1e49ed51bce998ce0c25bd49e80dd795"
+  }
+}
