@@ -46,6 +46,7 @@ import { asArray, authorized, json, openCodeUpstreamHeaders, upstreamHeaders, wr
 import { isChatCompletionsRoute, isCompactRoute, isModelsRoute, isResponsesRoute } from "./route-dispatch.mjs";
 import { resolveTargetModel as resolveModelRoute } from "./model-routing.mjs";
 import { contextLogFields, recordContextTrace as applyContextTrace } from "./context-trace.mjs";
+import { isAuthorizedLoopbackRequest, localRequestToken } from "./internal-auth.mjs";
 
 export const metricsState = {
   startedAt: Date.now(),
@@ -751,9 +752,7 @@ export function createMomoSwitch(settings, options = {}) {
 
       // 2. internal shutdown
       if (request.method === "POST" && pathname === "/internal/shutdown") {
-        const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
-        const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
-        if (!isLocal || (settings.localToken && headerToken !== settings.localToken)) {
+        if (!isAuthorizedLoopbackRequest(request, remoteIp, settings.localToken)) {
           return json(response, 403, { error: "Forbidden: shutdown is restricted to authenticated loopback clients." });
         }
 
@@ -847,9 +846,7 @@ export function createMomoSwitch(settings, options = {}) {
 
       // 3. internal metrics
       if (request.method === "GET" && pathname === "/internal/metrics") {
-        const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
-        const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
-        if (!isLocal || (settings.localToken && headerToken !== settings.localToken)) {
+        if (!isAuthorizedLoopbackRequest(request, remoteIp, settings.localToken)) {
           return json(response, 403, { error: "Forbidden: metrics are restricted to authenticated loopback clients." });
         }
 
@@ -913,9 +910,7 @@ export function createMomoSwitch(settings, options = {}) {
 
       // Image plugin endpoints are loopback-only and require the proxy local token.
       if (pathname.startsWith("/internal/images")) {
-        const isLocal = remoteIp === "127.0.0.1" || remoteIp === "::1" || remoteIp === "::ffff:127.0.0.1";
-        const headerToken = request.headers["x-local-token"] || request.headers.authorization?.replace(/^Bearer\s+/i, "");
-        if (!isLocal || headerToken !== settings.localToken) {
+        if (!isAuthorizedLoopbackRequest(request, remoteIp, settings.localToken)) {
           return json(response, 403, { error: { message: "Forbidden: image endpoints require an authenticated loopback client.", type: "authentication_error" } });
         }
         if (request.method === "GET" && pathname === "/internal/images/capabilities") {
