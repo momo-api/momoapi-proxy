@@ -44,7 +44,9 @@
 | P4a | P1 | 固定分组、分段计时、无样本语义、doctor 透传 | P0 | 健康查询不污染业务；有界；取消/失败计数正确；工具流回归 | 已合并（未发布） |
 | P4b | P1 | 日志有界异步队列、轮转、尾读、退出刷新 | P4a | 过载丢弃计数、磁盘失败/关停测试；不输出敏感内容 | 进行中（P4b1/P4b2） |
 | P4b1 | P1 | 普通/诊断日志及启动失败摘要的有界尾读 | P4a | 字节/行上限、Unicode、短读/截断、CLI 提示、旧结果等价 | 已合并（未发布） |
-| P4b2 | P1 | 异步写队列、轮转、丢弃计数、退出刷新 | P4b1 | 多 writer/磁盘失败/限时刷新；不影响模型工具流 | 待开始 |
+| P4b2 | P1 | 异步写队列、轮转、丢弃计数、退出刷新 | P4b1 | 多 writer/磁盘失败/限时刷新；不影响模型工具流 | 进行中（核心与接入分开） |
+| P4b2a | P1 | 独立有界队列与受锁保护的轮转文件 sink | P4b1 | 队列/等待者有界；故障不重放；跨进程/轮转/退出期限测试 | 本地验证通过，待最终 CI |
+| P4b2b | P1 | 日志格式边界、专用新路径、daemon/CLI 接入与退出刷新 | P4b2a | 旧日志不迁移/删除；指标区分接收/写入；进程退出与工具 wire 回归 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
 
@@ -182,7 +184,7 @@
 1. P3a 已通过本地/CI 并合并 PR #44；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
 2. P3b 已通过本地/CI 并合并 PR #46。上游 compact 增量计量并最后精确序列化；本地 checkpoint 已有逐项预算，保留算法不改，新增完整结果 golden 验证。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
-4. P4a 已合并 PR #48；P4b1 尾读通过最终 CI 并合并 PR #50；下一步 P4b2 异步日志与退出刷新、P5 生命周期/适配器拆分、P6 发布。当前没有挂起的发布或自动更新任务。
+4. P4a 已合并 PR #48；P4b1 尾读已合并 PR #50；P4b2a 写入核心本地通过，待最终 CI；之后 P4b2b 日志/退出刷新接入、P5 拆分、P6 发布。当前没有挂起的发布或自动更新任务。
 
 ## P3a 增量流状态（2026-09-12）
 
@@ -311,3 +313,33 @@ node scripts/benchmark-log-tail.mjs --baseline-root=<ef5f159 clean tree>，Windo
 验收：实现 7822e60 的 Node/container/windows-tray/secret-scan 全绿（[最终 CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34690384218)），已合并 [PR #50](https://github.com/momo-api/momoapi-proxy/pull/50)，main 978aa96。Windows 303 passed + 1 POSIX skip，Alpine 构建/运行各 304/304，tray 11 断言；完整历史 139 commits、工作树和暂存区 Secret scan 无泄漏。
 
 P4b1 已合并、未发布/未安装；P4b2 同步 append/诊断压缩、异步队列/轮转/多 writer/退出限时刷新仍未完成。现有日志文件未删除/移动/改写，未更换运行实例。下一批需先确定 daemon/CLI 共用日志目标的 writer 所有权、限额和失败语义，再接入写队列与退出刷新。
+
+## P4b2a 异步日志写入核心（2026-09-12）
+
+基线干净 main b402ea5（PR #51），分支 perf/bounded-log-writer。先完成独立核心，后续再接 logger/diagnostics/daemon。当前运行代码没有导入这两个新模块；日志写入路径、同步 append、诊断压缩、stdout 重复记录及 CLI/HTTP 退出行为均未改变，不把核心测试通过当作接入完成。
+
+核实源码发现：请求同时写 proxy.log 和 stdout，后台启动又把 stdout/stderr 指向 daemon.log；daemon、更新 CLI 均可能写日志。后续必须解决共享目标所有权和重复落盘；本批不替换或轮转任何已有日志。
+
+### 队列契约
+
+- 每个 writer 默认最多 1MiB / 1,024 条待处理记录，包含 in-flight；每条最多 64KiB，每批 128KiB / 64 条。UTF-8 字节含 LF，分配 Buffer 前准入；超限、换行注入、非字符串、空串及非法代理项整条拒绝，不截断、不替换字符。调用方仍负责格式化/脱敏；本模块不提供通用密钥检测。
+- enqueue 同步只做有界检查/内存入队；下一事件循环启动异步单一 pump。队列满丢新记录、独立计数；接受的条目保持顺序。sink 拒绝后不重放批次，即使可能部分写入；后续批次继续独立尝试。
+- accepted / written / writeFailed / uncertain / shutdownDropped / pendingRecords 分开；uncertain 是 writeFailed 的子集。恒等式 accepted = written + writeFailed + shutdownDropped + pendingRecords；没有把 enqueue=true 当落盘成功。
+- flush 是调用时已接受前缀的结算屏障；completed 表示已结算，不表示全写成功，必须同时看 writeFailed。最多 32 个公共等待者 + 1 个保留 close 等待者。默认 1 秒，可显式 1..60,000ms；超时不伪造成功，公共 flush 超时不丢队列。
+- close 幂等、停止新入队、限时等待。超时丢尚未开始的队列并 abort 协作式 sink；已提交 OS 的 I/O 无法被 JS 强制取消，继续计为 pending 至结算。期限仅约束等待，不是 OS 磁盘时限、进程终止时限或断电耐久性。
+
+### 文件 sink 契约
+
+- 仅允许调用方拥有且已授权轮转的专用绝对路径；当前文件默认 8MiB，另保留一份同上限 .1。批次上限默认 128KiB；只合并预算内整条 LF 记录。只用异步 fs，短写按已写字节推进，不重发前缀。
+- 所有合作进程使用同路径 .lock 的排他创建；默认最多 8 次、间隔 5ms，只重试尚未开始写入的锁竞争，不重放 append。未获得锁不删除它；不探测 PID/抢 stale lock，不自动恢复崩溃现场。锁遗留会导致日志丢弃/错误直到明确处理，是后续接入需要可见报告的风险。
+- 私有目录/新文件权限分别 0700/0600（Windows 仍由 ACL 决定）。拒绝非普通文件、符号链接、硬链接、超限现有文件和末尾非 LF 的可检测半条记录。不会自动修补/截断未知旧文件；检查不构成对恶意目录所有者的安全边界。
+- 轮转在锁内进行同目录 rename 替换 .1，不先删除 archive。rename 失败保留原两文件；rename 后创建新文件失败则上一代仍在 .1。该保留策略会覆盖已有 .1，因此运行接入必须使用新的专用路径，不能直接用于未分类历史日志。
+- 可能部分写入或关闭/解锁失败时返回 safe code + mayHaveWritten；不输出原始路径/异常/正文。部分写入后的非 LF 尾部阻止下一次 append，保留现场。完成 append/close 不代表 fsync。
+
+### 验收与下一步
+
+- 28 项新增测试：10 队列/18 文件及集成；覆盖 Unicode、上下限、10,000 次过载、in-flight 计费、前缀屏障、等待者上限、超时/迟到 I/O、失败不重放、短写/零写/部分失败、打开/关闭/解锁失败、轮转失败、现有文件保护、stale lock/取消、四个真实子进程并发、跨进程轮转、两代大小和记录顺序。
+- Windows 全量 332 项：330 passed、2 POSIX 专用项 skip、0 failed；Node 24 Alpine 构建与运行各 332/332；Windows tray 11 断言。仅临时合成文件；未读真实日志/会话/账户/密钥，未发送模型请求，未更换运行实例。
+- 没有性能提速结论：这批核心尚未接入，请求同步写入的实际成本没有变化。队列逻辑字节不等于 RSS 硬上限；组合 sink 另有最多一批合并 Buffer。
+
+当前核心本地验收通过，待提交/Secret scan/PR 最终 CI；P4b2b 接入、P5、P6 未完成。下一步先确定新专用日志路径与旧日志只读 fallback、严格格式/脱敏边界和可见失败指标，再接入 daemon/CLI 并验证 HTTP shutdown、SIGINT/SIGTERM、启动失败及限时退出；不直接轮转历史 proxy.log/daemon.log/diagnostic-events.jsonl。

@@ -166,6 +166,12 @@ unchanged pending the separate async log-writer phase. Existing local logs are
 neither migrated nor removed. Run node scripts/benchmark-log-tail.mjs
 --baseline-root=<clean baseline tree> for the synthetic old/new read benchmark.
 
+Developer note: src/log-writer.mjs and src/log-file-sink.mjs provide a tested,
+not-yet-integrated async logging core. No command or server imports them yet.
+See docs/REFACTOR-PLAN-2026-09.md (P4b2a/P4b2b) for ownership, failure semantics,
+limits and remaining lifecycle integration. Their presence does not mean current
+request writes, stdout mirroring or daemon shutdown have been optimized.
+
 ### Local request metrics
 
 Authenticated loopback GET /internal/metrics exposes requestMetrics schemaVersion 1:
