@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.13.12 - 2026-09-12
+
+- Preserve bounded checkpoint task/constraint text, latest execution evidence, pending calls and cross-boundary call/result associations. Refuse required state that cannot fit with explicit `checkpoint_state_budget_exceeded` (413), instead of silently discarding it.
+- Decode local checkpoints before tool lowering; fix custom tool selectors and namespace restoration in final SSE blocks.
+- Add native Responses structural tool audits with hashed identities and no chat bodies, tool arguments/results or credentials. Synthetic regression coverage compares checkpoint on/off and full tool-result follow-up.
+- This restores future checkpoint continuity, not state already lost in earlier checkpoints. Very large required histories need a new task with an explicit handoff.
+
 ## 0.13.11 - 2026-09-12
 
 - Repair Gemini function-call history before forwarding: pair tool results by call ID, correct mismatched result names such as `apply_patch` returned as `exec`, and safely omit orphaned function history that Gemini rejects.
