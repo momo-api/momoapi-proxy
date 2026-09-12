@@ -35,7 +35,8 @@
 | P1 | P0 | UTF-8/SSE 共用分帧；换行、多行 data、EOF；流写入背压 | P0 | 参数完全一致；首帧早于 EOF；慢写暂停读取；取消不回退 | 已合并 |
 | P2 | P1 | 大请求并发/总资源预算、队列与超时、body 副本、输出累计预算 | P1 | 1/2/4 并发 × 10/25/50MiB；记录 RSS/heap/external/GC/event-loop；超限明确拒绝，无 OOM | 进行中 |
 | P2a | P1 | 入站准入：并发/正文总预算、FIFO、超时/取消/关停、读取模块 | P1 | 等待不读正文；释放无泄漏；本地矩阵；错误不触达上游 | 已合并 |
-| P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 本地验证通过 |
+| P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 已合并 |
+| T1 | P0 | 修复 JS host-helper 被 customInput 当作 shell 的分类缺陷 | P2b 发现 | 13 样例 × 3 adapter 原样；call_id 不变；shell 反向回归 | 本地验证通过 |
 | P3 | P1 | compact/checkpoint 增量预算，末尾精确序列化；保留语义不变 | P0 | 状态等价；全请求序列化次数不随删除项线性增长 | 待开始 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
@@ -79,6 +80,8 @@
 | 2026-09-12 | P2a CI | 695f16d 的 Node/container/windows-tray/secret-scan 全绿 | [实现提交检查](https://github.com/momo-api/momoapi-proxy/actions/runs/34678248551)；后续提交需重新验收 |
 | 2026-09-12 | P2a 合并 | b7c2528 最终 Node/container/windows-tray/secret-scan 全绿后合并 | main 6e2150a；[PR #40](https://github.com/momo-api/momoapi-proxy/pull/40)；未发布 |
 | 2026-09-12 | P2b 本地 | 26 项新增测试；Windows/Alpine 构建/Alpine 运行各 240/240；tray 11 断言；18 个输出压力样本、4 并发溢出/3,000 次缓存 churn | feat/bounded-output-state；待 PR/CI；未发布 |
+| 2026-09-12 | P2b 合并 | d02e9b6 的 Node/container/windows-tray/secret-scan 全绿后合并 | main 0333c36；[PR #41](https://github.com/momo-api/momoapi-proxy/pull/41)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34680715697)；未发布 |
+| 2026-09-12 | T1 本地 | 1 项旧版红测；13 JS 样例 × 3 adapters 原样，6 shell 前缀反向样例；Windows/Alpine 构建/运行各 242/242；secret scan 通过 | fix/custom-exec-js-preservation；待 PR/CI；未发布 |
 
 ## 首批性能记录与取舍
 
@@ -161,5 +164,5 @@
 
 - 重复 fullAccumulatedText.includes、custom partial input 重新解码、pending 匹配扫描仍可能呈二次 CPU 开销。默认 16MiB 只是边界，不是这些算法已优化；应优先纳入 P3 的增量扫描工作。
 - 接受的终态输出序列化仍可能复制多份内存，P5 生命周期拆分时继续核查背压与峰值；不能把 per-accumulator bytes 相加当作准确 RSS。
-- 独立遗留缺陷：Chat/Gemini/Claude 的 customInput 对裸 text(...) 未识别为 JS，会自动包成 shell。正常闭环回归采用现有已认可的 const ...; text(...)，不以预算 PR 顺手改变既有输入改写语义。需聚焦工具输入完整性修复 PR（与原生 Responses custom 恢复分开验证）。
+- 独立遗留缺陷（T1 跟踪）：Chat/Gemini/Claude 的 customInput 对裸 text(...) 未识别为 JS，会自动包成 shell。P2b 闭环回归采用既有已认可的 const ...; text(...)，未在预算 PR 改变输入改写语义。后续聚焦修复扩展已知 JS helper 调用分类，并对非 JS shell 前缀保留旧行为；不是完整 JS parser，也不执行收到的代码。
 - GET、图像结果、模型/SSE idle/总时限不在本批；发布与本机替换仍属于 P6。

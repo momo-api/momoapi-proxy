@@ -280,7 +280,10 @@ function customInput(value) {
   if (normalizedExec) return normalizedExec;
 
   // Auto-wrap bare shell commands / scripts into valid Codex V8 isolate JavaScript
-  const isJs = raw.startsWith("await ") || raw.startsWith("tools.") || raw.startsWith("const ") || raw.startsWith("let ") || raw.startsWith("var ") || raw.startsWith("function ") || raw.startsWith("return ") || raw.startsWith("/*") || raw.startsWith("//") || raw.startsWith("try {");
+  // Unified exec exposes these JavaScript helpers directly, not as shell commands.
+  // Match a complete helper call (including whitespace/comments), not a prefix.
+  const hostHelperCall = /^(?:text|image|audio|generatedImage|store|load|notify|exit|setTimeout|clearTimeout|yield_control)(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*\(/.test(raw);
+  const isJs = hostHelperCall || raw.startsWith("await ") || raw.startsWith("tools.") || raw.startsWith("const ") || raw.startsWith("let ") || raw.startsWith("var ") || raw.startsWith("function ") || raw.startsWith("return ") || raw.startsWith("/*") || raw.startsWith("//") || raw.startsWith("try {");
   if (!isJs) {
     return `await tools.exec_command({ cmd: ${JSON.stringify(raw)} });`;
   }
