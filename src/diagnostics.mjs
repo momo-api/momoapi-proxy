@@ -4,6 +4,7 @@ import { arch, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { appHome } from "./config.mjs";
 import { getCurrentVersion } from "./updater.mjs";
+import { readLogTail } from "./log-tail.mjs";
 
 const MAX_EVENT_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_EVENT_LINES = 1_000;
@@ -28,12 +29,11 @@ export function diagnosticPath(env = process.env) {
 }
 
 export function readRecentDiagnostics(lines = 100, env = process.env) {
-  const count = Math.max(1, Math.min(1_000, Number(lines) || 100));
-  try {
-    return readFileSync(diagnosticPath(env), "utf8").split(/\r?\n/).filter(Boolean).slice(-count);
-  } catch {
-    return [];
-  }
+  return readRecentDiagnosticReport(lines, env).lines;
+}
+
+export function readRecentDiagnosticReport(lines = 100, env = process.env) {
+  return readLogTail(diagnosticPath(env), lines);
 }
 
 function safeText(value, maxLength = 160) {
