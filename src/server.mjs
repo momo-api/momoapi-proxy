@@ -6,7 +6,7 @@ import { DsmlMarkerDetector } from "./incremental-stream-state.mjs";
 import { BoundedCallCache, RetainedOutputBudget, budgetedOutputBody, resolveOutputPolicy, readBoundedOutputText } from "./output-budget.mjs";
 import { bodyOf, requestReservationBytes } from "./request-body.mjs";
 export { bodyOf, getMaxRequestBodyBytes } from "./request-body.mjs";
-import { streamSseBlocks, sseDataPayload, replaceSseDataPayload, waitForResponseDrain, writeResponseChunk, forwardResponseBody } from "./stream-transport.mjs";
+import { streamSseBlocks, sseDataPayload, replaceSseDataPayload, writeResponseChunk, forwardResponseBody } from "./stream-transport.mjs";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
 import {
@@ -16,7 +16,7 @@ import {
   restoreAllRoutedCallsInJson,
   createRoutedCustomToolRestoreBlockRewrite,
 } from "./responses-compat.mjs";
-import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, responseCreated, sseError } from "./responses-sse.mjs";
+import { ResponseStreamEmitter, customToolEvents, functionEvents } from "./responses-sse.mjs";
 import { logRequest as writeRequestLog } from "./logger.mjs";
 import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock, summarizeToolEvents } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
@@ -39,6 +39,7 @@ import { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-ada
 export { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-adapter.mjs";
 import { customInput, emitRememberedCall } from "./tool-call-state.mjs";
 import { resolveOpenCodeSession } from "./opencode-session.mjs";
+import { initSseResponse, streamSseLines, upstreamErrorMessage, writeResponsesFailure } from "./responses-transport.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -226,28 +227,6 @@ function writeSse(response, chunks) {
   response.end();
 }
 
-async function* streamSseLines(body, response, signal, settings) {
-  for await (const block of streamSseBlocks(budgetedOutputBody(body, settings), resolveOutputPolicy(settings))) {
-    const data = sseDataPayload(block)?.trim();
-    if (!data || data === "[DONE]") continue;
-    let parsed;
-    try { parsed = JSON.parse(data); } catch { continue; }
-    yield parsed;
-    // Bridge emitters can write several events for one input frame. Drain that
-    // batch before reading another frame; terminal in-memory batches are separate.
-    await waitForResponseDrain(response, signal);
-  }
-}
-
-function initSseResponse(response, status = 200) {
-  response.writeHead(status, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-cache",
-    "connection": "keep-alive",
-    "x-accel-buffering": "no"
-  });
-}
-
 function recordContextTrace(response, trace, admitted = true) {
   if (!trace) return;
   response.momoContextTrace = trace;
@@ -274,30 +253,6 @@ function contextLogFields(response, request) {
     imageBytes: trace?.imageBytes,
     policyAction: trace?.policyActions?.join(",") || (trace?.hardLimitRejected ? "hard_limit_rejected" : undefined),
   };
-}
-
-async function upstreamErrorMessage(upstream) {
-  const errText = await readBoundedOutputText(upstream);
-  let message;
-  try {
-    const parsed = JSON.parse(errText);
-    message = parsed.error?.message || parsed.message || errText;
-  } catch {
-    message = errText || `Upstream HTTP ${upstream.status}`;
-  }
-  return String(message)
-    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer [redacted]")
-    .replace(/data:[^;,\s]+(?:;[^,\s]*)?;base64,[A-Za-z0-9+/=\r\n]+/gi, "[inline data redacted]")
-    .slice(0, 4000);
-}
-
-function writeResponsesFailure(response, model, status, message, code = `http_${status}`) {
-  if (!response.headersSent) initSseResponse(response, status);
-  const respId = response.momoResponseId || "resp_err_" + randomUUID();
-  if (!response.momoResponseId) response.write(responseCreated(model, respId).data);
-  response.write(failed(respId, model, message, code));
-  response.write(sseError(message, code));
-  response.end();
 }
 
 function compactJson(response, status, body, headers = {}) {
