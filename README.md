@@ -172,6 +172,8 @@ or `POST /v1/responses/compact`. Compaction defaults to a local recoverable chec
 
 `previous_response_id` continuation is conservative: for native Responses routes, the proxy drops a repeated transcript only after an exact complete-prefix match crosses a recorded provider-output boundary containing a provider-issued item id. Partial or ambiguous matches, model changes, `store:false`, and non-Responses routes fail open and remain untouched. Continuation fingerprints are SHA-256 hashes, bounded, and memory-only.
 
+Local checkpoints preserve task text, system/developer constraints, pending tool calls, cross-turn call/result links, and the latest execution evidence. Optional recent tool groups are retained atomically. They are lossy history indexes, not semantic summaries or proof that omitted work finished. If required state exceeds the bounded checkpoint budget, the proxy returns `checkpoint_state_budget_exceeded` (413); start a new task with an explicit handoff rather than retrying the same oversized history. Native Responses request logs include bounded tool structure and hashed identities, never tool arguments/results or chat text. See [checkpoint investigation and limitations](docs/checkpoint-tool-continuity.md).
+
 ## Test evidence
 
 `npm run test:container` verifies the local admission token, Responses passthrough, Gemini `functionCall` to Responses SSE conversion, and setup/rollback in a clean Node 24 container.

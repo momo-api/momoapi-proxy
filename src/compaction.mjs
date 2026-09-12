@@ -5,7 +5,6 @@ const MIB = 1024 * 1024;
 const INLINE_DATA_URL = /^data:([^;,]+)(?:;[^,]*)?;base64,[A-Za-z0-9+/=\r\n]+$/i;
 const LARGE_INLINE_TEXT = 64 * 1024;
 const MAX_COMPACT_LIMIT_BYTES = 64 * MIB;
-const DEFAULT_RETAINED_USER_CHARS = 20_000 * 4;
 const LOCAL_COMPACTION_PREFIX = "momo1:";
 const MAX_LOCAL_COMPACTION_ENVELOPE_CHARS = 2 * MIB;
 const MAX_LOCAL_COMPACTION_JSON_BYTES = 1024 * 1024;
@@ -201,6 +200,7 @@ export function prepareContextManagedPayload(payload) {
 function itemText(item) {
   if (typeof item === "string") return item;
   if (!item || typeof item !== "object") return "";
+  if (item.type === "input_text" && typeof item.text === "string") return item.text;
   if (typeof item.content === "string") return item.content;
   if (!Array.isArray(item.content)) return "";
   return item.content.map((part) => typeof part === "string" ? part : (typeof part?.text === "string" ? part.text : "")).join("");
@@ -209,10 +209,6 @@ function itemText(item) {
 export function extractCompactUserMessages(input) {
   if (!Array.isArray(input)) return [];
   return input.filter(isUserItem).map(itemText).filter((text) => text.trim().length > 0);
-}
-
-function compactMessage(text) {
-  return { id: `msg_${randomUUID()}`, type: "message", role: "user", status: "completed", content: [{ type: "input_text", text }] };
 }
 
 function fixedCheckpoint(input) {
@@ -228,26 +224,74 @@ function fixedCheckpoint(input) {
     `- Prior assistant/tool-call items: ${completed}`,
     `- Prior tool-output items: ${toolOutputs}`,
     "- Historical binary attachments and oversized tool outputs were intentionally omitted.",
-    "- Resume from the latest user request below; ask for missing facts instead of inventing them.",
+    "- This lossy history index is not a new task or evidence that a tool executed.",
+    "- Follow the latest real user task and retained constraints. Retained tool results are execution evidence.",
+    "- Older omitted state is unknown; do not claim it completed.",
     "",
     "## Latest user request",
     latest,
   ].join("\n");
 }
 
-export function buildLocalCompactResponse(_model, input) {
-  const users = extractCompactUserMessages(input);
-  const selected = [];
-  let remaining = DEFAULT_RETAINED_USER_CHARS;
-  for (let index = users.length - 1; index >= 0 && remaining > 0; index--) {
-    const text = users[index];
-    if (text.length <= remaining) { selected.push(text); remaining -= text.length; }
-    else { selected.push(text.slice(text.length - remaining)); break; }
+export function buildLocalCompactResponse(_model, input, { requiredCallIds = new Set() } = {}) {
+  const items = Array.isArray(input) ? input : [];
+  const selected = new Map();
+  const groups = new Map();
+  const isCall = (item) => item?.type === "function_call" || item?.type === "custom_tool_call";
+  const isResult = (item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output";
+  let bytes = 0;
+  const add = (entries, required) => {
+    const fresh = entries.filter(([index]) => !selected.has(index));
+    const size = fresh.reduce((sum, [, item]) => sum + serializedBodyBytes(item), 0);
+    if (bytes + size > (required ? 900_000 : 400_000)) {
+      if (!required) return;
+      const error = new Error("Checkpoint cannot safely retain required task and tool state within its budget. Supply an explicit handoff in a new task.");
+      error.statusCode = 413;
+      error.code = "checkpoint_state_budget_exceeded";
+      throw error;
+    }
+    for (const [index, item] of fresh) selected.set(index, item);
+    bytes += size;
+  };
+  // Keep instruction roles and task text intact; never silently tail-slice them.
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item?.type === "additional_tools") add([[index, item]], true);
+    if (isUserItem(item) || item?.role === "developer" || item?.role === "system") {
+      const text = item?.type === "input_text" ? item.text : itemText(item);
+      if (text) add([[index, { type: "message", role: item?.role || "user", content: [{ type: "input_text", text }] }]], true);
+    }
+    if ((isCall(item) || isResult(item)) && typeof item.call_id === "string") {
+      const group = groups.get(item.call_id) || [];
+      group.push([index, item]);
+      groups.set(item.call_id, group);
+    }
   }
-  selected.reverse();
+  const orderedGroups = [...groups.entries()].sort((a, b) => b[1].at(-1)[0] - a[1].at(-1)[0]);
+  let latestEvidence = false;
+  const mandatory = new Set();
+  for (const [id, entries] of orderedGroups) {
+    const hasCall = entries.some(([, item]) => isCall(item));
+    const hasResult = entries.some(([, item]) => isResult(item));
+    if (hasCall && (!hasResult || requiredCallIds.has(id) || !latestEvidence)) {
+      add(entries, true);
+      mandatory.add(id);
+      if (hasResult) latestEvidence = true;
+    }
+  }
+  // Keep complete recent groups atomically, with exact names, arguments and IDs.
+  for (const [id, entries] of orderedGroups) {
+    if (!mandatory.has(id) && entries.some(([, item]) => isCall(item))) add(entries, false);
+  }
+  let retainedAssistant = 0;
+  for (let index = items.length - 1; index >= 0 && retainedAssistant < 8; index--) {
+    if (items[index]?.role !== "assistant") continue;
+    add([[index, compactValue(items[index], { aggressive: true })]], false);
+    retainedAssistant++;
+  }
   const output = [
-    ...selected.map(compactMessage),
-    compactMessage(`${SUMMARY_PREFIX}\n${fixedCheckpoint(input)}`),
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: fixedCheckpoint(items) }] },
+    ...[...selected].sort((a, b) => a[0] - b[0]).map(([, item]) => item),
   ];
   return {
     id: `resp_compact_${randomUUID()}`,
@@ -281,7 +325,10 @@ export function prepareOversizedHistoryReplay(payload, settings = {}) {
 
   const history = input.slice(0, boundary);
   const currentTurn = input.slice(boundary);
-  body.input = [...buildLocalCompactResponse(body.model, history).output, ...currentTurn];
+  const requiredCallIds = new Set(currentTurn
+    .filter((item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output")
+    .map((item) => item.call_id));
+  body.input = [...buildLocalCompactResponse(body.model, history, { requiredCallIds }).output, ...currentTurn];
   return { payload: body, rewritten: true, originalBytes, outboundBytes: serializedBodyBytes(body), limitBytes };
 }
 

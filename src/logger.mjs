@@ -44,7 +44,7 @@ export function logError(title, error, env = process.env) {
   }, { env });
 }
 
-export function logRequest({ method, url, model, status, elapsedMs, error, errorCode, ip, toolsCount, toolCalls, requestBytes, outboundBytes, imageCount, imageBytes, policyAction, inputTokens, outputTokens, totalTokens }, env = process.env) {
+export function logRequest({ method, url, model, status, elapsedMs, error, errorCode, ip, toolsCount, toolCalls, requestBytes, outboundBytes, imageCount, imageBytes, policyAction, inputTokens, outputTokens, totalTokens, toolAudit }, env = process.env) {
   const timestamp = new Date().toISOString();
   const modelTag = model ? ` [${safeLogValue(model)}]` : "";
   const statusTag = status != null ? ` -> HTTP ${status}` : "";
@@ -62,7 +62,7 @@ export function logRequest({ method, url, model, status, elapsedMs, error, error
     : "";
   const policyTag = policyAction ? ` [policy:${String(policyAction).slice(0, 160)}]` : "";
   const line = `[${timestamp}]${ipTag} ${method} ${url}${modelTag}${toolsTag}${callsTag}${requestBytesTag}${outboundBytesTag}${mediaTag}${policyTag}${statusTag}${timeTag}${errorTag}`;
-  writeLog(line, env);
+  writeLog(line + (toolAudit ? ` [tool-audit:${JSON.stringify(toolAudit)}]` : ""), env);
   const businessRoute = /^(?:(?:\/v1)?\/(?:responses|chat\/completions|images(?:\/|$)|messages|models(?:\/|$))|\/internal\/images(?:\/|$))/i.test(String(url || ""));
   if (businessRoute && Number(status) >= 400) {
     recordDiagnosticEvent({
