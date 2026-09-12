@@ -7,7 +7,7 @@ import { BoundedCallCache, RetainedOutputBudget, budgetedOutputBody, resolveOutp
 import { bodyOf, requestReservationBytes } from "./request-body.mjs";
 export { bodyOf, getMaxRequestBodyBytes } from "./request-body.mjs";
 import { streamSseBlocks, sseDataPayload, replaceSseDataPayload, waitForResponseDrain, writeResponseChunk, forwardResponseBody } from "./stream-transport.mjs";
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
 import {
   rewriteRoutedNamespaceToolsForUpstream,
@@ -38,6 +38,7 @@ export { buildClaudeMessages } from "./claude-adapter.mjs";
 import { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-adapter.mjs";
 export { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-adapter.mjs";
 import { customInput, emitRememberedCall } from "./tool-call-state.mjs";
+import { resolveOpenCodeSession } from "./opencode-session.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -126,60 +127,6 @@ function authorized(request, settings) {
 
 function upstreamHeaders(settings, contentType = "application/json") {
   return { authorization: "Bearer " + settings.apiKey, "content-type": contentType };
-}
-
-function safeSessionValue(value) {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.length > 4096 || /[\u0000-\u001f\u007f]/.test(trimmed)) return null;
-  return trimmed;
-}
-
-function deriveOpenCodeSessionId(seed) {
-  const digest = createHash("sha256")
-    .update("momoapi-proxy/opencode-go/session/v1\0")
-    .update(seed)
-    .digest("hex")
-    .slice(0, 32);
-  return `ocx_${digest}`;
-}
-
-function cachedOpenCodeSession(payload, calls) {
-  for (const item of asArray(payload?.input)) {
-    if (!item || typeof item !== "object" || !item.call_id) continue;
-    const cached = safeSessionValue(calls?.get(item.call_id)?.openCodeSessionId);
-    if (cached) return cached;
-  }
-  return null;
-}
-
-function firstConversationSeed(payload) {
-  for (const item of asArray(payload?.input)) {
-    if (typeof item === "string" && item.trim()) return `${payload?.model || ""}\0${item}`;
-    if (!item || typeof item !== "object") continue;
-    if (item.role === "user" || item.type === "message" || item.type === "input_text") {
-      return `${payload?.model || ""}\0${JSON.stringify(item)}`;
-    }
-  }
-  return null;
-}
-
-function resolveOpenCodeSession(request, payload, calls) {
-  const explicit = safeSessionValue(request?.headers?.["x-opencode-session"]);
-  if (explicit) return explicit;
-
-  const cached = cachedOpenCodeSession(payload, calls);
-  if (cached) return cached;
-
-  const parent = safeSessionValue(request?.headers?.["x-codex-parent-thread-id"]);
-  const thread = safeSessionValue(request?.headers?.["thread-id"]);
-  const session = safeSessionValue(request?.headers?.session_id || request?.headers?.["session-id"]);
-  const specific = thread || session;
-  const lane = parent && specific ? `${parent}\0${specific}` : (specific || parent);
-  if (lane) return deriveOpenCodeSessionId(lane);
-
-  const seed = firstConversationSeed(payload);
-  return deriveOpenCodeSessionId(seed || randomUUID());
 }
 
 function openCodeUpstreamHeaders(settings, request, payload, calls) {
