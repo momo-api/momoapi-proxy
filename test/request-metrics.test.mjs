@@ -255,6 +255,26 @@ test("HTTP 200 with a failed SSE terminal is explicitly transport success, not m
   });
 });
 
+test("native Responses writeHead content type records active SSE before EOF", async () => {
+  let release;
+  const hold = new Promise((resolve) => { release = resolve; });
+  await withServer(async () => new Response(new ReadableStream({ async start(controller) {
+    controller.enqueue(new TextEncoder().encode('data: {"type":"response.created","response":{"id":"resp_synthetic"}}\n\n'));
+    await hold;
+    controller.enqueue(new TextEncoder().encode('data: {"type":"response.completed","response":{"id":"resp_synthetic","output":[]}}\n\n'));
+    controller.close();
+  } }), { headers: { "content-type": "text/event-stream" } }), async (base) => {
+    const response = await fetch(base + "/responses", { method: "POST", headers, body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input: [] }) });
+    const reader = response.body.getReader();
+    try {
+      assert.equal((await reader.read()).done, false);
+      assert.equal((await metrics(base)).requests.activeSse, 1);
+    } finally { release(); }
+    while (!(await reader.read()).done) {}
+    assert.equal((await metrics(base)).requests.activeSse, 0);
+  });
+});
+
 test("cancelling an open SSE counts an aborted HTTP transport and releases active SSE once", async () => {
   let aborted;
   const upstreamAborted = new Promise((resolve) => { aborted = resolve; });

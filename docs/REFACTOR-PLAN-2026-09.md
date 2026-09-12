@@ -41,7 +41,7 @@
 | P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 已合并 |
 | P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 已合并 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 进行中（P4a/P4b） |
-| P4a | P1 | 固定分组、分段计时、无样本语义、doctor 透传 | P0 | 健康查询不污染业务；有界；取消/失败计数正确；工具流回归 | 本地验证通过，待 PR/CI |
+| P4a | P1 | 固定分组、分段计时、无样本语义、doctor 透传 | P0 | 健康查询不污染业务；有界；取消/失败计数正确；工具流回归 | PR #48 待最终验收 |
 | P4b | P1 | 日志有界异步队列、轮转、尾读、退出刷新 | P4a | 过载丢弃计数、磁盘失败/关停测试；不输出敏感内容 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
@@ -263,8 +263,8 @@ P3b 已合并，未发布/未安装；后续 P4a 见下文，P4b/P5/P6 仍未完
 - 顶层 requests/ttfbMs 改为 business 别名，这是有意的指标兼容性变更；legacyAllHttpRequests 保留原全 HTTP 模块级计数。新 requestMetrics 有独立 startedAt/uptimeSeconds；旧 context/draining/resetTime 仍为模块级，未在本批重构。
 - HTTP success 不等于模型/SSE 成功；200 + response.failed 仍归类 HTTP success。aborted 包含在 failed 中。first write 不是客户端收到首字节，也不是模型首 token；多个阶段存在重叠和不同样本数，不可相加各自分位数。
 - fetch 包装保留返回对象身份及错误，不读取或包装响应 body、不添加重试。首次写计时后不再逐 delta 查询 content-type。raw Chat SSE 活跃计数纳入新版指标；关停/取消计数幂等。
-- 新增 16 项测试（15 指标 + 1 doctor）：缺失样本、固定分组、窗口有界/分位数、时钟、成功/取消幂等、fetch 原错误/无重复调用、多 attempt、解析拒绝、local compact 无上游、server 实例隔离、队列超时、raw SSE 原字节、204 无正文、10,000 条不同路径不增标签、doctor 无样本不改成 0；另明确验证 HTTP 200 中 response.failed 的 HTTP 语义和活跃 SSE 取消计数。
-- 最终全量 Windows/Alpine 构建/Alpine 运行各 288/288，tray 11 断言；历史 134 commits/工作树 Secret scan 无泄漏。新增 HTTP 测试用独立临时 profile 隔离合成日志；未读取或上传实际运行日志。暂存扫描及 PR/CI 仍需在提交/合并前验收。
+- 新增 17 项测试（16 指标 + 1 doctor）：缺失样本、固定分组、窗口有界/分位数、时钟、成功/取消幂等、fetch 原错误/无重复调用、多 attempt、解析拒绝、local compact 无上游、server 实例隔离、队列超时、raw SSE 原字节、204 无正文、10,000 条不同路径不增标签、doctor 无样本不改成 0；另明确验证 HTTP 200 中 response.failed 的 HTTP 语义、活跃 SSE 取消计数和 native Responses writeHead 首帧到 EOF 之间活跃计数。
+- 最终全量 Windows/Alpine 构建/Alpine 运行各 289/289，tray 11 断言；历史 134 commits/工作树/实现暂存区 Secret scan 无泄漏。新增 HTTP 测试用独立临时 profile 隔离合成日志；未读取或上传实际运行日志。
 
 ### P4a 采样开销与完整流 A/B
 
@@ -279,4 +279,4 @@ node scripts/benchmark-request-metrics.mjs；Windows x64 / Node v24.16.0 / Xeon 
 
 12 次全部正常退出且 upstream iterator released。此脚本验证字节计数/完成状态/释放，不代表逐字节哈希验证；工具内容正确性另由全量 wire/工具/Unicode 回归覆盖。OS maxRSS 含启动，结束 heap 和 sampled RSS 不是真实瞬时峰值。两场景有小幅耗时/内存增加；本批价值是可观测性，不宣称提速或生产容量提升。合成原始报告存 Git 外，未读真实会话/密钥或调用生产模型。
 
-当前 P4a 本地全量/Secret scan 通过，待 PR/CI；P4b 日志、P5 拆分、P6 发布/本机安装未完成。
+实现 e96164d 的 Node/container/windows-tray/secret-scan 全绿（[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34688110164)）；[PR #48](https://github.com/momo-api/momoapi-proxy/pull/48) 补充 native SSE 测试后等待最新 head 再次验收，不沿用旧 head 的绿灯合并。P4b 日志、P5 拆分、P6 发布/本机安装未完成。
