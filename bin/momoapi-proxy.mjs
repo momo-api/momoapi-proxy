@@ -10,13 +10,14 @@ import { rollback, setup, uninstall } from "../src/setup.mjs";
 import { readCatalog } from "../src/catalog.mjs";
 import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
-import { logPath, readRecentLogs, logInfo, logError } from "../src/logger.mjs";
+import { logPath, readRecentLogReport, logInfo, logError } from "../src/logger.mjs";
+import { readLogTail } from "../src/log-tail.mjs";
 import { checkAndRecordLatestVersion, getCurrentVersion, readUpdateStatus, startUpdateChecker, updateSelf, writeUpdateStatus } from "../src/updater.mjs";
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
 import { installWindowsDesktop } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
 import { createImageAssetStore } from "../src/image-assets.mjs";
-import { configureDiagnostics, getDiagnosticsMetrics, readRecentDiagnostics, recordDiagnosticEvent } from "../src/diagnostics.mjs";
+import { configureDiagnostics, getDiagnosticsMetrics, readRecentDiagnosticReport, recordDiagnosticEvent } from "../src/diagnostics.mjs";
 import { getImagePluginStatus, installImagePlugin } from "../src/plugin-install.mjs";
 
 process.on("uncaughtException", (err) => {
@@ -25,6 +26,15 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   logError("Unhandled Rejection", reason);
 });
+
+function reportLogTailLimit(report) {
+  if (!report.available && report.error !== "not_found") {
+    console.error("Log tail unavailable: " + report.error);
+    process.exitCode = 1;
+  } else if (report.byteLimitReached) {
+    console.error("Log tail reached the 1 MiB read limit; older data and a leading partial record were omitted. Fewer than the requested lines may be shown.");
+  }
+}
 
 function killWindowsProcessByPattern(pattern) {
   if (process.platform !== "win32") return;
@@ -99,13 +109,7 @@ async function startDaemon(binFile, scriptDir, port) {
 
   const ok = await waitForHealth(port, 4000);
   if (!ok) {
-    let recentError = "";
-    if (existsSync(logFile)) {
-      try {
-        const lines = readFileSync(logFile, "utf8").trim().split("\n").slice(-8);
-        recentError = lines.join("\n");
-      } catch {}
-    }
+    const recentError = readLogTail(logFile, 8).lines.join("\n");
     throw new Error("MOMO API Proxy daemon failed to start on port " + port + (recentError ? ":\n" + recentError : "."));
   }
   return true;
@@ -485,9 +489,11 @@ async function main() {
     if (!report.ok) process.exitCode = 1;
   } else if (command === "logs" || command === "log") {
     const count = Number(value("-n") || value("--lines") || 50);
-    const logs = readRecentLogs(count);
+    const report = readRecentLogReport(count);
+    reportLogTailLimit(report);
+    const logs = report.lines;
     if (!logs.length) {
-      console.log("No log entries yet. (Log path: " + logPath() + ")");
+      if (report.available || report.error === "not_found") console.log("No log entries in the bounded tail. (Log path: " + logPath() + ")");
     } else {
       console.log("=== Recent MOMO Codex Bridge Logs (Last " + logs.length + " entries) ===");
       console.log(logs.join("\n"));
@@ -495,9 +501,11 @@ async function main() {
     }
   } else if (command === "diagnostics" || command === "diagnostic") {
     const count = Number(value("-n") || value("--lines") || 100);
-    const events = readRecentDiagnostics(count);
+    const report = readRecentDiagnosticReport(count);
+    reportLogTailLimit(report);
+    const events = report.lines;
     if (!events.length) {
-      console.log("No diagnostic events recorded.");
+      if (report.available || report.error === "not_found") console.log("No diagnostic events in the bounded tail.");
     } else {
       console.log(events.join("\n"));
     }

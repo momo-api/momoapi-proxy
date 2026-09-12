@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { readLogTail } from "./log-tail.mjs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { recordDiagnosticEvent } from "./diagnostics.mjs";
@@ -85,13 +86,9 @@ export function logRequest({ method, url, model, status, elapsedMs, error, error
 }
 
 export function readRecentLogs(lines = 100, env = process.env) {
-  const target = logPath(env);
-  if (!existsSync(target)) return [];
-  try {
-    const content = readFileSync(target, "utf8");
-    const allLines = content.split(/\r?\n/).filter(Boolean);
-    return allLines.slice(-lines);
-  } catch {
-    return [];
-  }
+  return readRecentLogReport(lines, env).lines;
+}
+
+export function readRecentLogReport(lines = 100, env = process.env) {
+  return readLogTail(logPath(env), lines);
 }

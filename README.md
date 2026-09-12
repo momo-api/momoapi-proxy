@@ -139,6 +139,33 @@ node .\scripts\codex-cli-smoke.mjs --claude
 
 ## Context and media limits
 
+### Bounded local log inspection
+
+The logs/log and diagnostics/diagnostic commands read backwards in 64 KiB blocks,
+up to 1 MiB per call and at most 1,000 nonempty returned lines. Daemon startup
+failure excerpts use the same reader. Ordinary LF/CRLF and valid Unicode are
+preserved, including a final line without a newline. Positive line counts are
+floored/clamped to 1..1000; invalid/nonpositive counts fall back to 100 (the logs
+CLI still defaults to 50). This deliberately prevents -n 0/Infinity from dumping
+the entire file.
+
+At the byte cap, a leading partial record is omitted rather than shown as broken
+UTF-8/JSON; the CLI warns that fewer lines may be available. A single record
+larger than the cap may yield no entries. Invalid UTF-8, read failure, nonregular
+files and detected truncation are reported with safe error codes and CLI exit 1;
+a missing file is normal. Legacy readRecentLogs/readRecentDiagnostics still return
+arrays (empty on read failure); new report APIs expose availability, bytesRead,
+truncated and byteLimitReached without raw exception paths or contents.
+
+One descriptor and size snapshot exclude later appends and avoid reopening a
+different file after rotation. This is not an atomic snapshot of in-place edits
+or a disk-latency deadline. Regular-file I/O remains synchronous but byte-bounded;
+POSIX FIFO paths are rejected without waiting for a writer. This only improves
+inspection: request append, diagnostic compaction, retention and shutdown remain
+unchanged pending the separate async log-writer phase. Existing local logs are
+neither migrated nor removed. Run node scripts/benchmark-log-tail.mjs
+--baseline-root=<clean baseline tree> for the synthetic old/new read benchmark.
+
 ### Local request metrics
 
 Authenticated loopback GET /internal/metrics exposes requestMetrics schemaVersion 1:

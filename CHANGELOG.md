@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Read recent request/diagnostic logs and daemon startup-error excerpts from a bounded tail (at most 1 MiB / 1,000 returned nonempty lines), rather than loading the full file. Preserve UTF-8/CRLF across reverse reads; expose byte-limit and safe read-error reports in the CLI. Log writes, retention, rotation and shutdown flushing are unchanged.
+
 - Separate business, health, control, image and other request metrics in bounded per-server windows; add monotonic queue/body/parse/pre-upstream/headers/first-body-write/transport timing. No request payloads or dynamic labels are retained.
 - Metrics compatibility change: top-level requests and ttfbMs now describe business routes only, with unavailable percentiles returned as null. Legacy all-HTTP counters remain under legacyAllHttpRequests; HTTP success is not SSE/model success. Doctor forwards the explicit availability and stage data.
 
