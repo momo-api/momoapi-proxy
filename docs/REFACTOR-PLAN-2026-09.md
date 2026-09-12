@@ -37,7 +37,9 @@
 | P2a | P1 | 入站准入：并发/正文总预算、FIFO、超时/取消/关停、读取模块 | P1 | 等待不读正文；释放无泄漏；本地矩阵；错误不触达上游 | 已合并 |
 | P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 已合并 |
 | T1 | P0 | 修复 JS host-helper 被 customInput 当作 shell 的分类缺陷 | P2b 发现 | 13 样例 × 3 adapter 原样；call_id 不变；shell 反向回归 | 已合并 |
-| P3 | P1 | compact/checkpoint 增量预算，末尾精确序列化；保留语义不变 | P0 | 状态等价；全请求序列化次数不随删除项线性增长 | 待开始 |
+| P3 | P1 | 流累计增量处理 + compact/checkpoint 增量预算，末尾精确序列化 | P0/P2 | 状态与工具 wire 等价；避免逐片段/删项全量重扫 | 进行中 |
+| P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 本地验证通过 |
+| P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 待开始 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
@@ -84,6 +86,7 @@
 | 2026-09-12 | T1 本地 | 1 项旧版红测；13 JS 样例 × 3 adapters 原样，6 shell 前缀反向样例；Windows/Alpine 构建/运行各 242/242；secret scan 通过 | fix/custom-exec-js-preservation；待 PR/CI；未发布 |
 | 2026-09-12 | T1 合并 | e700996 的 Node/container/windows-tray/secret-scan 全绿后合并 | main cda8423；[PR #42](https://github.com/momo-api/momoapi-proxy/pull/42)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34680993171)；未发布 |
 | 2026-09-12 | 运行核实 | 127.0.0.1:18789 健康、version 0.13.12、service momo-codex-bridge | 本轮未发布/未替换本机/未操作 VPS；不得把 main 合并当运行升级 |
+| 2026-09-12 | P3a 本地 | 新增 10 项；Windows/Alpine 构建/运行各 252/252；tray 11 断言；历史/工作树扫描通过；工具字节哈希相同；18 个隔离 loopback 样本 | perf/incremental-stream-state；待 PR/CI；未发布 |
 
 ## 首批性能记录与取舍
 
@@ -171,7 +174,45 @@
 
 ## 下一批执行顺序
 
-1. P3a：DSML marker 增量检测、custom partial-input 增量处理、pending 按 call/index 匹配；先固定跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
+1. P3a：本地实现与测试通过，完成聚焦 PR/CI 后合并；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
 2. P3b：compact/checkpoint 增量字节预算，最后精确序列化；约束、当前任务、pending call/result 与动态工具保留语义不变。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
 4. P4 指标/日志、P5 生命周期/适配器拆分、P6 包发布与安装验收仍未完成。当前没有挂起的发布或自动更新任务。
+
+## P3a 增量流状态（2026-09-12）
+
+基线为干净 main a0b6aed（PR #43），分支 perf/incremental-stream-state；旧版本从该提交创建只读 detached worktree。没有修改 checkpoint、限制大小、路由、认证、版本、运行目录或 VPS。
+
+- DSML 检测仅扫描本次片段 + 最多 11 个 UTF-16 code units 的边界后缀；命中后不再扫描。保留原 marker 集合和命中时机，最终 DSML 解析仍用完整、预算内文本。
+- native custom input 用前缀/正文/escape/unicode 状态机，每个输入单元最多处理一次；普通文本按 slice 成段复制。保持旧有空白、跨段转义、代理项、未知 escape 与非法 unicode 的部分解码行为；不是新的 JSON 容错政策。
+- pending 用 item ID 和 output_index 双桶，ID 优先，合并命中桶时维持到达顺序；无身份事件仍保留至明确失败。预算的计费点不变。
+- 8 个新单元测试：每个切分点、400 组确定性随机输入、10,000 次随机配对操作、线性工作量计数；2 个新增 HTTP 回归：跨段 DSML 和 namespace/custom 迟到身份的完整参数恢复。已有超限、取消、背压与 provider 工具闭环仍运行。
+
+### 微基准：相同结果的局部 CPU 工作
+
+命令 npm run benchmark:incremental-stream -- --baseline-root=<a0b6aed clean tree>。Windows x64 / Node v24.16.0 / Xeon E5-2696 v3，1 次预热、7 个样本，新旧顺序交错且顺序执行。表为最终单独运行批次；先前与测试部分重叠的探索批次不作为此表数据。四组工具场景逐事件 SHA-256（包含顺序/格式/终态）完全相同；marker 场景检测结果相同。
+
+| 场景 | 旧 P50 / P95 ms | 新 P50 / P95 ms |
+| --- | --- | --- |
+| 小 custom 工具（1.2KB wire） | 0.495 / 0.600 | 0.567 / 0.655 |
+| 256KiB custom 参数、512 字符分片 | 1428.821 / 1463.605 | 17.954 / 21.794 |
+| 2,000 个迟到身份、反向释放 | 139.405 / 147.905 | 77.982 / 86.740 |
+| 2,000 个仅终态才给身份 | 141.561 / 149.212 | 89.166 / 95.521 |
+| 1MiB marker 检测、1KiB 分片 | 344.757 / 358.750 | 1.417 / 1.787 |
+| 4MiB marker 检测、1KiB 分片 | 5009.027 / 5238.501 | 5.265 / 5.914 |
+
+7 样本的 P95 就是样本最大值，不当可靠生产分位数；仅本地 CPU/格式处理，小工具有约 0.07ms 中位数开销，不宣称所有输入更快。
+
+### 完整代理 loopback A/B
+
+使用 benchmark-output-budget.mjs --rounds=1 --scenarios=small,normal,flood，旧实现加 --server-root=<a0b6aed clean tree>；新旧交错 3 轮、每个场景全新 server 子进程，18 次顺序执行，无并行测试/构建，无真实模型调用。client 在独立进程边读边丢弃，以下为三个样本中位数。
+
+| 输出场景 | 耗时 ms（旧 → 新） | OS max RSS MiB（旧 → 新） | 事件循环 max ms（旧 → 新） |
+| --- | --- | --- | --- |
+| 16KiB 正常完成 | 83.15 → 82.29 | 58.85 → 58.97 | 29.90 → 31.57 |
+| 1MiB 正常完成 | 165.19 → 70.03 | 112.14 → 63.18 | 31.80 → 30.83 |
+| 32MiB 候选流、16MiB 累计边界拒绝 | 21199.18 → 585.90 | 331.97 → 110.81 | 358.88 → 32.77 |
+
+最后一行不是提前拒绝换性能：新旧均产生 4097 个 delta，客户端均收到 17,007,261 bytes、response.failed，无 completed。正常场景分别同为 16,774 / 1,063,078 bytes；所有上游 iterator 释放、18 进程正常结束。OS 峰值含启动，结束 heap 不当峰值；3 样本不外推生产容量，不声称 RSS 硬上限。报告保留 Git 外。
+
+剩余：P3b 重复序列化；P4 指标/日志；P5 生命周期与终态背压/多副本；P6 发布。既有 DSML 在 marker 完成前可能已经输出前缀、之后补发清理文本的行为，本批刻意不改变，应另用语义修复 PR 处理。

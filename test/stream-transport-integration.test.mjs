@@ -31,6 +31,34 @@ function request(base, body = payload) {
   return fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer synthetic_local", "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
+test("Chat and native Responses detect split DSML markers and keep final tool arguments", async () => {
+  const parts = ["before\n<to", "ol_ca", "lls>", '<invoke name="run"><parameter name="input">const x = "中文😀"; text(x);</parameter></invoke></tool_calls>'];
+  for (const model of ["grok-4.5", "gpt-5.6-sol"]) await withServer(async () => {
+    const events = parts.map((delta) => model.startsWith("grok") ? { choices: [{ delta: { content: delta } }] } : { type: "response.output_text.delta", delta });
+    if (!model.startsWith("grok")) events.push({ type: "response.completed", response: { id: "resp_dsml", output: [] } });
+    return new Response(events.map((event) => "data: " + JSON.stringify(event)).join("\r\n\r\n"));
+  }, async (base) => {
+    const events = parseSse(await (await request(base, { ...payload, model, tools: [{ type: "custom", name: "run" }] })).text());
+    const calls = events.filter((event) => event.type === "response.output_item.done" && event.item.type === "custom_tool_call");
+    assert.equal(calls.length, 1); assert.equal(calls[0].item.input, 'const x = "中文😀"; text(x);');
+    assert.equal(events.filter((event) => event.type === "response.completed").length, 1);
+  });
+});
+
+test("native namespace custom deltas retain exact escaped Unicode after late identity", async () => {
+  const input = 'text("中文😀")\n';
+  const args = JSON.stringify({ input });
+  const item = { type: "function_call", id: "fc_late_unicode", call_id: "call_late_unicode", name: "terminal__run", arguments: args };
+  const values = args.split("").map((delta) => ({ type: "response.function_call_arguments.delta", output_index: 0, delta }));
+  values.push({ type: "response.output_item.done", output_index: 0, item }, { type: "response.completed", response: { id: "resp_late_unicode", output: [item] } });
+  await withServer(async () => new Response(values.map((value) => "data: " + JSON.stringify(value)).join("\n\n")), async (base) => {
+    const events = parseSse(await (await request(base)).text());
+    assert.equal(events.filter((event) => event.type === "response.custom_tool_call_input.delta").map((event) => event.delta).join(""), input);
+    const tool = events.find((event) => event.type === "response.output_item.done").item;
+    assert.equal(tool.input, input); assert.equal(tool.namespace, "terminal"); assert.equal(tool.call_id, item.call_id);
+  });
+});
+
 test("native Responses retains Chinese/emoji custom tool input across UTF-8 chunks", async () => {
   const input = 'text("中文😀")';
   const item = { type: "function_call", id: "fc_transport", call_id: "transport_call", name: "terminal__run", arguments: JSON.stringify({ input }) };

@@ -233,7 +233,14 @@ and accepted tool call/result semantics are covered by synthetic regressions.
 
 These budgets do not cover GET routes, image-result processing, every transient
 allocation, or model/SSE idle timeouts. See the plan for remaining performance
-work, notably repeated full-text DSML/custom argument scans. Chat/Gemini/Claude
+work, notably compact/checkpoint repeated serialization and terminal copies.
+DSML marker detection now inspects only new text plus an 11-code-unit boundary;
+native custom-input decoding carries prefix/escape state across chunks. Pending
+arguments use ID/index buckets with stable arrival order, without scanning other
+calls. Final parsing, output budgets and existing tolerant partial-input semantics
+are unchanged. See npm run benchmark:incremental-stream -- --baseline-root=...
+for an explicit clean-baseline, sequential A/B comparison.
+Chat/Gemini/Claude
 custom-input normalization recognizes unified-exec host helper calls such as
 text(...), image(...), and store(...) as JavaScript rather than wrapping them as
 shell; bare shell compatibility is retained. This classification is not a full
