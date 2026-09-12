@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { splitSseBlocks, sseDataPayload } from "./stream-transport.mjs";
+import { RetainedOutputBudget } from "./output-budget.mjs";
 
 function event(name, payload) {
   return `event: ${name}\ndata: ${JSON.stringify({ type: name, ...payload })}\n\n`;
@@ -10,7 +11,9 @@ export function responseCreated(model, responseId = `resp_${randomUUID()}`) {
 }
 
 export class ResponseStreamEmitter {
-  constructor(response, model, responseId = `resp_${randomUUID()}`) {
+  constructor(response, model, responseId = `resp_${randomUUID()}`, settings = {}) {
+    this.budget = new RetainedOutputBudget(settings);
+    response.momoResponseId = responseId;
     this.response = response;
     this.model = model;
     this.responseId = responseId;
@@ -28,6 +31,7 @@ export class ResponseStreamEmitter {
 
   writeTextDelta(delta) {
     if (!delta) return;
+    this.budget.text(delta, this.activeTextMessage ? 0 : 1);
     if (!this.activeTextMessage) {
       const itemId = `msg_${randomUUID()}`;
       const outIdx = this.outputIndex++;
@@ -89,6 +93,7 @@ export class ResponseStreamEmitter {
   }
 
   writeFunctionCall({ callId, name, arguments: args }) {
+    this.budget.value({ callId, name, arguments: args });
     this.flushTextMessage();
     const itemId = `fc_${randomUUID()}`;
     const cid = callId || `call_${randomUUID()}`;
@@ -125,6 +130,7 @@ export class ResponseStreamEmitter {
   }
 
   writeCustomToolCall({ callId, name, input }) {
+    this.budget.value({ callId, name, input });
     this.flushTextMessage();
     const itemId = `ctc_${randomUUID()}`;
     const cid = callId || `call_${randomUUID()}`;

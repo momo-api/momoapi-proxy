@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Bound model output wire bytes/event counts, retained text/tool/output accumulators and whole-entry continuation cache; fail explicitly and abort upstream instead of emitting false completion after overflow.
+- Preserve the active response ID on streaming failure, reject unresolved native tool arguments at terminal/EOF, and handle identities first supplied in a terminal snapshot.
+- Require full provider-aware history or an explicit handoff for missing/evicted Gemini/Claude result-only continuations; document limits, measurements and remaining performance work. No package version or live runtime change.
+
 - Add bounded per-server ingress admission for Responses, compact, raw Chat and internal image POSTs: FIFO slots/body reservations, queue/read deadlines, shutdown and cancellation cleanup, and aggregate-only local metrics.
 - Validate Content-Length before allocating/reading, count actual uploaded bytes, and return explicit pre-upstream JSON admission errors; no automatic model replay, version bump or live runtime replacement.
 - Track P2a separately from future output/cache budgets and record the full synthetic 10/25/50MiB concurrency matrix, including memory/latency regressions.

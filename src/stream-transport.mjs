@@ -91,19 +91,23 @@ export function* splitSseBlocks(text, options) {
 
 export async function* streamSseBlocks(body, options) {
   if (!body) return;
-  if (typeof body === "string") { for (const block of splitSseBlocks(body, options)) yield block; return; }
+  if (typeof body === "string") body = [body];
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const framer = new SseFramer(options);
+  let events = 0;
+  const admit = () => {
+    if (++events > (options?.maxEvents ?? Infinity)) throw streamError("Upstream output exceeded the event count budget.", "output_budget_exceeded");
+  };
   function decode(chunk, stream) {
     try { return decoder.decode(chunk, { stream }); }
     catch { throw streamError("Upstream SSE contained invalid UTF-8.", "upstream_invalid_utf8"); }
   }
   for await (const chunk of body) {
     const text = typeof chunk === "string" ? decode(undefined, false) + chunk : decode(chunk, true);
-    for (const block of framer.push(text)) yield block;
+    for (const block of framer.push(text)) { admit(); yield block; }
   }
-  for (const block of framer.push(decode(undefined, false))) yield block;
-  for (const block of framer.finish()) yield block;
+  for (const block of framer.push(decode(undefined, false))) { admit(); yield block; }
+  for (const block of framer.finish()) { admit(); yield block; }
 }
 
 export function sseDataPayload(block) {
