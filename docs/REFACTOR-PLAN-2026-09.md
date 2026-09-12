@@ -33,10 +33,10 @@
 | --- | --- | --- | --- | --- | --- |
 | P0 | P0 | 基线、计划、合成回归、可重复基准 | 无 | 旧缺陷确定性失败；无生产请求 | 已合并 |
 | P1 | P0 | UTF-8/SSE 共用分帧；换行、多行 data、EOF；流写入背压 | P0 | 参数完全一致；首帧早于 EOF；慢写暂停读取；取消不回退 | 已合并 |
-| P2 | P1 | 大请求并发/总资源预算、队列与超时、body 副本、输出累计预算 | P1 | 1/2/4 并发 × 10/25/50MiB；记录 RSS/heap/external/GC/event-loop；超限明确拒绝，无 OOM | 进行中 |
+| P2 | P1 | 大请求并发/总资源预算、队列与超时、body 副本、输出累计预算 | P1 | 1/2/4 并发 × 10/25/50MiB；记录 RSS/heap/external/GC/event-loop；超限明确拒绝，无 OOM | 已合并（P2a/P2b；不是 RSS 硬上限） |
 | P2a | P1 | 入站准入：并发/正文总预算、FIFO、超时/取消/关停、读取模块 | P1 | 等待不读正文；释放无泄漏；本地矩阵；错误不触达上游 | 已合并 |
 | P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 已合并 |
-| T1 | P0 | 修复 JS host-helper 被 customInput 当作 shell 的分类缺陷 | P2b 发现 | 13 样例 × 3 adapter 原样；call_id 不变；shell 反向回归 | 本地验证通过 |
+| T1 | P0 | 修复 JS host-helper 被 customInput 当作 shell 的分类缺陷 | P2b 发现 | 13 样例 × 3 adapter 原样；call_id 不变；shell 反向回归 | 已合并 |
 | P3 | P1 | compact/checkpoint 增量预算，末尾精确序列化；保留语义不变 | P0 | 状态等价；全请求序列化次数不随删除项线性增长 | 待开始 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
@@ -82,6 +82,8 @@
 | 2026-09-12 | P2b 本地 | 26 项新增测试；Windows/Alpine 构建/Alpine 运行各 240/240；tray 11 断言；18 个输出压力样本、4 并发溢出/3,000 次缓存 churn | feat/bounded-output-state；待 PR/CI；未发布 |
 | 2026-09-12 | P2b 合并 | d02e9b6 的 Node/container/windows-tray/secret-scan 全绿后合并 | main 0333c36；[PR #41](https://github.com/momo-api/momoapi-proxy/pull/41)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34680715697)；未发布 |
 | 2026-09-12 | T1 本地 | 1 项旧版红测；13 JS 样例 × 3 adapters 原样，6 shell 前缀反向样例；Windows/Alpine 构建/运行各 242/242；secret scan 通过 | fix/custom-exec-js-preservation；待 PR/CI；未发布 |
+| 2026-09-12 | T1 合并 | e700996 的 Node/container/windows-tray/secret-scan 全绿后合并 | main cda8423；[PR #42](https://github.com/momo-api/momoapi-proxy/pull/42)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34680993171)；未发布 |
+| 2026-09-12 | 运行核实 | 127.0.0.1:18789 健康、version 0.13.12、service momo-codex-bridge | 本轮未发布/未替换本机/未操作 VPS；不得把 main 合并当运行升级 |
 
 ## 首批性能记录与取舍
 
@@ -166,3 +168,10 @@
 - 接受的终态输出序列化仍可能复制多份内存，P5 生命周期拆分时继续核查背压与峰值；不能把 per-accumulator bytes 相加当作准确 RSS。
 - 独立遗留缺陷（T1 跟踪）：Chat/Gemini/Claude 的 customInput 对裸 text(...) 未识别为 JS，会自动包成 shell。P2b 闭环回归采用既有已认可的 const ...; text(...)，未在预算 PR 改变输入改写语义。后续聚焦修复扩展已知 JS helper 调用分类，并对非 JS shell 前缀保留旧行为；不是完整 JS parser，也不执行收到的代码。
 - GET、图像结果、模型/SSE idle/总时限不在本批；发布与本机替换仍属于 P6。
+
+## 下一批执行顺序
+
+1. P3a：DSML marker 增量检测、custom partial-input 增量处理、pending 按 call/index 匹配；先固定跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
+2. P3b：compact/checkpoint 增量字节预算，最后精确序列化；约束、当前任务、pending call/result 与动态工具保留语义不变。
+3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
+4. P4 指标/日志、P5 生命周期/适配器拆分、P6 包发布与安装验收仍未完成。当前没有挂起的发布或自动更新任务。
