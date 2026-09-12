@@ -1,10 +1,115 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLocalCompactResponse, decodeLocalCompaction, prepareCompactPayload, prepareOversizedHistoryReplay } from "../src/compaction.mjs";
+import { buildLocalCompactResponse, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareOversizedHistoryReplay } from "../src/compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "test_gateway_key", localToken: "test_local_token", host: "127.0.0.1", port: 0, compactionMode: "upstream" };
+
+function continuityFixture() {
+  return { model: "gpt-5.6-sol", stream: true, tool_choice: "required",
+    tools: [{ type: "namespace", name: "functions", tools: [{ type: "custom", name: "exec" }] }],
+    input: [
+      { role: "developer", content: "CONSTRAINT_SENTINEL" },
+      { role: "user", content: "ORIGINAL_TASK_SENTINEL" },
+      { role: "assistant", content: "x".repeat(600000) },
+      { type: "custom_tool_call", name: "exec", call_id: "completed", input: "text(1)" },
+      { type: "custom_tool_call_output", call_id: "completed", output: "VERIFIED_STATE_SENTINEL" },
+      { type: "custom_tool_call", name: "exec", call_id: "pending", input: "text(2)" },
+      { role: "user", content: "LATEST_TASK_SENTINEL" },
+      { type: "custom_tool_call_output", call_id: "pending", output: "PENDING_RESULT_SENTINEL" },
+    ] };
+}
+
+test("checkpoint on/off retains constraints, execution evidence and cross-boundary tool pairs", () => {
+  const fixture = continuityFixture();
+  for (const limit of [524288, 8388608]) {
+    const result = prepareOversizedHistoryReplay(structuredClone(fixture), { maxHistoricalReplayBytes: limit });
+    assert.equal(result.rewritten, limit === 524288);
+    const text = JSON.stringify(result.payload.input);
+    for (const marker of ["CONSTRAINT_SENTINEL", "ORIGINAL_TASK_SENTINEL", "LATEST_TASK_SENTINEL", "VERIFIED_STATE_SENTINEL", "PENDING_RESULT_SENTINEL"]) assert.ok(text.includes(marker));
+    for (const item of fixture.input.filter((item) => item.call_id)) assert.deepEqual(result.payload.input.find((candidate) => candidate.type === item.type && candidate.call_id === item.call_id), item);
+    assert.deepEqual(result.payload.tools, fixture.tools);
+    assert.equal(result.payload.tool_choice, "required");
+    if (result.rewritten) assert.ok(result.outboundBytes < 64000);
+  }
+});
+
+test("explicit checkpoint retains pending calls and refuses oversized required evidence", () => {
+  const fixture = continuityFixture();
+  const output = buildLocalCompactResponse(fixture.model, fixture.input.slice(0, -2)).output;
+  assert.equal(output[0].role, "assistant");
+  assert.ok(output.some((item) => item.call_id === "pending"));
+  assert.ok(output.some((item) => item.output === "VERIFIED_STATE_SENTINEL"));
+  assert.throws(() => buildLocalCompactResponse(fixture.model, [{ role: "user", content: "retain" }, { type: "function_call", name: "run", call_id: "large", arguments: "x".repeat(1000000) }]), { code: "checkpoint_state_budget_exceeded" });
+});
+
+test("checkpoint retains dynamically loaded tools and exact latest long user text", () => {
+  const loaded = { type: "additional_tools", tools: [{ type: "function", name: "dynamic_run", parameters: { type: "object" } }] };
+  const text = "TASK_START_CONSTRAINT" + "x".repeat(100000) + "TASK_END";
+  const compacted = buildLocalCompactResponse("gpt-5.6-sol", [loaded, { type: "input_text", text }]);
+  assert.deepEqual(compacted.output.find((item) => item.type === "additional_tools"), loaded);
+  assert.equal(compacted.output.find((item) => item.role === "user").content[0].text, text);
+  const again = buildLocalCompactResponse("gpt-5.6-sol", compacted.output);
+  assert.equal(again.output.find((item) => item.role === "user").content[0].text, text);
+});
+
+test("unterminated final SSE block restores namespace and custom call identity", async () => {
+  const fakeFetch = async (_url, init) => {
+    const wire = JSON.parse(init.body);
+    assert.equal(wire.tools[0].name, "terminal__run");
+    const item = { type: "function_call", id: "fc_tail", call_id: "tail_call", name: "terminal__run", arguments: JSON.stringify({ input: "synthetic" }) };
+    return new Response("data: " + JSON.stringify({ type: "response.output_item.done", item }));
+  };
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", tools: [{ type: "namespace", name: "terminal", tools: [{ type: "custom", name: "run" }] }], input: [{ role: "user", content: "synthetic" }] }) });
+    const event = JSON.parse((await response.text()).trim().slice(5));
+    assert.equal(event.item.type, "custom_tool_call");
+    assert.equal(event.item.name, "run");
+    assert.equal(event.item.namespace, "terminal");
+    assert.equal(event.item.call_id, "tail_call");
+    assert.equal(event.item.input, "synthetic");
+  });
+});
+
+test("mock upstream tool round trip survives checkpoint and encrypted local envelope replay", async () => {
+  for (const limit of [524288, 8388608]) {
+    const captured = [];
+    const fakeFetch = async (_url, init) => {
+      captured.push(JSON.parse(init.body));
+      const item = { type: "function_call", id: "fc_next", name: "exec", call_id: "next", arguments: JSON.stringify({ input: "text(3)" }) };
+      return new Response(responseSse("resp_next", [item]), { headers: { "content-type": "text/event-stream" } });
+    };
+    await withServer(fakeFetch, async (base) => {
+      const fixture = continuityFixture();
+      for (const envelope of [false, true]) {
+        const payload = envelope ? { ...fixture, input: [{ type: "compaction", encrypted_content: encodeLocalCompaction(buildLocalCompactResponse(fixture.model, fixture.input).output) }] } : fixture;
+        const response = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(), body: JSON.stringify(payload) });
+        assert.equal(response.status, 200);
+        const events = (await response.text()).split(String.fromCharCode(10)).filter((line) => line.startsWith("data: " )).map((line) => JSON.parse(line.slice(6)));
+        const item = events.find((event) => event.type === "response.output_item.done").item;
+        assert.equal(item.type, "custom_tool_call");
+        assert.equal(item.name, "exec");
+        assert.equal(item.call_id, "next");
+        assert.equal(item.input, "text(3)");
+        const wire = captured.at(-1);
+        assert.equal(wire.tool_choice, "required");
+        assert.equal(wire.tools[0].type, "function");
+        assert.equal(wire.tools[0].name, "exec");
+        for (const id of ["completed", "pending"]) {
+          assert.ok(wire.input.some((entry) => entry.type === "function_call" && entry.call_id === id && entry.name === "exec"));
+          assert.ok(wire.input.some((entry) => entry.type === "function_call_output" && entry.call_id === id));
+        }
+        const followup = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(), body: JSON.stringify({ ...payload, input: [...payload.input, item, { type: "custom_tool_call_output", call_id: item.call_id, output: "SYNTHETIC_EXECUTION_RESULT" }] }) });
+        assert.equal(followup.status, 200);
+        await followup.text();
+        const nextWire = captured.at(-1);
+        assert.ok(nextWire.input.some((entry) => entry.type === "function_call" && entry.call_id === "next" && entry.name === "exec"));
+        assert.ok(nextWire.input.some((entry) => entry.type === "function_call_output" && entry.call_id === "next" && entry.output === "SYNTHETIC_EXECUTION_RESULT"));
+      }
+    }, { maxHistoricalReplayBytes: limit });
+  }
+});
 
 async function withServer(fetchImpl, run, overrides = {}) {
   const server = createMomoSwitch({ ...settings, ...overrides }, { fetchImpl });
@@ -57,7 +162,9 @@ test("oversized hidden history becomes a bounded local checkpoint while preservi
   const result = prepareOversizedHistoryReplay(payload, { contextPolicy: { maxHistoricalReplayBytes: 128 * 1024 } });
   assert.equal(result.rewritten, true);
   assert.ok(result.originalBytes > 2 * 1024 * 1024);
-  assert.ok(result.outboundBytes < 256 * 1024);
+  assert.ok(result.outboundBytes < 1024 * 1024);
+  assert.match(JSON.stringify(result.payload.input), /old task 0 /);
+  assert.match(JSON.stringify(result.payload.input), /old task 79 /);
   assert.equal(result.payload.input.at(-1), current);
   assert.match(JSON.stringify(result.payload.input), /CURRENT MODEL-SWITCH REQUEST/);
   assert.doesNotMatch(JSON.stringify(result.payload.input), /data:image/);
@@ -85,7 +192,7 @@ test("compact endpoint defaults to local checkpoint without an upstream model ca
   assert.equal(fetchCalls, 0);
 });
 
-test("Claude model switch never sends a multi-megabyte replay upstream", async () => {
+test("Claude model switch fails explicitly when required user state exceeds the checkpoint budget", async () => {
   let captured;
   const hugeHistory = [];
   for (let index = 0; index < 200; index++) {
@@ -99,13 +206,10 @@ test("Claude model switch never sends a multi-megabyte replay upstream", async (
   };
   await withServer(fakeFetch, async (base) => {
     const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "claude-opus-4-6-thinking", stream: true, input: hugeHistory }) });
-    assert.equal(response.status, 200);
-    await response.text();
+    assert.equal(response.status, 413);
+    assert.match(await response.text(), /checkpoint_state_budget_exceeded/);
   }, { compactionMode: "local", contextPolicy: { maxHistoricalReplayBytes: 128 * 1024 } });
-  assert.equal(captured.url, "https://gateway.example/v1/messages");
-  assert.ok(Buffer.byteLength(captured.body, "utf8") < 256 * 1024);
-  assert.match(captured.body, /solve only the new task/);
-  assert.doesNotMatch(captured.body, /o{1000}/);
+  assert.equal(captured, undefined);
 });
 
 test("compact preparation never mutates integrity-protected encrypted_content", () => {

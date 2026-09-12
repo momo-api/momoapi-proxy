@@ -372,7 +372,15 @@ export function rewriteRoutedCustomToolsForUpstream(body) {
   if (conversionNames.size === 0) return { body, names: conversionNames };
   const callIds = new Set();
   collectConvertedCallIds(body, conversionNames, callIds);
-  return { body: rewriteCustomForUpstream(body, conversionNames, callIds), names: conversionNames };
+  // A selector is not a tool definition: never attach a schema to tool_choice.
+  const { tool_choice: choice, ...rest } = body;
+  const rewriteSelector = (selector) => {
+    if (!isPlainObject(selector)) return selector;
+    if (selector.type === "custom" && conversionNames.has(selector.name)) return { ...selector, type: "function" };
+    if (selector.type === "allowed_tools" && Array.isArray(selector.tools)) return { ...selector, tools: selector.tools.map(rewriteSelector) };
+    return selector;
+  };
+  return { body: { ...rewriteCustomForUpstream(rest, conversionNames, callIds), ...(choice !== undefined ? { tool_choice: rewriteSelector(choice) } : {}) }, names: conversionNames };
 }
 
 export function restoreRoutedCustomCalls(value, names) {

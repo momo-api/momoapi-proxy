@@ -10,6 +10,7 @@ import {
 } from "./responses-compat.mjs";
 import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, parseSse, responseCreated, sseError } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
+import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock, summarizeToolEvents } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
 import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay } from "./compaction.mjs";
@@ -1121,6 +1122,7 @@ function recordContextTrace(response, trace, admitted = true) {
 function contextLogFields(response, request) {
   const trace = response.momoContextTrace;
   return {
+    toolAudit: response.momoToolAudit ? { ...response.momoToolAudit, events: summarizeToolEvents(response.momoToolEvents) } : undefined,
     requestBytes: trace?.requestBytes || request.momoRequestBodyBytes,
     outboundBytes: trace?.outboundBytes,
     imageCount: trace?.imageCount,
@@ -1891,6 +1893,12 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
 }
 
 async function forwardResponses(request, response, settings, payload, calls, fetchImpl, signal, replay = null, imageAssetStore = null) {
+  response.momoToolAudit = { entry: summarizeToolRequest(payload) };
+  response.momoToolEvents = createToolEventAudit();
+  // Restore local envelopes before lowering: recovered calls need the same
+  // custom/namespace conversion as ordinary client history.
+  payload = { ...payload, input: asArray(payload.input).flatMap((item) =>
+    item?.type === "compaction" ? (decodeLocalCompaction(item.encrypted_content) || [item]) : [item]) };
   // 1. Lower tool_search to standard function
   const { body: searchBody, names: searchNames } = rewriteRoutedToolSearchForUpstream(payload);
   // 2. Lower custom tools (exec, etc.) to standard functions
@@ -1902,6 +1910,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
     ? await expandCurrentImageVisionReferences(nsBody, imageAssetStore, settings.localToken)
     : nsBody;
   const cleanPayload = normalizeResponsesPayload(visionPayload);
+  response.momoToolAudit.normalized = summarizeToolRequest(cleanPayload);
   const historyReplay = prepareOversizedHistoryReplay(cleanPayload, settings);
   const managedPayload = Array.isArray(cleanPayload.context_management)
     && cleanPayload.context_management.some((item) => item?.type === "compaction")
@@ -1912,6 +1921,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
     prepared.trace.policyActions.push("local_history_checkpoint");
   }
   const outboundBody = serializeOutboundBody(prepared.payload, settings, prepared.trace);
+  response.momoToolAudit.upstream = summarizeToolRequest(prepared.payload);
   // Attach trace for network-error logging, but defer metric finalization until
   // a possible Responses -> Chat fallback has passed its own final admission.
   response.momoContextTrace = prepared.trace;
@@ -1962,6 +1972,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
       }
 
       if (json) {
+        observeToolEvent(response.momoToolEvents, "upstream", json);
         if (json.type === "response.created" && json.response?.id) {
           currentResponseId = json.response.id;
         }
@@ -2003,6 +2014,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
           }
           const outputBlocks = customToolBlockRewrite(transformedBlock);
           for (const outBlock of outputBlocks) {
+            observeToolBlock(response.momoToolEvents, "client", outBlock);
             observeResponsesBlock(responseState, outBlock);
             response.write(outBlock + "\n\n");
           }
@@ -2013,6 +2025,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
       if (!hasDsml) {
         const outputBlocks = customToolBlockRewrite(block);
         for (const outBlock of outputBlocks) {
+          observeToolBlock(response.momoToolEvents, "client", outBlock);
           observeResponsesBlock(responseState, outBlock);
           response.write(outBlock + "\n\n");
         }
@@ -2020,8 +2033,12 @@ async function forwardResponses(request, response, settings, payload, calls, fet
     }
   }
   if (buffer.trim() && !hasDsml) {
-    const outputBlocks = customToolBlockRewrite(buffer);
+    observeToolBlock(response.momoToolEvents, "upstream", buffer);
+    const restoredBuffer = buffer.split("\n").map((line) => line.trim().startsWith("data:")
+      ? "data: " + restoreAllRoutedCallsInJson(line.trim().slice(5).trim(), nsAliases, null) : line).join("\n");
+    const outputBlocks = customToolBlockRewrite(restoredBuffer);
     for (const outBlock of outputBlocks) {
+      observeToolBlock(response.momoToolEvents, "client", outBlock);
       observeResponsesBlock(responseState, outBlock);
       response.write(outBlock);
     }

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { summarizeToolRequest, createToolEventAudit, observeToolEvent, summarizeToolEvents } from "../src/tool-audit.mjs";
 import {
   rewriteRoutedNamespaceToolsForUpstream,
   restoreRoutedNamespaceCalls,
@@ -8,6 +9,34 @@ import {
   restoreAllRoutedCallsInJson,
   createRoutedCustomToolRestoreBlockRewrite,
 } from "../src/responses-compat.mjs";
+
+test("custom tool selectors are lowered without tool-definition fields", () => {
+  const tools = [{ type: "namespace", name: "functions", tools: [{ type: "custom", name: "exec" }] }];
+  for (const choice of ["auto", "required", "none", { type: "custom", name: "exec" }, { type: "allowed_tools", mode: "required", tools: [{ type: "custom", name: "exec", namespace: "functions" }] }]) {
+    const lowered = rewriteRoutedCustomToolsForUpstream({ tools, tool_choice: choice });
+    const wire = rewriteRoutedNamespaceToolsForUpstream(lowered.body).body;
+    assert.equal(wire.tools[0].type, "function");
+    assert.ok(wire.tools[0].parameters);
+    const expected = typeof choice === "string" ? choice : choice.type === "custom"
+      ? { type: "function", name: "exec" }
+      : { type: "allowed_tools", mode: "required", tools: [{ type: "function", name: "exec" }] };
+    assert.deepEqual(wire.tool_choice, expected);
+  }
+});
+
+test("tool audit records only bounded structure and detects missing client call IDs", () => {
+  const secret = "PRIVATE_BODY_SENTINEL";
+  const summary = summarizeToolRequest({ tools: [{ type: "custom", name: secret, description: secret }], tool_choice: { type: secret, name: secret }, input: [{ type: "function_call_output", call_id: secret, output: secret }] });
+  assert.equal(summary.unmatchedOutputs, 1);
+  assert.doesNotMatch(JSON.stringify(summary), /PRIVATE_BODY_SENTINEL/);
+  const audit = createToolEventAudit();
+  const call = { type: "function_call", name: secret, call_id: secret, arguments: secret };
+  observeToolEvent(audit, "upstream", { type: "response.output_item.done", item: call });
+  assert.equal(summarizeToolEvents(audit).missingClientCalls, 1);
+  observeToolEvent(audit, "client", { type: "response.completed", response: { output: [{ ...call, type: "custom_tool_call" }] } });
+  assert.equal(summarizeToolEvents(audit).missingClientCalls, 0);
+  assert.doesNotMatch(JSON.stringify(summarizeToolEvents(audit)), /PRIVATE_BODY_SENTINEL/);
+});
 
 test("responses-compat: namespace flattening and restoration for Codex-Canvas", () => {
   const request = {
