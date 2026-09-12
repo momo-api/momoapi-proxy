@@ -1,6 +1,6 @@
 # MOMO API Proxy 重构计划与进度
 
-更新：2026-09-12。基线：main b10c207d934ee672e3a69f2dacffc169a2172bb6，包版本 0.13.12。
+更新：2026-09-12。基线：main 6650bdc，包版本 0.13.12。
 
 ## 目标与边界
 
@@ -47,7 +47,7 @@
 | P4b2 | P1 | 异步写队列、轮转、丢弃计数、退出刷新 | P4b1 | 多 writer/磁盘失败/限时刷新；不影响模型工具流 | 已合并（未发布） |
 | P4b2a | P1 | 独立有界队列与受锁保护的轮转文件 sink | P4b1 | 队列/等待者有界；故障不重放；跨进程/轮转/退出期限测试 | 已合并（未接入/未发布） |
 | P4b2b | P1 | 日志格式边界、专用新路径、daemon/CLI 接入与退出刷新 | P4b2a | 旧日志不迁移/删除；指标区分接收/写入；进程退出与工具 wire 回归 | 已合并（未发布） |
-| P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 进行中（P5a–P5i 已合并） |
+| P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 进行中（P5a–P5j 已合并） |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
 
 首批：P0 + P1。资源准入、checkpoint 策略、版本升级和运行目录替换不混入本批。
@@ -365,7 +365,7 @@ P4b2b 已通过 [PR #54](https://github.com/momo-api/momoapi-proxy/pull/54) 合�
 
 ## P5 模块化拆分进度（2026-09-12）
 
-P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开始，只做等价抽离；没有改变路由、认证、模型选择��工具 wire、版本、tag、daemon 或生产运行实例。
+P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开始，只做等价抽离；没有改变路由、认证、模型选择、工具 wire、版本、tag、daemon 或生产运行实例。
 
 | 切片 | 抽离边界 | PR / 合并提交 | 验收 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -378,8 +378,9 @@ P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开
 | P5g | OpenCode session helpers | [#62](https://github.com/momo-api/momoapi-proxy/pull/62) / `dc1046f` | 66 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
 | P5h | Responses stream state helpers | [#63](https://github.com/momo-api/momoapi-proxy/pull/63) / `1db2704` | 105 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
 | P5i | Responses transport helpers | [#64](https://github.com/momo-api/momoapi-proxy/pull/64) / `b42432b` | 122 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
+| P5j | Image vision helpers | [#66](https://github.com/momo-api/momoapi-proxy/pull/66) / `6650bdc` | Windows 351/0；Alpine 351；tray 11；新增 vision 签名/当前轮次/去重回归 | 已合并 |
 
-截至 `b42432b`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,351 行，减少约 1,293 行；这只是维护性指标，不代表端到端性能自动提升。当前仍需继续拆分 HTTP 生命周期/图片引用/compact 及路由编排边界，并为每个切片保持 wire、tool-call、背压和取消回归。P5 未完成，尚未进入 P6 发布。
+截至 `6650bdc`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,273 行，减少约 1,371 行；这只是维护性指标，不代表端到端性能自动提升。当前仍需继续拆分 HTTP 生命周期、compact 及路由编排边界，并为每个切片保持 wire、tool-call、背压和取消回归。P5 未完成，尚未进入 P6 发布。
 
 P5 验收共同约束：
 
