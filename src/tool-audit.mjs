@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { sseDataPayload } from './stream-transport.mjs';
 const hash = (value) => createHash('sha256').update(String(value ?? '')).digest('hex').slice(0, 16);
 const isCall = (item) => item?.type === 'function_call' || item?.type === 'custom_tool_call';
 const isOutput = (item) => item?.type === 'function_call_output' || item?.type === 'custom_tool_call_output';
@@ -38,10 +39,8 @@ export function observeToolEvent(audit, side, event) {
   }
 }
 export function observeToolBlock(audit, side, block) {
-  for (const line of block.split(String.fromCharCode(10))) {
-    if (!line.trim().startsWith('data:')) continue;
-    try { observeToolEvent(audit, side, JSON.parse(line.trim().slice(5))); } catch {}
-  }
+  const data = sseDataPayload(block);
+  if (data !== null) try { observeToolEvent(audit, side, JSON.parse(data)); } catch {}
 }
 export function summarizeToolEvents(audit) {
   if (!audit) return undefined;

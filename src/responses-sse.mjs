@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { splitSseBlocks, sseDataPayload } from "./stream-transport.mjs";
 
 function event(name, payload) {
   return `event: ${name}\ndata: ${JSON.stringify({ type: name, ...payload })}\n\n`;
@@ -241,8 +242,8 @@ export function sseError(message, code = "server_error") {
 }
 
 export function parseSse(text) {
-  return text.split(/\r?\n\r?\n/).flatMap((block) => {
-    const data = block.split(/\r?\n/).find((line) => line.startsWith("data:"))?.slice(5).trim();
+  return [...splitSseBlocks(text)].flatMap((block) => {
+    const data = sseDataPayload(block)?.trim();
     if (!data || data === "[DONE]") return [];
     try { return [JSON.parse(data)]; } catch { return []; }
   });

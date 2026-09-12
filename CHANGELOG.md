@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Unify incremental UTF-8/SSE framing for native Responses and protocol bridges: preserve split Chinese/emoji tool arguments, forward CRLF/CR events before EOF, and handle multi-line data through tool restoration and audits.
+- Await downstream drain for native Responses, raw Chat passthrough, and between bridge input events; preserve cancellation. Reject malformed UTF-8 and oversized individual SSE frames instead of silently corrupting or buffering them indefinitely.
+- Add a staged refactor plan, transport regression matrix, and local-only framing benchmark; no checkpoint policy, package version, or runtime installation changes.
+
 - Show the actual running version in the native tray menu and tooltip, with installed-version fallback when stopped. Remove the PowerShell tray's fixed version.
 - Brand Windows startup entries as MOMO API Proxy Service.cmd and MOMO API Proxy Tray.lnk, preserving existing entry data and startup approval state during migration.
 - Stop only the exact installed tray before replacing its locked executable; leave an unchanged running tray alive. Generate Windows product/file version metadata from package.json.
