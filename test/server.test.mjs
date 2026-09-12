@@ -6,8 +6,46 @@ import { ImageAssetStore } from "../src/image-assets.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { attachmentFromPart, imageFromPart, outputParts, responsesToolOutput, safePartJson, safeTextValue } from "../src/protocol-content.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "momo-secret", localToken: "local-secret", host: "127.0.0.1", port: 0 };
+
+test("protocol content module preserves text and keeps binary attachments out of model text", () => {
+  assert.equal(safeTextValue("hello 中文😀"), "hello 中文😀");
+  assert.equal(safeTextValue(`data:application/pdf;base64,${"A".repeat(100_004)}`), "[file: inline application/pdf data]");
+  assert.equal(safeTextValue("A".repeat(100_004)), "[inline binary data omitted]");
+  assert.equal(safePartJson({ name: "fixture", payload: "A".repeat(100_004) }),
+    '{"name":"fixture","payload":"[inline binary data omitted from text]"}');
+
+  assert.deepEqual(imageFromPart({ type: "image", data: "aGVsbG8=", mime_type: "image/png" }), {
+    kind: "base64", mimeType: "image/png", data: "aGVsbG8=", url: "data:image/png;base64,aGVsbG8=",
+  });
+  assert.deepEqual(attachmentFromPart({
+    type: "input_file", filename: "fixture.pdf", file_data: "data:application/pdf;base64,JVBERi0=",
+  }), {
+    marker: "[file: fixture.pdf]",
+    native: { type: "input_file", filename: "fixture.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
+  });
+
+  const mixed = [
+    { type: "output_text", text: "done" },
+    { type: "input_image", image_url: "https://example.invalid/image.png" },
+    { type: "input_file", filename: "fixture.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
+  ];
+  assert.deepEqual(outputParts(mixed), {
+    text: "done\n[file: fixture.pdf]",
+    responseText: "done",
+    images: [{ kind: "url", mimeType: "image/jpeg", url: "https://example.invalid/image.png" }],
+    files: [{ type: "input_file", filename: "fixture.pdf", file_data: "data:application/pdf;base64,JVBERi0=" }],
+    hasText: true,
+  });
+  assert.deepEqual(responsesToolOutput(mixed), [
+    { type: "input_text", text: "done" },
+    { type: "input_image", image_url: "https://example.invalid/image.png" },
+    { type: "input_file", filename: "fixture.pdf", file_data: "data:application/pdf;base64,JVBERi0=" },
+  ]);
+  assert.equal(responsesToolOutput("line one\n中文😀"), "line one\n中文😀");
+});
 
 async function withServer(fetchImpl, run) {
   const server = createMomoSwitch(settings, { fetchImpl });
