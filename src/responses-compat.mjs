@@ -1,5 +1,6 @@
 // Responses tool compatibility: namespace tool flattening and custom tool conversion
 // Ported from OpenCodex for seamless Codex-Canvas and custom tool support in MOMO API.
+import { sseDataPayload, replaceSseDataPayload } from "./stream-transport.mjs";
 
 export const BUILTIN_FUNCTIONS_NAMESPACE = "functions";
 export const ROUTED_CUSTOM_TOOL_PASSTHROUGH = new Set(["apply_patch"]);
@@ -471,33 +472,6 @@ function partialCustomToolInput(argumentsText) {
   return output;
 }
 
-function sseDataPayload(block) {
-  const data = [];
-  for (const line of block.split(/\r?\n/)) {
-    if (!line.startsWith("data:")) continue;
-    const value = line.slice(5);
-    data.push(value.startsWith(" ") ? value.slice(1) : value);
-  }
-  return data.length > 0 ? data.join("\n") : null;
-}
-
-function replaceSseDataPayload(block, payload) {
-  const newline = block.includes("\r\n") ? "\r\n" : "\n";
-  const lines = block.split(/\r?\n/);
-  const rewritten = [];
-  let replaced = false;
-  for (const line of lines) {
-    if (!line.startsWith("data:")) {
-      rewritten.push(line);
-      continue;
-    }
-    if (!replaced) {
-      rewritten.push(`data: ${payload}`);
-      replaced = true;
-    }
-  }
-  return replaced ? rewritten.join(newline) : block;
-}
 
 function replaceSseEventName(block, type) {
   const newline = block.includes("\r\n") ? "\r\n" : "\n";

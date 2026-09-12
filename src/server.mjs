@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { streamSseBlocks, sseDataPayload, replaceSseDataPayload, waitForResponseDrain, writeResponseChunk, forwardResponseBody } from "./stream-transport.mjs";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
 import {
@@ -8,7 +9,7 @@ import {
   restoreAllRoutedCallsInJson,
   createRoutedCustomToolRestoreBlockRewrite,
 } from "./responses-compat.mjs";
-import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, parseSse, responseCreated, sseError } from "./responses-sse.mjs";
+import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, responseCreated, sseError } from "./responses-sse.mjs";
 import { logRequest } from "./logger.mjs";
 import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock, summarizeToolEvents } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
@@ -1064,33 +1065,16 @@ function writeSse(response, chunks) {
   response.end();
 }
 
-async function* streamSseLines(body) {
-  if (!body) return;
-  if (typeof body === "string") {
-    for (const data of parseSse(body)) yield data;
-    return;
-  }
-  let buffer = "";
-  for await (const chunk of body) {
-    buffer += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-    const blocks = buffer.split(/\r?\n\r?\n/);
-    buffer = blocks.pop() || "";
-    for (const block of blocks) {
-      const dataLine = block.split(/\r?\n/).find((l) => l.startsWith("data:"));
-      if (!dataLine) continue;
-      const jsonStr = dataLine.slice(5).trim();
-      if (!jsonStr || jsonStr === "[DONE]") continue;
-      try { yield JSON.parse(jsonStr); } catch {}
-    }
-  }
-  if (buffer.trim()) {
-    const dataLine = buffer.split(/\r?\n/).find((l) => l.startsWith("data:"));
-    if (dataLine) {
-      const jsonStr = dataLine.slice(5).trim();
-      if (jsonStr && jsonStr !== "[DONE]") {
-        try { yield JSON.parse(jsonStr); } catch {}
-      }
-    }
+async function* streamSseLines(body, response, signal) {
+  for await (const block of streamSseBlocks(body)) {
+    const data = sseDataPayload(block)?.trim();
+    if (!data || data === "[DONE]") continue;
+    let parsed;
+    try { parsed = JSON.parse(data); } catch { continue; }
+    yield parsed;
+    // Bridge emitters can write several events for one input frame. Drain that
+    // batch before reading another frame; terminal in-memory batches are separate.
+    await waitForResponseDrain(response, signal);
   }
 }
 
@@ -1179,7 +1163,7 @@ function observeResponsesEvent(state, event) {
 
 function observeResponsesBlock(state, block) {
   if (!state || typeof block !== "string") return;
-  const data = block.split(/\r?\n/).find((line) => line.trim().startsWith("data:"))?.trim().slice(5).trim();
+  const data = sseDataPayload(block)?.trim();
   if (!data || data === "[DONE]") return;
   try { observeResponsesEvent(state, JSON.parse(data)); } catch {}
 }
@@ -1823,7 +1807,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
   let fullAccumulatedText = "";
   const toolCallsByIndex = new Map();
 
-  for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
+  for await (const data of streamSseLines(upstream.body || (await upstream.text()), response, signal)) {
     const choice = data.choices?.[0];
     if (!choice) continue;
 
@@ -1949,98 +1933,72 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   let hasDsml = false;
   let fullAccumulatedText = "";
   let currentResponseId = "resp_" + randomUUID();
-  let buffer = "";
 
-  for await (const chunk of upstream.body) {
-    const textChunk = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-    buffer += textChunk;
-    const blocks = buffer.split("\n\n");
-    buffer = blocks.pop() || "";
+  for await (const block of streamSseBlocks(upstream.body)) {
+    if (!block.trim()) continue;
+    let json = null;
+    const rawJsonStr = sseDataPayload(block)?.trim();
+    if (rawJsonStr && rawJsonStr !== "[DONE]") {
+      try { json = JSON.parse(rawJsonStr); } catch {}
+    }
 
-    for (const block of blocks) {
-      if (!block.trim()) continue;
-      const lines = block.split("\n");
-      const dataLine = lines.find((l) => l.trim().startsWith("data:"));
-      let json = null;
-      let rawJsonStr = null;
-      if (dataLine) {
-        rawJsonStr = dataLine.trim().slice(5).trim();
-        const jsonStr = rawJsonStr;
-        if (jsonStr && jsonStr !== "[DONE]") {
-          try { json = JSON.parse(jsonStr); } catch {}
-        }
+    if (json) {
+      observeToolEvent(response.momoToolEvents, "upstream", json);
+      if (json.type === "response.created" && json.response?.id) {
+        currentResponseId = json.response.id;
       }
-
-      if (json) {
-        observeToolEvent(response.momoToolEvents, "upstream", json);
-        if (json.type === "response.created" && json.response?.id) {
-          currentResponseId = json.response.id;
-        }
-        if (json.type === "response.output_text.delta" && typeof json.delta === "string") {
-          fullAccumulatedText += json.delta;
-          if (fullAccumulatedText.includes("<｜｜DSML｜｜") || fullAccumulatedText.includes("<||DSML||") || fullAccumulatedText.includes("<tool_calls>") || fullAccumulatedText.includes("<invoke ")) {
-            hasDsml = true;
-            continue;
-          }
-        }
-        if (json.type === "response.completed" && hasDsml) {
-          const dsmlCalls = parseDsmlCalls(fullAccumulatedText);
-          const cleanText = stripDsmlMarkup(fullAccumulatedText).trim();
-          const emitter = new ResponseStreamEmitter(response, cleanPayload.model, currentResponseId);
-          if (cleanText) {
-            emitter.writeTextDelta(cleanText);
-            emitter.flushTextMessage();
-          }
-          for (const call of dsmlCalls) {
-            const mapped = restoreToolName(call.name, functions);
-            if (mapped.kind === "custom") {
-              emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
-            } else {
-              emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
-            }
-          }
-          emitter.complete();
-          return;
-        }
-
-        if (!hasDsml) {
-          let transformedBlock = block;
-          if (nsAliases && nsAliases.size > 0 && rawJsonStr) {
-            const restoredJsonStr = restoreAllRoutedCallsInJson(rawJsonStr, nsAliases, null);
-            if (restoredJsonStr !== rawJsonStr) {
-              const rewrittenLines = lines.map((l) => l.trim().startsWith("data:") ? "data: " + restoredJsonStr : l);
-              transformedBlock = rewrittenLines.join("\n");
-            }
-          }
-          const outputBlocks = customToolBlockRewrite(transformedBlock);
-          for (const outBlock of outputBlocks) {
-            observeToolBlock(response.momoToolEvents, "client", outBlock);
-            observeResponsesBlock(responseState, outBlock);
-            response.write(outBlock + "\n\n");
-          }
+      if (json.type === "response.output_text.delta" && typeof json.delta === "string") {
+        fullAccumulatedText += json.delta;
+        if (fullAccumulatedText.includes("<｜｜DSML｜｜") || fullAccumulatedText.includes("<||DSML||") || fullAccumulatedText.includes("<tool_calls>") || fullAccumulatedText.includes("<invoke ")) {
+          hasDsml = true;
           continue;
         }
       }
+      if (json.type === "response.completed" && hasDsml) {
+        const dsmlCalls = parseDsmlCalls(fullAccumulatedText);
+        const cleanText = stripDsmlMarkup(fullAccumulatedText).trim();
+        const emitter = new ResponseStreamEmitter(response, cleanPayload.model, currentResponseId);
+        if (cleanText) {
+          emitter.writeTextDelta(cleanText);
+          emitter.flushTextMessage();
+        }
+        for (const call of dsmlCalls) {
+          const mapped = restoreToolName(call.name, functions);
+          if (mapped.kind === "custom") {
+            emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
+          } else {
+            emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
+          }
+        }
+        emitter.complete();
+        return;
+      }
 
       if (!hasDsml) {
-        const outputBlocks = customToolBlockRewrite(block);
+        let transformedBlock = block;
+        if (nsAliases && nsAliases.size > 0 && rawJsonStr) {
+          const restoredJsonStr = restoreAllRoutedCallsInJson(rawJsonStr, nsAliases, null);
+          if (restoredJsonStr !== rawJsonStr) {
+            transformedBlock = replaceSseDataPayload(block, restoredJsonStr);
+          }
+        }
+        const outputBlocks = customToolBlockRewrite(transformedBlock);
         for (const outBlock of outputBlocks) {
           observeToolBlock(response.momoToolEvents, "client", outBlock);
           observeResponsesBlock(responseState, outBlock);
-          response.write(outBlock + "\n\n");
+          await writeResponseChunk(response, outBlock + "\n\n", signal);
         }
+        continue;
       }
     }
-  }
-  if (buffer.trim() && !hasDsml) {
-    observeToolBlock(response.momoToolEvents, "upstream", buffer);
-    const restoredBuffer = buffer.split("\n").map((line) => line.trim().startsWith("data:")
-      ? "data: " + restoreAllRoutedCallsInJson(line.trim().slice(5).trim(), nsAliases, null) : line).join("\n");
-    const outputBlocks = customToolBlockRewrite(restoredBuffer);
-    for (const outBlock of outputBlocks) {
-      observeToolBlock(response.momoToolEvents, "client", outBlock);
-      observeResponsesBlock(responseState, outBlock);
-      response.write(outBlock);
+
+    if (!hasDsml) {
+      const outputBlocks = customToolBlockRewrite(block);
+      for (const outBlock of outputBlocks) {
+        observeToolBlock(response.momoToolEvents, "client", outBlock);
+        observeResponsesBlock(responseState, outBlock);
+        await writeResponseChunk(response, outBlock + "\n\n", signal);
+      }
     }
   }
   finalizeResponsesState(responseState, replay);
@@ -2067,7 +2025,7 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
   emitter.start();
   let usage;
 
-  for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
+  for await (const data of streamSseLines(upstream.body || (await upstream.text()), response, signal)) {
     const root = data?.response && typeof data.response === "object" ? data.response : data;
     if (root?.usageMetadata) usage = geminiUsage(root.usageMetadata);
     for (const part of root?.candidates?.[0]?.content?.parts || []) {
@@ -2116,7 +2074,7 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
   emitter.start();
 
   const toolBlocks = new Map();
-  for await (const data of streamSseLines(upstream.body || (await upstream.text()))) {
+  for await (const data of streamSseLines(upstream.body || (await upstream.text()), response, signal)) {
     if (data.type === "content_block_delta" && data.delta?.type === "text_delta") {
       emitter.writeTextDelta(data.delta.text);
     }
@@ -2171,25 +2129,10 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
   }
 
   if (upstream.body) {
-    if (typeof upstream.body.getReader === "function") {
-      const reader = upstream.body.getReader();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          response.write(value);
-        }
-      } finally {
-        reader.releaseLock();
-      }
-    } else {
-      for await (const chunk of upstream.body) {
-        response.write(chunk);
-      }
-    }
+    await forwardResponseBody(upstream.body, response, signal);
   } else {
     const text = await upstream.text();
-    response.write(text);
+    await writeResponseChunk(response, text, signal);
   }
   response.end();
 }
