@@ -396,6 +396,12 @@ P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开
 4. 生产部署只允许 immutable digest、单服务重建、健康检查、公开路由验收和回滚记录；CDN 三份产物需逐一回下载校验。
 5. 若缺少远程入口或授权，保持 GitHub Release draft、现网版本与 CDN 产物不变。
 
+### P6 本机验收与版本收口（2026-09-12）
+
+只读验收确认手动更新后的 `127.0.0.1:18789/healthz` 返回 `0.13.12`；`momoapi-proxy --version`、`momo-codex-bridge --version`、CLI `status.version` / `runtimeVersion` 与托盘心跳均为 `0.13.12`。已安装托盘的文件版本和产品版本也是 `0.13.12`。Windows Startup 中当前入口为 `MOMO API Proxy Service.cmd`，旧 `momo-codex-bridge.cmd` 与 `momoapi-proxy-tray.lnk` 均不存在；代码仍保留旧名称兼容迁移。
+
+GitHub `v0.13.12` Release 已公开，但 P1-P5 的性能、稳定性和模块化重构仍位于 `main` 的 Unreleased 区域，包版本继续为 `0.13.12` 会使更新器无法识别这些变化。因此 P6 使用独立 `release/prepare-v0.13.13` 分支准备补丁版本，只更新版本元数据、Changelog 和由该版本生成的托盘二进制；不替换当前 daemon，不修改 VPS/CDN。发布前门禁包括 Windows 全量、Node 24 Alpine、tray、完整历史/工作树/staged secret scan 和发布包内容核验。
+
 P5 验收共同约束：
 
 - 只使用本地合成数据和 mock；不读取真实日志、会话、密钥或生产账户。

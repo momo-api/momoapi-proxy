@@ -2,34 +2,15 @@
 
 ## Unreleased
 
-- Add independently tested bounded async log-writer and rotating file-sink primitives. Not yet connected to the runtime logger: existing request/diagnostic writes, stdout mirroring, paths and process shutdown remain unchanged pending integration.
+## 0.13.13 - 2026-09-12
 
-- Read recent request/diagnostic logs and daemon startup-error excerpts from a bounded tail (at most 1 MiB / 1,000 returned nonempty lines), rather than loading the full file. Preserve UTF-8/CRLF across reverse reads; expose byte-limit and safe read-error reports in the CLI. Log writes, retention, rotation and shutdown flushing are unchanged.
-
-- Separate business, health, control, image and other request metrics in bounded per-server windows; add monotonic queue/body/parse/pre-upstream/headers/first-body-write/transport timing. No request payloads or dynamic labels are retained.
-- Metrics compatibility change: top-level requests and ttfbMs now describe business routes only, with unavailable percentiles returned as null. Legacy all-HTTP counters remain under legacyAllHttpRequests; HTTP success is not SSE/model success. Doctor forwards the explicit availability and stage data.
-
-- Track compact request byte deltas per replaced input slot instead of repeatedly serializing the whole request; retain the existing eight-marker selection cadence and exact final size gate. Local checkpoint retention policy is unchanged and covered by clean-baseline golden tests.
-
-- Incrementally detect DSML markers and decode native custom-tool partial inputs; index pending argument events by item ID/output index while retaining arrival order. Keep output budgets and tool-wire semantics unchanged; add differential benchmarks and streaming regressions.
-
-- Preserve unified-exec JavaScript helper calls (text/image/audio/generatedImage/store/load/notify/exit/timers/yield_control) on Chat/Gemini/Claude bridges instead of incorrectly wrapping them as shell commands; preserve existing bare-shell compatibility.
-
-- Bound model output wire bytes/event counts, retained text/tool/output accumulators and whole-entry continuation cache; fail explicitly and abort upstream instead of emitting false completion after overflow.
-- Preserve the active response ID on streaming failure, reject unresolved native tool arguments at terminal/EOF, and handle identities first supplied in a terminal snapshot.
-- Require full provider-aware history or an explicit handoff for missing/evicted Gemini/Claude result-only continuations; document limits, measurements and remaining performance work. No package version or live runtime change.
-
-- Add bounded per-server ingress admission for Responses, compact, raw Chat and internal image POSTs: FIFO slots/body reservations, queue/read deadlines, shutdown and cancellation cleanup, and aggregate-only local metrics.
-- Validate Content-Length before allocating/reading, count actual uploaded bytes, and return explicit pre-upstream JSON admission errors; no automatic model replay, version bump or live runtime replacement.
-- Track P2a separately from future output/cache budgets and record the full synthetic 10/25/50MiB concurrency matrix, including memory/latency regressions.
-
-- Unify incremental UTF-8/SSE framing for native Responses and protocol bridges: preserve split Chinese/emoji tool arguments, forward CRLF/CR events before EOF, and handle multi-line data through tool restoration and audits.
-- Await downstream drain for native Responses, raw Chat passthrough, and between bridge input events; preserve cancellation. Reject malformed UTF-8 and oversized individual SSE frames instead of silently corrupting or buffering them indefinitely.
-- Add a staged refactor plan, transport regression matrix, and local-only framing benchmark; no checkpoint policy, package version, or runtime installation changes.
-
-- Show the actual running version in the native tray menu and tooltip, with installed-version fallback when stopped. Remove the PowerShell tray's fixed version.
-- Brand Windows startup entries as MOMO API Proxy Service.cmd and MOMO API Proxy Tray.lnk, preserving existing entry data and startup approval state during migration.
-- Stop only the exact installed tray before replacing its locked executable; leave an unchanged running tray alive. Generate Windows product/file version metadata from package.json.
+- Add bounded FIFO ingress admission, body reservations, queue/read deadlines and output/event/cache budgets so overload and oversized responses fail explicitly instead of exhausting memory or emitting false completion.
+- Stream UTF-8/SSE incrementally with downstream backpressure and cancellation propagation; preserve split Unicode and tool arguments while rejecting malformed or oversized frames.
+- Incrementally parse DSML/custom-tool state and compact byte deltas, preserve unified-exec JavaScript helpers across protocol bridges, and require explicit handoff when provider-aware continuation history is incomplete.
+- Integrate bounded asynchronous request/diagnostic logging, rotating sinks and 1 MiB/1,000-line tail reads with shutdown flushing and safe read-error reporting.
+- Separate business/control/health/image metrics and add monotonic queue, body, parse, upstream, first-byte and transport timing without retaining request content or dynamic labels.
+- Split the large server implementation into tested protocol, tool-state, streaming, lifecycle, routing, trace and authentication modules while preserving the external wire contracts.
+- Show the actual runtime version in the Windows tray, migrate startup entries to `MOMO API Proxy Service.cmd` and `MOMO API Proxy Tray.lnk`, and replace only the exact installed tray executable.
 
 ## 0.13.12 - 2026-09-12
 
