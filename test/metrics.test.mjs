@@ -58,8 +58,10 @@ test("metrics accurately track requests, successes, failures, and TTFB", async (
     // 前面 2 次成功 + 1 次 401 失败
     assert.equal(metrics.requests.success, 2);
     assert.equal(metrics.requests.failed, 1);
-    assert.equal(metrics.requests.active, 1); // 只有当前 metrics 请求本身活跃
-    assert.ok(metrics.ttfbMs.samples >= 3);
+    assert.equal(metrics.requests.total, 3);
+    assert.equal(metrics.requests.active, 0); // metrics 查询只计入 control
+    assert.equal(metrics.requestMetrics.groups.control.requests.active, 1);
+    assert.equal(metrics.ttfbMs.samples, 3);
     assert.ok(metrics.ttfbMs.p50 >= 0);
     assert.ok(metrics.memory.rssBytes > 0);
     assert.ok(metrics.memory.externalBytes >= 0);

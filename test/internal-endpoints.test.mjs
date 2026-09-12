@@ -39,7 +39,8 @@ test("internal endpoints enforce loopback and localToken authentication", async 
     assert.ok(typeof metrics.uptimeSeconds === "number");
     assert.ok(typeof metrics.resetTime === "string");
     assert.ok(metrics.requests && typeof metrics.requests.total === "number");
-    assert.ok(metrics.ttfbMs && typeof metrics.ttfbMs.p50 === "number");
+    assert.equal(metrics.ttfbMs.available, false);
+    assert.equal(metrics.ttfbMs.p50, null);
     assert.ok(metrics.memory && typeof metrics.memory.rssBytes === "number");
     assert.ok(typeof metrics.memory.externalBytes === "number");
     assert.equal(metrics.diagnostics?.mode, "local-only");
