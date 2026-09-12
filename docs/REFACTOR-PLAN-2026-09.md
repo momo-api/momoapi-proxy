@@ -379,8 +379,9 @@ P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开
 | P5h | Responses stream state helpers | [#63](https://github.com/momo-api/momoapi-proxy/pull/63) / `1db2704` | 105 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
 | P5i | Responses transport helpers | [#64](https://github.com/momo-api/momoapi-proxy/pull/64) / `b42432b` | 122 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
 | P5j | Image vision helpers | [#66](https://github.com/momo-api/momoapi-proxy/pull/66) / `6650bdc` | Windows 351/0；Alpine 351；tray 11；新增 vision 签名/当前轮次/去重回归 | 已合并 |
+| P5k | HTTP lifecycle helpers | [#68](https://github.com/momo-api/momoapi-proxy/pull/68) / `5dc073c` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；新增 `http-lifecycle` 定向回归（46 passed） | 已合并 |
 
-截至 `6650bdc`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,273 行，减少约 1,371 行；这只是维护性指标，不代表端到端性能自动提升。当前仍需继续拆分 HTTP 生命周期、compact 及路由编排边界，并为每个切片保持 wire、tool-call、背压和取消回归。P5 未完成，尚未进入 P6 发布。
+截至 `5dc073c`，`server.mjs` 已从 P5 前基线约 2,644 行降至 1,234 行，减少约 1,410 行；这只是维护性指标，不代表端到端性能自动提升。HTTP 生命周期边界已完成，当前仍需继续拆分 compact 及路由编排边界，并为每个切片保持 wire、tool-call、背压和取消回归。P5 未完成，尚未进入 P6 发布。
 
 P5 验收共同约束：
 
