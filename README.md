@@ -139,6 +139,44 @@ node .\scripts\codex-cli-smoke.mjs --claude
 
 ## Context and media limits
 
+### Local request metrics
+
+Authenticated loopback GET /internal/metrics exposes requestMetrics schemaVersion 1:
+fixed business, health, control, image and other groups. Business means the exact
+Responses/compact, raw Chat and models routes (including rejected requests).
+Health polling, metrics/shutdown, internal image work, unknown paths and OPTIONS
+are not business latency samples. Each server owns its counters and startedAt;
+each stage retains the latest 500 observations with nearest-rank percentiles.
+
+Compatibility: top-level requests and ttfbMs now alias the business counters and
+clientFirstWriteMs stage. No observations means available:false, samples:0 and
+null percentiles, not 0ms. Existing all-HTTP, module-wide counters are exposed
+under legacyAllHttpRequests. Doctor passes through availability and stage data.
+Context counters, draining state and legacy resetTime remain module-wide; use
+requestMetrics.startedAt/uptimeSeconds for the new per-server measurement epoch.
+
+| Stage | Meaning |
+| --- | --- |
+| queueWaitMs | Admission attempt through grant/rejection; includes reservation checks |
+| bodyReadMs | After admission through body collection, buffer assembly and UTF-8 decode, or read failure |
+| bodyParseMs | JSON.parse, including parse rejection; absent if no parse was attempted |
+| preUpstreamMs | Parsed body ready (or request arrival for GET) through first fetch invocation; not isolated CPU time |
+| upstreamHeadersMs | Per fetch invocation through response/headers resolution, including HTTP errors; absent for thrown fetch failures |
+| clientFirstWriteMs | Arrival through first nonempty local write/end invocation; not socket delivery, upstream first token or model latency |
+| transportTotalMs | Arrival through response finish/early close; includes streaming and client backpressure |
+
+Stages overlap and have different sample populations; do not sum percentiles.
+Fallbacks may produce multiple upstream attempts for one request. Local compact
+has no upstream sample; an empty 204 has no first-body-write sample. success/failed
+describe HTTP transport only: a 200 response.failed SSE remains HTTP success.
+aborted is a subset of failed, not an extra outcome to add to totals. No extra
+response-body reads or retries are introduced by instrumentation.
+
+Metrics retain no URL/query, model, body, credentials, tool names/IDs or schemas.
+Memory RSS remains a process/request-boundary sample, not a true peak or hard cap.
+Run node scripts/benchmark-request-metrics.mjs for synthetic instrumentation cost;
+see the refactor plan for clean-baseline stream A/B evidence and its limits.
+
 ### Local request admission
 
 Responses, compact, raw Chat, and internal image POST requests share a per-server

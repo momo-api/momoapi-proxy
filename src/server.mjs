@@ -1,4 +1,6 @@
 import { createServer } from "node:http";
+import { performance } from "node:perf_hooks";
+import { RequestMetrics } from "./request-metrics.mjs";
 import { RequestAdmission } from "./request-admission.mjs";
 import { DsmlMarkerDetector } from "./incremental-stream-state.mjs";
 import { BoundedCallCache, RetainedOutputBudget, budgetedOutputBody, resolveOutputPolicy, readBoundedOutputText } from "./output-budget.mjs";
@@ -67,7 +69,6 @@ export const metricsState = {
   requestsFailed: 0,
   activeRequests: 0,
   activeSse: 0,
-  ttfbHistory: [],
   maxRssBytes: 0,
   isDraining: false,
   contextRequestsAdmitted: 0,
@@ -87,18 +88,6 @@ export const metricsState = {
   replayBytesSkipped: 0,
 };
 
-export function recordTtfb(ms) {
-  metricsState.ttfbHistory.push(ms);
-  if (metricsState.ttfbHistory.length > 500) metricsState.ttfbHistory.shift();
-}
-
-export function calculatePercentile(arr, p) {
-  if (arr.length === 0) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * p));
-  return sorted[idx];
-}
-
 export function resetMetrics() {
   metricsState.startedAt = Date.now();
   metricsState.resetTime = new Date().toISOString();
@@ -107,7 +96,6 @@ export function resetMetrics() {
   metricsState.requestsFailed = 0;
   metricsState.activeRequests = 0;
   metricsState.activeSse = 0;
-  metricsState.ttfbHistory = [];
   metricsState.maxRssBytes = 0;
   metricsState.isDraining = false;
   metricsState.contextRequestsAdmitted = 0;
@@ -2112,6 +2100,8 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
 }
 
 export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = process.exit, assetStore } = {}) {
+  const requestMetrics = new RequestMetrics();
+  const originalFetch = fetchImpl;
   metricsState.isDraining = false;
   const calls = new BoundedCallCache(settings);
   const activeSockets = new Set();
@@ -2125,25 +2115,27 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
 
   const server = createServer(async (request, response) => {
     const t0 = Date.now();
-    let firstByteRecorded = false;
-
-    // 记录 TTFB (首字节写入时间)
+    const metricPath = (request.url || "/").split("?")[0].replace(/\/+$/, "") || "/";
+    const timing = requestMetrics.begin(request.method, metricPath);
+    const fetchImpl = timing.wrapFetch(originalFetch);
+    // This is a local body-write milestone, not socket delivery or first token.
+    let measuredFirstWrite = false;
+    const measureFirstWrite = (chunk) => {
+      if (measuredFirstWrite || !(chunk?.length || chunk?.byteLength)) return;
+      measuredFirstWrite = true;
+      if (String(response.getHeader("content-type") || "").includes("text/event-stream")) timing.sse();
+      timing.firstWrite();
+    };
     const originalWrite = response.write.bind(response);
     const originalEnd = response.end.bind(response);
 
     response.write = function (...args) {
-      if (!firstByteRecorded) {
-        firstByteRecorded = true;
-        recordTtfb(Date.now() - t0);
-      }
+      measureFirstWrite(args[0]);
       return originalWrite(...args);
     };
 
     response.end = function (...args) {
-      if (!firstByteRecorded) {
-        firstByteRecorded = true;
-        recordTtfb(Date.now() - t0);
-      }
+      measureFirstWrite(args[0]);
       return originalEnd(...args);
     };
 
@@ -2152,8 +2144,15 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
     request.on("error", () => abortController.abort());
     let admissionLease;
     const receiveBody = async () => {
-      admissionLease = await admission.acquire(requestReservationBytes(request, settings), abortController.signal);
-      return bodyOf(request, settings, { signal: abortController.signal, timeoutMs: admission.policy.bodyReadTimeoutMs });
+      const queueStart = performance.now();
+      try { admissionLease = await admission.acquire(requestReservationBytes(request, settings), abortController.signal); }
+      finally { timing.observe("queueWaitMs", performance.now() - queueStart); }
+      try { return await bodyOf(request, settings, { signal: abortController.signal, timeoutMs: admission.policy.bodyReadTimeoutMs }); }
+      finally {
+        timing.observe("bodyReadMs", request.momoBodyReadMs);
+        timing.observe("bodyParseMs", request.momoBodyParseMs);
+        timing.bodyReady();
+      }
     };
     activeAbortControllers.add(abortController);
     response.on("finish", () => activeAbortControllers.delete(abortController));
@@ -2187,8 +2186,12 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       }
     };
 
-    response.on("finish", () => finishCleanup(response.statusCode < 400));
+    response.on("finish", () => {
+      timing.finish(response.statusCode);
+      finishCleanup(response.statusCode < 400);
+    });
     response.on("close", () => {
+      timing.finish(response.statusCode, !response.writableFinished);
       if (!response.writableEnded) {
         abortController.abort();
         finishCleanup(false);
@@ -2326,6 +2329,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
 
         const curMem = process.memoryUsage();
         if (curMem.rss > metricsState.maxRssBytes) metricsState.maxRssBytes = curMem.rss;
+        const measured = requestMetrics.snapshot();
 
         return json(response, 200, {
           ok: true,
@@ -2335,7 +2339,9 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
           admission: admission.snapshot(),
           callCache: calls.snapshot(),
           outputPolicy: resolveOutputPolicy(settings),
-          requests: {
+          requests: measured.groups.business.requests,
+          requestMetrics: measured,
+          legacyAllHttpRequests: {
             total: metricsState.requestsTotal,
             success: metricsState.requestsSuccess,
             failed: metricsState.requestsFailed,
@@ -2359,12 +2365,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             replayDedupHits: metricsState.replayDedupHits,
             replayBytesSkipped: metricsState.replayBytesSkipped,
           },
-          ttfbMs: {
-            p50: calculatePercentile(metricsState.ttfbHistory, 0.5),
-            p95: calculatePercentile(metricsState.ttfbHistory, 0.95),
-            p99: calculatePercentile(metricsState.ttfbHistory, 0.99),
-            samples: metricsState.ttfbHistory.length,
-          },
+          ttfbMs: measured.groups.business.stages.clientFirstWriteMs,
           memory: {
             rssBytes: curMem.rss,
             heapUsedBytes: curMem.heapUsed,
@@ -2372,6 +2373,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             externalBytes: curMem.external,
             arrayBuffersBytes: curMem.arrayBuffers,
             maxRssBytes: metricsState.maxRssBytes,
+            maxRssScope: "request-boundary sampled process RSS; not a true peak or per-server measurement",
           },
           features: {
             dnsCache: { supported: false },

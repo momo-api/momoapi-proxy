@@ -125,6 +125,7 @@ export async function runDoctor({ env = process.env, fetchImpl = fetch } = {}) {
         isDraining: metricsData.isDraining,
         requests: metricsData.requests,
         ttfbMs: metricsData.ttfbMs,
+        requestMetrics: metricsData.requestMetrics,
         memory: metricsData.memory,
       };
     } else {

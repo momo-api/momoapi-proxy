@@ -40,7 +40,9 @@
 | P3 | P1 | 流累计增量处理 + compact/checkpoint 增量预算，末尾精确序列化 | P0/P2 | 状态与工具 wire 等价；避免逐片段/删项全量重扫 | 已合并（P3a/P3b；未发布） |
 | P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 已合并 |
 | P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 已合并 |
-| P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
+| P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 进行中（P4a/P4b） |
+| P4a | P1 | 固定分组、分段计时、无样本语义、doctor 透传 | P0 | 健康查询不污染业务；有界；取消/失败计数正确；工具流回归 | 本地验证通过，待 PR/CI |
+| P4b | P1 | 日志有界异步队列、轮转、尾读、退出刷新 | P4a | 过载丢弃计数、磁盘失败/关停测试；不输出敏感内容 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
 
@@ -178,7 +180,7 @@
 1. P3a 已通过本地/CI 并合并 PR #44；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
 2. P3b 已通过本地/CI 并合并 PR #46。上游 compact 增量计量并最后精确序列化；本地 checkpoint 已有逐项预算，保留算法不改，新增完整结果 golden 验证。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
-4. P4 指标/日志、P5 生命周期/适配器拆分、P6 包发布与安装验收仍未完成。当前没有挂起的发布或自动更新任务。
+4. P4a 指标本地验证通过，P4b 日志、P5 生命周期/适配器拆分、P6 包发布与安装验收仍未完成。当前没有挂起的发布或自动更新任务。
 
 ## P3a 增量流状态（2026-09-12）
 
@@ -216,7 +218,7 @@
 
 最后一行不是提前拒绝换性能：新旧均产生 4097 个 delta，客户端均收到 17,007,261 bytes、response.failed，无 completed。正常场景分别同为 16,774 / 1,063,078 bytes；所有上游 iterator 释放、18 进程正常结束。OS 峰值含启动，结束 heap 不当峰值；3 样本不外推生产容量，不声称 RSS 硬上限。报告保留 Git 外。
 
-剩余：P3b 重复序列化；P4 指标/日志；P5 生命周期与终态背压/多副本；P6 发布。既有 DSML 在 marker 完成前可能已经输出前缀、之后补发清理文本的行为，本批刻意不改变，应另用语义修复 PR 处理。
+本节验收时剩余 P3b（现已合并，见后文）；P4 指标/日志；P5 生命周期与终态背压/多副本；P6 发布。既有 DSML 在 marker 完成前可能已经输出前缀、之后补发清理文本的行为，本批刻意不改变，应另用语义修复 PR 处理。
 
 ## P3b compact 增量预算（2026-09-12）
 
@@ -249,4 +251,32 @@ OS maxRSS 采集于校验哈希前，但包含启动、fixture 构造和初始�
 
 验收：实现 d6158e0 的 Node/container/windows-tray/secret-scan 全绿后合并 [PR #46](https://github.com/momo-api/momoapi-proxy/pull/46)，main 515495c；[最终 CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34686897743)。本地与容器 272/272，历史/工作树/暂存区 Secret scan 无泄漏。
 
-下一步 P4：业务与健康指标分离、分段耗时，以及有界日志队列/轮转/尾读；P5/P6 仍未完成。P3b 已合并，未发布/未安装。
+P3b 已合并，未发布/未安装；后续 P4a 见下文，P4b/P5/P6 仍未完成。
+
+## P4a 请求指标与分段计时（2026-09-12）
+
+基线为干净 main 83afdf7（PR #47）；分支 feat/request-stage-metrics。改动只涉及请求指标和 body 计时，不改变路由、认证、checkpoint、工具转换、日志写入策略、版本或运行实例。
+
+- 先在原版验证红测：4 次健康 + 5 次 metrics 查询被记为 9 个业务请求，目标应为 0。新版每个 server 单独持有固定 business/health/control/image/other 五组，未知路径不能产生新标签。
+- 七个阶段使用单调时钟：准入等待、正文收集/组装/解码、JSON 解析、首次上游前准备、每次 fetch 的响应头、首次非空本地正文写入、HTTP finish/早关总时长。只收集实际发生的阶段；超时没读正文不伪造读取样本，fetch 抛错不伪造响应头样本。
+- 每组/阶段最多 500 个数值（总上限 17,500 个），环形写入；查询时排序，nearest-rank P50/P95/P99。available:false + null 分位数明确表示无样本，observations 为累计观察数。未知 URL、query、model、正文、schema、工具名/ID、认证信息均不进入指标。
+- 顶层 requests/ttfbMs 改为 business 别名，这是有意的指标兼容性变更；legacyAllHttpRequests 保留原全 HTTP 模块级计数。新 requestMetrics 有独立 startedAt/uptimeSeconds；旧 context/draining/resetTime 仍为模块级，未在本批重构。
+- HTTP success 不等于模型/SSE 成功；200 + response.failed 仍归类 HTTP success。aborted 包含在 failed 中。first write 不是客户端收到首字节，也不是模型首 token；多个阶段存在重叠和不同样本数，不可相加各自分位数。
+- fetch 包装保留返回对象身份及错误，不读取或包装响应 body、不添加重试。首次写计时后不再逐 delta 查询 content-type。raw Chat SSE 活跃计数纳入新版指标；关停/取消计数幂等。
+- 新增 16 项测试（15 指标 + 1 doctor）：缺失样本、固定分组、窗口有界/分位数、时钟、成功/取消幂等、fetch 原错误/无重复调用、多 attempt、解析拒绝、local compact 无上游、server 实例隔离、队列超时、raw SSE 原字节、204 无正文、10,000 条不同路径不增标签、doctor 无样本不改成 0；另明确验证 HTTP 200 中 response.failed 的 HTTP 语义和活跃 SSE 取消计数。
+- 最终全量 Windows/Alpine 构建/Alpine 运行各 288/288，tray 11 断言；历史 134 commits/工作树 Secret scan 无泄漏。新增 HTTP 测试用独立临时 profile 隔离合成日志；未读取或上传实际运行日志。暂存扫描及 PR/CI 仍需在提交/合并前验收。
+
+### P4a 采样开销与完整流 A/B
+
+node scripts/benchmark-request-metrics.mjs；Windows x64 / Node v24.16.0 / Xeon E5-2696 v3。预热新旧各 2,000 次，7 轮交错、每轮 20,000 次。仅 mock fetch 中位数约 0.119 微秒/请求，完整记录生命周期 + 一次 mock fetch 约 1.181 微秒/请求；填满五组七阶段的 snapshot 平均约 1.368ms/次。此微基准不是与旧服务器的端到端比较，也不含真实模型。
+
+另用原有 benchmark-output-budget.mjs，--rounds=1 --scenarios=small,normal，旧版 --server-root=<83afdf7 clean tree>；交错三轮、12 个全新 server 进程，严格顺序运行，无并行构建/测试，客户端独立消费。下表每项三个样本中位数，不是可靠生产分位数。
+
+| 场景 | 整体耗时 ms（旧 → 新） | OS maxRSS MiB（旧 → 新） | 工作一致性 |
+| --- | --- | --- | --- |
+| 16KiB 正常流 | 84.37 → 85.80 | 58.85 → 59.34 | 同为 4 deltas / 16,774 bytes / completed |
+| 1MiB 正常流 | 72.95 → 73.58 | 62.93 → 64.95 | 同为 256 deltas / 1,063,078 bytes / completed |
+
+12 次全部正常退出且 upstream iterator released。此脚本验证字节计数/完成状态/释放，不代表逐字节哈希验证；工具内容正确性另由全量 wire/工具/Unicode 回归覆盖。OS maxRSS 含启动，结束 heap 和 sampled RSS 不是真实瞬时峰值。两场景有小幅耗时/内存增加；本批价值是可观测性，不宣称提速或生产容量提升。合成原始报告存 Git 外，未读真实会话/密钥或调用生产模型。
+
+当前 P4a 本地全量/Secret scan 通过，待 PR/CI；P4b 日志、P5 拆分、P6 发布/本机安装未完成。

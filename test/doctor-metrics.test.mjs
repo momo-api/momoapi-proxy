@@ -8,6 +8,7 @@ test("doctor correctly reports daemon metrics when daemon is online", async () =
     isDraining: false,
     requests: { total: 15, success: 14, failed: 1, active: 0, activeSse: 0 },
     ttfbMs: { p50: 120, p95: 350, p99: 500, samples: 15 },
+    requestMetrics: { schemaVersion: 1, groups: { business: { stages: {} } } },
     memory: { rssBytes: 45000000, heapUsedBytes: 25000000, maxRssBytes: 50000000 },
   };
 
@@ -38,6 +39,7 @@ test("doctor correctly reports daemon metrics when daemon is online", async () =
   assert.equal(res.checks.daemonMetrics.uptimeSeconds, 120);
   assert.equal(res.checks.daemonMetrics.requests.total, 15);
   assert.equal(res.checks.daemonMetrics.ttfbMs.p50, 120);
+  assert.deepEqual(res.checks.daemonMetrics.requestMetrics, fakeMetrics.requestMetrics);
 });
 
 test("doctor reports offline reason without fabricating zero values when daemon is unreachable", async () => {
@@ -62,4 +64,16 @@ test("doctor reports offline reason without fabricating zero values when daemon 
   assert.ok(res.checks.daemonMetrics);
   assert.equal(res.checks.daemonMetrics.available, false);
   assert.ok(res.checks.daemonMetrics.reason.includes("ECONNREFUSED"));
+});
+
+test("doctor preserves unavailable timing samples instead of converting null to zero", async () => {
+  const absent = { available: false, samples: 0, observations: 0, p50: null, p95: null, p99: null };
+  const result = await runDoctor({
+    env: { MOMO_API_KEY: "synthetic_key", MOMO_ENDPOINT: "https://synthetic.invalid", MOMO_LOCAL_TOKEN: "synthetic_local" },
+    fetchImpl: async (url) => Response.json(url.includes("/internal/metrics")
+      ? { ttfbMs: absent, requestMetrics: { schemaVersion: 1, groups: {} } }
+      : { data: [] }),
+  });
+  assert.equal(result.checks.daemonMetrics.available, true);
+  assert.deepEqual(result.checks.daemonMetrics.ttfbMs, absent);
 });

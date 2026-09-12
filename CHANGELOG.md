@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Separate business, health, control, image and other request metrics in bounded per-server windows; add monotonic queue/body/parse/pre-upstream/headers/first-body-write/transport timing. No request payloads or dynamic labels are retained.
+- Metrics compatibility change: top-level requests and ttfbMs now describe business routes only, with unavailable percentiles returned as null. Legacy all-HTTP counters remain under legacyAllHttpRequests; HTTP success is not SSE/model success. Doctor forwards the explicit availability and stage data.
+
 - Track compact request byte deltas per replaced input slot instead of repeatedly serializing the whole request; retain the existing eight-marker selection cadence and exact final size gate. Local checkpoint retention policy is unchanged and covered by clean-baseline golden tests.
 
 - Incrementally detect DSML markers and decode native custom-tool partial inputs; index pending argument events by item ID/output index while retaining arrival order. Keep output budgets and tool-wire semantics unchanged; add differential benchmarks and streaming regressions.

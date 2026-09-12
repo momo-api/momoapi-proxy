@@ -1,4 +1,5 @@
 import { admissionError } from "./request-admission.mjs";
+import { performance } from "node:perf_hooks";
 
 export function getMaxRequestBodyBytes(settings = {}) {
   const mb = parseInt(process.env.MOMO_MAX_REQUEST_BODY_MB || settings.maxRequestBodyMb || "64", 10);
@@ -27,6 +28,7 @@ export async function bodyOf(request, settings = {}, { signal, timeoutMs = 12000
   if (signal?.aborted || request.aborted) throw admissionError(499, "request_cancelled", "Client cancelled the upload.");
   const expected = declaredBodyBytes(request, settings);
   const maxBytes = getMaxRequestBodyBytes(settings);
+  const readStart = performance.now();
   const raw = await new Promise((resolve, reject) => {
     let target = expected === null ? null : Buffer.allocUnsafe(expected);
     let chunks = [];
@@ -49,6 +51,7 @@ export async function bodyOf(request, settings = {}, { signal, timeoutMs = 12000
       settled = true;
       cleanup();
       if (error) {
+        request.momoBodyReadMs = performance.now() - readStart;
         request.pause();
         chunks = [];
         target = null;
@@ -60,7 +63,9 @@ export async function bodyOf(request, settings = {}, { signal, timeoutMs = 12000
         chunks = [];
         target = null;
         slab = null;
-        resolve(buffer.toString("utf8"));
+        const text = buffer.toString("utf8");
+        request.momoBodyReadMs = performance.now() - readStart;
+        resolve(text);
       }
     };
     const onError = () => finish(admissionError(400, "request_body_interrupted", "Request body stream was interrupted."));
@@ -99,6 +104,8 @@ export async function bodyOf(request, settings = {}, { signal, timeoutMs = 12000
     if (signal?.aborted || request.aborted) onAbort();
     else if (request.destroyed) onError();
   });
+  const parseStart = performance.now();
   try { return JSON.parse(raw); }
   catch { throw admissionError(400, "invalid_json", "Request body must be valid JSON."); }
+  finally { request.momoBodyParseMs = performance.now() - parseStart; }
 }
