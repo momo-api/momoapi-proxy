@@ -43,6 +43,7 @@ import { resolveOpenCodeSession } from "./opencode-session.mjs";
 import { initSseResponse, streamSseLines, upstreamErrorMessage, writeResponsesFailure } from "./responses-transport.mjs";
 import { expandCurrentImageVisionReferences, withImageVisionReferences } from "./image-vision.mjs";
 import { asArray, authorized, json, openCodeUpstreamHeaders, upstreamHeaders, writeSse } from "./http-lifecycle.mjs";
+import { isChatCompletionsRoute, isCompactRoute, isModelsRoute, isResponsesRoute } from "./route-dispatch.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -997,7 +998,7 @@ export function createMomoSwitch(settings, options = {}) {
       }
 
       // 6. models
-      if (request.method === "GET" && (pathname === "/v1/models" || pathname === "/models")) {
+      if (isModelsRoute(request.method, pathname)) {
         const upstream = await fetchImpl(settings.endpoint + "/v1/models", { headers: upstreamHeaders(settings), signal: abortController.signal });
         finalStatus = upstream.status;
         logRequest({ method: "GET", url: pathname, status: finalStatus, elapsedMs: Date.now() - t0, ip: remoteIp });
@@ -1005,7 +1006,7 @@ export function createMomoSwitch(settings, options = {}) {
       }
 
       // 7. chat completions
-      if (request.method === "POST" && (pathname === "/v1/chat/completions" || pathname === "/chat/completions")) {
+      if (isChatCompletionsRoute(request.method, pathname)) {
         const payload = await receiveBody();
         requestedModel = payload.model;
         await forwardChatCompletions(request, response, settings, payload, fetchImpl, abortController.signal);
@@ -1014,7 +1015,7 @@ export function createMomoSwitch(settings, options = {}) {
       }
 
       // 8. responses
-      if (request.method === "POST" && (pathname === "/v1/responses/compact" || pathname === "/responses/compact")) {
+      if (isCompactRoute(request.method, pathname)) {
         const payload = await receiveBody();
         requestedModel = payload.model;
         if (!payload.model) {
@@ -1026,7 +1027,7 @@ export function createMomoSwitch(settings, options = {}) {
         return;
       }
 
-      if (request.method === "POST" && (pathname === "/v1/responses" || pathname === "/responses")) {
+      if (isResponsesRoute(request.method, pathname)) {
         const payload = await receiveBody();
         requestedModel = payload.model;
         if (!payload.model) {
