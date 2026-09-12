@@ -22,7 +22,7 @@ import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeTo
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
 import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay } from "./compaction.mjs";
-import { preparePreviousResponseReplay, rememberResponseState } from "./responses-state.mjs";
+import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { createImageAssetStore, persistImageResult } from "./image-assets.mjs";
 import { getDiagnosticsMetrics } from "./diagnostics.mjs";
@@ -298,46 +298,6 @@ function writeResponsesFailure(response, model, status, message, code = `http_${
   response.write(failed(respId, model, message, code));
   response.write(sseError(message, code));
   response.end();
-}
-
-function collectResponsesState(response, replay, settings) {
-  if (!replay?.seed) return null;
-  const state = { responseId: null, output: [], terminal: false, budget: new RetainedOutputBudget(settings) };
-  response.momoResponsesState = state;
-  return state;
-}
-
-function observeResponsesEvent(state, event) {
-  if (!state || !event || typeof event !== "object") return;
-  if (event.type === "response.created" && typeof event.response?.id === "string") {
-    state.responseId = event.response.id;
-  }
-  if (event.type === "response.output_item.done" && event.item && typeof event.item === "object") {
-    state.budget.value(event.item);
-    state.output.push(event.item);
-  }
-  if ((event.type === "response.completed" || event.type === "response.incomplete") && event.response) {
-    state.terminal = true;
-    if (typeof event.response.id === "string") state.responseId = event.response.id;
-    if (state.output.length === 0 && Array.isArray(event.response.output)) {
-      state.budget.value(event.response.output);
-      for (const item of event.response.output) state.output.push(item);
-    }
-  }
-}
-
-function observeResponsesBlock(state, block) {
-  if (!state || typeof block !== "string") return;
-  const data = sseDataPayload(block)?.trim();
-  if (!data || data === "[DONE]") return;
-  let parsed;
-  try { parsed = JSON.parse(data); } catch { return; }
-  observeResponsesEvent(state, parsed);
-}
-
-function finalizeResponsesState(state, replay) {
-  if (!state?.terminal || !replay?.seed || !state.responseId || state.output.length === 0) return;
-  rememberResponseState(state.responseId, replay.seed, state.output);
 }
 
 function compactJson(response, status, body, headers = {}) {
