@@ -225,7 +225,7 @@ async function main() {
 
     console.log("正在配置 MOMO API Proxy...");
     const result = await setup({ apiKey, endpoint, port, autostart, desktopAliases, imagePlugin });
-    const desktop = installWindowsDesktop({ port });
+    const desktop = installWindowsDesktop({ port, autostart });
     console.log("MOMO API Proxy 配置成功！");
     console.log("  - 上游端点: " + (endpoint || "https://momoapi.us"));
     console.log("  - 本地代理: http://127.0.0.1:" + port + "/v1");

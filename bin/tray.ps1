@@ -24,7 +24,15 @@ function Get-MomoBinPath {
   return [System.IO.Path]::Combine($homeDir, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs")
 }
 
-$Version = "v0.9.8"
+function Get-InstalledVersion {
+  try {
+    $packagePath = Join-Path (Split-Path -Parent (Split-Path -Parent (Get-MomoBinPath))) 'package.json'
+    $packageVersion = (Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json).version
+    if ($packageVersion -match '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { return "v$packageVersion" }
+  } catch {}
+  return '版本未知'
+}
+$script:Version = Get-InstalledVersion
 
 # Single-instance mutex
 $mutexName = "Local\MomoApiProxyTrayMutex_" + [System.Environment]::UserName
@@ -72,9 +80,14 @@ function Check-BridgeRunning {
     $req = [System.Net.WebRequest]::Create("http://127.0.0.1:" + $Port + "/healthz")
     $req.Timeout = 1200
     $resp = $req.GetResponse()
+    $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+    $health = $reader.ReadToEnd() | ConvertFrom-Json
+    $reader.Dispose()
     $resp.Close()
+    $script:Version = if ($health.version -match '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { 'v' + $health.version } else { '版本未知' }
     return $true
   } catch {
+    $script:Version = Get-InstalledVersion
     return $false
   }
 }
@@ -97,7 +110,7 @@ $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $activeIcon = Create-MomoIcon $true
 $inactiveIcon = Create-MomoIcon $false
 $notifyIcon.Icon = $activeIcon
-$notifyIcon.Text = "MOMO API Proxy $Version (:18789)"
+$notifyIcon.Text = "MOMO API Proxy $Version (:$Port)"
 $notifyIcon.Visible = $true
 
 # Context Menu
@@ -207,8 +220,8 @@ $timer.add_Tick({
   $running = Check-BridgeRunning
   if ($running) {
     $notifyIcon.Icon = $activeIcon
-    $notifyIcon.Text = "MOMO API Proxy $Version (运行中 :18789)"
-    $titleItem.Text = "MOMO API Proxy $Version (运行中 :18789)"
+    $notifyIcon.Text = "MOMO API Proxy $Version (运行中 :$Port)"
+    $titleItem.Text = "MOMO API Proxy $Version (运行中 :$Port)"
   } else {
     $notifyIcon.Icon = $inactiveIcon
     $notifyIcon.Text = "MOMO API Proxy $Version (已停止)"
