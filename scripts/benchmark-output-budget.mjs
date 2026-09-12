@@ -43,6 +43,11 @@ if (process.argv.includes("--worker")) {
     process.send(summary, () => process.disconnect());
   });
 } else {
+  const roundsArg = process.argv.find((arg) => arg.startsWith("--rounds="));
+  const rounds = roundsArg ? Number(roundsArg.slice(9)) : 3;
+  const scenariosArg = process.argv.find((arg) => arg.startsWith("--scenarios="));
+  const scenarios = scenariosArg ? scenariosArg.slice(12).split(",") : ["small", "normal", "flood"];
+  if (!Number.isSafeInteger(rounds) || rounds < 1 || rounds > 20 || !scenarios.length || scenarios.some((name) => !["small", "normal", "flood"].includes(name))) throw new Error("Invalid synthetic benchmark selection");
   function wait(child, type, send) {
     return new Promise((resolve, reject) => {
       const cleanup = () => { clearTimeout(timer); child.off("message", receive); child.off("exit", ended); child.off("error", fail); };
@@ -55,7 +60,7 @@ if (process.argv.includes("--worker")) {
     });
   }
   const results = [];
-  for (const scenario of ["small", "normal", "flood"]) for (let round = 1; round <= 3; round++) {
+  for (const scenario of scenarios) for (let round = 1; round <= rounds; round++) {
     const child = fork(script, ["--worker", "--server-root=" + root], { windowsHide: true, execArgv: ["--expose-gc", "--max-old-space-size=1024"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
     child.stderr.resume();
     try {
@@ -74,5 +79,5 @@ if (process.argv.includes("--worker")) {
       results.push({ scenario, round, status: response.status, bytes, completed, failed, elapsedMs, ...memory });
     } finally { if (child.connected) child.kill(); }
   }
-  console.log(JSON.stringify({ environment: { node: process.version, platform: process.platform, cpu: cpus()[0]?.model }, results, note: "3 fresh-server samples per scenario; local synthetic 16KiB/1MiB/32MiB text output. Flood rejection intentionally changes completed->failed. Not production speed/RSS guarantees. Client excluded; sampled RSS may miss transients, OS lifetime maximum includes startup." }, null, 2));
+  console.log(JSON.stringify({ environment: { node: process.version, platform: process.platform, cpu: cpus()[0]?.model }, rounds, results, note: "Fresh-server samples; local synthetic small=16KiB, normal=1MiB, flood=32MiB text output. Budgets may intentionally reject flood; check terminal fields. Not production speed/RSS guarantees. Client excluded; sampled RSS may miss transients, OS lifetime maximum includes startup." }, null, 2));
 }

@@ -2,11 +2,10 @@
 // Ported from OpenCodex for seamless Codex-Canvas and custom tool support in MOMO API.
 import { sseDataPayload, replaceSseDataPayload } from "./stream-transport.mjs";
 import { RetainedOutputBudget } from "./output-budget.mjs";
+import { PartialCustomInputDecoder, PendingToolArguments } from "./incremental-stream-state.mjs";
 
 export const BUILTIN_FUNCTIONS_NAMESPACE = "functions";
 export const ROUTED_CUSTOM_TOOL_PASSTHROUGH = new Set(["apply_patch"]);
-const FREEFORM_WRAP_PREFIX = '{"input":"';
-const FREEFORM_WRAP_PREFIX_RE = /^\s*\{\s*"input"\s*:\s*"/;
 
 export function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -443,37 +442,6 @@ export function restoreAllRoutedCallsInJson(text, aliases, customNames) {
   }
 }
 
-function partialCustomToolInput(argumentsText) {
-  const match = FREEFORM_WRAP_PREFIX_RE.exec(argumentsText);
-  if (!match) return null;
-  const body = argumentsText.slice(match[0].length);
-  let output = "";
-  for (let index = 0; index < body.length; index++) {
-    const char = body[index];
-    if (char === '"') break;
-    if (char !== "\\") {
-      output += char;
-      continue;
-    }
-    const escaped = body[index + 1];
-    if (escaped === undefined) break;
-    index += 1;
-    if (escaped === "n") output += "\n";
-    else if (escaped === "t") output += "\t";
-    else if (escaped === "r") output += "\r";
-    else if (escaped === "b") output += "\b";
-    else if (escaped === "f") output += "\f";
-    else if (escaped === "u") {
-      const hex = body.slice(index + 1, index + 5);
-      if (hex.length !== 4 || !/^[0-9a-fA-F]{4}$/.test(hex)) break;
-      output += String.fromCharCode(Number.parseInt(hex, 16));
-      index += 4;
-    } else output += escaped;
-  }
-  return output;
-}
-
-
 function replaceSseEventName(block, type) {
   const newline = block.includes("\r\n") ? "\r\n" : "\n";
   const lines = block.split(/\r?\n/);
@@ -499,22 +467,15 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
   const budget = new RetainedOutputBudget(settings);
   const ordinaryItemIds = new Set();
   const openCalls = new Map();
-  let pendingArguments = [];
+  const pendingArguments = new PendingToolArguments();
+  const newOpenCall = () => ({ argumentsText: "", decoder: new PartialCustomInputDecoder() });
 
   const releaseCall = (itemId) => {
     openCalls.delete(itemId);
   };
 
   const takePendingArguments = (itemId, outputIndex) => {
-    const matched = [];
-    const remaining = [];
-    for (const pending of pendingArguments) {
-      const matches = pending.itemId !== undefined
-        ? itemId !== undefined && pending.itemId === itemId
-        : outputIndex !== undefined && pending.outputIndex === outputIndex;
-      (matches ? matched : remaining).push(pending);
-    }
-    pendingArguments = remaining;
+    const matched = pendingArguments.take(itemId, outputIndex);
     return matched.map((pending) => {
       if (pending.itemId !== undefined || itemId === undefined) return pending.block;
       const payload = sseDataPayload(pending.block);
@@ -566,7 +527,7 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
           ordinaryItemIds.add(upstreamItemId);
         }
         if (routed && type === "response.output_item.added") {
-          openCalls.set(upstreamItemId, { argumentsText: "", emittedInput: "" });
+          openCalls.set(upstreamItemId, newOpenCall());
         }
       }
       const pending = takePendingArguments(upstreamItemId, outputIndex);
@@ -575,7 +536,7 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
         return [...pending, block];
       }
       if (upstreamItemId && pending.length > 0 && !openCalls.has(upstreamItemId)) {
-        openCalls.set(upstreamItemId, { argumentsText: "", emittedInput: "" });
+        openCalls.set(upstreamItemId, newOpenCall());
       }
       const restored = restoreRoutedCustomCalls(parsed, names);
       const restoredBlock = restored.changed
@@ -593,7 +554,7 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
       || type === "response.function_call_arguments.done";
     if (argumentEvent && (!upstreamItemId || (!itemNames.has(upstreamItemId) && !ordinaryItemIds.has(upstreamItemId)))) {
       budget.text(block, 1);
-      pendingArguments.push({ block, itemId: upstreamItemId, outputIndex });
+      pendingArguments.add({ block, itemId: upstreamItemId, outputIndex });
       return [];
     }
     if (
@@ -601,17 +562,13 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
       && upstreamItemId
       && itemNames.has(upstreamItemId)
     ) {
-      const open = openCalls.get(upstreamItemId) || { argumentsText: "", emittedInput: "" };
+      const open = openCalls.get(upstreamItemId) || newOpenCall();
       const delta = typeof parsed.delta === "string" ? parsed.delta : "";
       budget.text(delta);
       open.argumentsText += delta;
       openCalls.set(upstreamItemId, open);
-      if (FREEFORM_WRAP_PREFIX.startsWith(open.argumentsText)) return [];
-      const fullInput = partialCustomToolInput(open.argumentsText);
-      if (fullInput === null) return [];
-      if (!fullInput.startsWith(open.emittedInput) || fullInput.length === open.emittedInput.length) return [];
-      const inputDelta = fullInput.slice(open.emittedInput.length);
-      open.emittedInput = fullInput;
+      const inputDelta = open.decoder.push(delta);
+      if (!inputDelta) return [];
       const nextType = "response.custom_tool_call_input.delta";
       const next = {
         ...parsed,
@@ -644,18 +601,18 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
     const restored = restoreRoutedCustomCalls(parsed, names);
     const terminal = type === "response.completed" || type === "response.failed" || type === "response.incomplete";
     const terminalPending = [];
-    if (type === "response.completed" && pendingArguments.length && Array.isArray(parsed.response?.output)) {
+    if (type === "response.completed" && pendingArguments.size && Array.isArray(parsed.response?.output)) {
       // Some providers identify the call only in the terminal output snapshot.
       // Replay its pending deltas through the ordinary path before completion.
       for (const [index, item] of parsed.response.output.entries()) {
-        if (item?.type !== "function_call" || !pendingArguments.some((pending) => pending.itemId !== undefined ? pending.itemId === item.id : pending.outputIndex === index)) continue;
+        if (item?.type !== "function_call" || !pendingArguments.has(item.id, index)) continue;
         terminalPending.push(...rewrite("data: " + JSON.stringify({ type: "response.output_item.done", output_index: index, item })));
       }
     }
     if (terminal) {
-      if (pendingArguments.length && type === "response.completed") throw unresolved();
+      if (pendingArguments.size && type === "response.completed") throw unresolved();
       openCalls.clear();
-      pendingArguments = [];
+      pendingArguments.clear();
       itemNames.clear();
       ordinaryItemIds.clear();
     }
@@ -667,7 +624,7 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
   function unresolved() {
     return Object.assign(new Error("Upstream tool arguments have no matching call; response cannot be completed safely."), { statusCode: 502, code: "unmatched_tool_arguments" });
   }
-  rewrite.finish = () => { if (pendingArguments.length) throw unresolved(); };
+  rewrite.finish = () => { if (pendingArguments.size) throw unresolved(); };
   return rewrite;
 }
 

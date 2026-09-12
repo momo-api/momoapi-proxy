@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { RequestAdmission } from "./request-admission.mjs";
+import { DsmlMarkerDetector } from "./incremental-stream-state.mjs";
 import { BoundedCallCache, RetainedOutputBudget, budgetedOutputBody, resolveOutputPolicy, readBoundedOutputText } from "./output-budget.mjs";
 import { bodyOf, requestReservationBytes } from "./request-body.mjs";
 export { bodyOf, getMaxRequestBodyBytes } from "./request-body.mjs";
@@ -1794,6 +1795,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
 
   let fullAccumulatedText = "";
   const toolCallsByIndex = new Map();
+  const dsmlDetector = new DsmlMarkerDetector();
   const accumulatedBudget = new RetainedOutputBudget(settings);
 
   for await (const data of streamSseLines(upstream.body || (await readBoundedOutputText(upstream)), response, signal, settings)) {
@@ -1804,7 +1806,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
     if (deltaContent) {
       accumulatedBudget.text(deltaContent);
       fullAccumulatedText += deltaContent;
-      if (!fullAccumulatedText.includes("<｜｜DSML｜｜") && !fullAccumulatedText.includes("<||DSML||") && !fullAccumulatedText.includes("<tool_calls>") && !fullAccumulatedText.includes("<invoke ")) {
+      if (!dsmlDetector.push(deltaContent)) {
         emitter.writeTextDelta(deltaContent);
       }
     }
@@ -1825,7 +1827,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
     }
   }
 
-  const hasDsml = fullAccumulatedText.includes("<｜｜DSML｜｜") || fullAccumulatedText.includes("<||DSML||") || fullAccumulatedText.includes("<tool_calls>") || fullAccumulatedText.includes("<invoke ");
+  const hasDsml = dsmlDetector.found;
   if (hasDsml) {
     const dsmlCalls = parseDsmlCalls(fullAccumulatedText);
     const cleanText = stripDsmlMarkup(fullAccumulatedText).trim();
@@ -1910,6 +1912,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames, settings);
   const functions = extractFunctions(payload);
   let hasDsml = false;
+  const dsmlDetector = new DsmlMarkerDetector();
   let fullAccumulatedText = "";
   let currentResponseId = "resp_" + randomUUID();
   const accumulatedBudget = new RetainedOutputBudget(settings);
@@ -1931,7 +1934,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
       if (json.type === "response.output_text.delta" && typeof json.delta === "string") {
         accumulatedBudget.text(json.delta);
         fullAccumulatedText += json.delta;
-        if (fullAccumulatedText.includes("<｜｜DSML｜｜") || fullAccumulatedText.includes("<||DSML||") || fullAccumulatedText.includes("<tool_calls>") || fullAccumulatedText.includes("<invoke ")) {
+        if (dsmlDetector.push(json.delta)) {
           hasDsml = true;
           continue;
         }

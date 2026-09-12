@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Incrementally detect DSML markers and decode native custom-tool partial inputs; index pending argument events by item ID/output index while retaining arrival order. Keep output budgets and tool-wire semantics unchanged; add differential benchmarks and streaming regressions.
+
 - Preserve unified-exec JavaScript helper calls (text/image/audio/generatedImage/store/load/notify/exit/timers/yield_control) on Chat/Gemini/Claude bridges instead of incorrectly wrapping them as shell commands; preserve existing bare-shell compatibility.
 
 - Bound model output wire bytes/event counts, retained text/tool/output accumulators and whole-entry continuation cache; fail explicitly and abort upstream instead of emitting false completion after overflow.
