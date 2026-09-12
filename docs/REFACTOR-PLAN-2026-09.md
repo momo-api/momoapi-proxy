@@ -383,8 +383,9 @@ P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开
 | P5l | Compact endpoint helpers | [#70](https://github.com/momo-api/momoapi-proxy/pull/70) / `7753783` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；新增 compact policy/parser/reader/encoding 回归（51 passed） | 已合并 |
 | P5m | Public route dispatch helpers | [#72](https://github.com/momo-api/momoapi-proxy/pull/72) / `36cf5c1` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；完整本地 352/356（既有日志竞争测试复跑通过）；路由矩阵定向回归 61 passed | 已合并 |
 | P5n | Model routing helper | [#74](https://github.com/momo-api/momoapi-proxy/pull/74) / `5396c2b` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；模型协议矩阵与空模型回归通过 | 已合并 |
+| P5o | Context trace helpers | [#76](https://github.com/momo-api/momoapi-proxy/pull/76) / `2c8eced` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；trace 计数幂等与日志字段回归 61 passed | 已合并 |
 
-截至 `5396c2b`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,176 行，减少约 1,468 行；这只是维护性指标，不代表端到端性能自动提升。HTTP 生命周期、compact endpoint、公共路由判定和模型协议判定边界已完成，当前仍需继续拆分路由编排中的响应/图片分支，并为每个切片保持 wire、tool-call、背压和取消回归。P5 未完成，尚未进入 P6 发布。
+截至 `2c8eced`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,153 行，减少约 1,491 行；这只是维护性指标，不代表端到端性能自动提升。HTTP 生命周期、compact endpoint、公共路由判定、模型协议判定与 context trace 边界已完成；剩余主要是响应/图片路由编排，完成后再收口 P5 并进入 P6 验收规划。
 
 P5 验收共同约束：
 
