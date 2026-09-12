@@ -21,7 +21,8 @@ import { logRequest as writeRequestLog } from "./logger.mjs";
 import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock, summarizeToolEvents } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
-import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, encodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay } from "./compaction.mjs";
+import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay } from "./compaction.mjs";
+import { encodeRecoverableCompaction, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { createImageAssetStore, persistImageResult } from "./image-assets.mjs";
@@ -46,7 +47,6 @@ import { asArray, authorized, json, openCodeUpstreamHeaders, upstreamHeaders, wr
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
 const MUSE_PREFIX = /^muse-/;
-const COMPACT_RESPONSE_MAX_BYTES = 32 * 1024 * 1024;
 export const metricsState = {
   startedAt: Date.now(),
   resetTime: new Date().toISOString(),
@@ -140,58 +140,6 @@ function contextLogFields(response, request) {
 
 function compactJson(response, status, body, headers = {}) {
   return json(response, status, body, headers);
-}
-
-function shouldUseLocalCompact(status, message = "") {
-  if (status === 413) return true;
-  if (status === 405 || status === 501) return true;
-  if (status === 404) return !/\bmodel\b/i.test(String(message));
-  return status === 400 && /(?:compact|endpoint|route).*(?:unsupported|not supported|not found|unavailable|unknown)/i.test(String(message));
-}
-
-async function readCompactResponseText(upstream) {
-  if (!upstream.body) return "";
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of upstream.body) {
-    const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : Buffer.from(chunk);
-    total += buffer.length;
-    if (total > COMPACT_RESPONSE_MAX_BYTES) {
-      try { await upstream.body.cancel?.(); } catch {}
-      const error = new Error("Compact response exceeded the 32 MiB safety limit.");
-      error.statusCode = 502;
-      error.code = "compact_response_too_large";
-      throw error;
-    }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks, total).toString("utf8");
-}
-
-function parseCompactResponseText(text) {
-  let payload;
-  try { payload = JSON.parse(text); } catch {
-    const error = new Error("Compact endpoint returned invalid JSON.");
-    error.statusCode = 502;
-    error.code = "invalid_compact_response";
-    throw error;
-  }
-  if (!payload || payload.object !== "response.compaction" || !Array.isArray(payload.output)) {
-    const error = new Error("Compact endpoint returned an invalid response.compaction object.");
-    error.statusCode = 502;
-    error.code = "invalid_compact_response";
-    throw error;
-  }
-  return payload;
-}
-
-function encodeRecoverableCompaction(model, input, output) {
-  try {
-    return encodeLocalCompaction(output);
-  } catch (error) {
-    if (error?.code !== "local_compaction_envelope_too_large") throw error;
-    return encodeLocalCompaction(buildLocalCompactResponse(model, input).output);
-  }
 }
 
 async function forwardCompact(request, response, settings, payload, fetchImpl, signal, compactLocks) {
