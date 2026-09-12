@@ -40,8 +40,8 @@
 | P3 | P1 | 流累计增量处理 + compact/checkpoint 增量预算，末尾精确序列化 | P0/P2 | 状态与工具 wire 等价；避免逐片段/删项全量重扫 | 已合并（P3a/P3b；未发布） |
 | P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 已合并 |
 | P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 已合并 |
-| P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 进行中（P4a/P4b） |
-| P4a | P1 | 固定分组、分段计时、无样本语义、doctor 透传 | P0 | 健康查询不污染业务；有界；取消/失败计数正确；工具流回归 | PR #48 待最终验收 |
+| P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 进行中（P4a 已合并，P4b 待开始） |
+| P4a | P1 | 固定分组、分段计时、无样本语义、doctor 透传 | P0 | 健康查询不污染业务；有界；取消/失败计数正确；工具流回归 | 已合并（未发布） |
 | P4b | P1 | 日志有界异步队列、轮转、尾读、退出刷新 | P4a | 过载丢弃计数、磁盘失败/关停测试；不输出敏感内容 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
@@ -180,7 +180,7 @@
 1. P3a 已通过本地/CI 并合并 PR #44；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
 2. P3b 已通过本地/CI 并合并 PR #46。上游 compact 增量计量并最后精确序列化；本地 checkpoint 已有逐项预算，保留算法不改，新增完整结果 golden 验证。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
-4. P4a 指标本地验证通过，P4b 日志、P5 生命周期/适配器拆分、P6 包发布与安装验收仍未完成。当前没有挂起的发布或自动更新任务。
+4. P4a 指标已通过最终 CI 并合并 PR #48；下一步 P4b 日志，随后 P5 生命周期/适配器拆分、P6 包发布与安装验收。当前没有挂起的发布或自动更新任务。
 
 ## P3a 增量流状态（2026-09-12）
 
@@ -279,4 +279,6 @@ node scripts/benchmark-request-metrics.mjs；Windows x64 / Node v24.16.0 / Xeon 
 
 12 次全部正常退出且 upstream iterator released。此脚本验证字节计数/完成状态/释放，不代表逐字节哈希验证；工具内容正确性另由全量 wire/工具/Unicode 回归覆盖。OS maxRSS 含启动，结束 heap 和 sampled RSS 不是真实瞬时峰值。两场景有小幅耗时/内存增加；本批价值是可观测性，不宣称提速或生产容量提升。合成原始报告存 Git 外，未读真实会话/密钥或调用生产模型。
 
-实现 e96164d 的 Node/container/windows-tray/secret-scan 全绿（[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34688110164)）；[PR #48](https://github.com/momo-api/momoapi-proxy/pull/48) 补充 native SSE 测试后等待最新 head 再次验收，不沿用旧 head 的绿灯合并。P4b 日志、P5 拆分、P6 发布/本机安装未完成。
+实现 e96164d 的四类 CI 全绿后补充 native SSE 测试；最终 da3f71b 的 Node/container/windows-tray/secret-scan 再次全绿（[最终 CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34688288679)），已合并 [PR #48](https://github.com/momo-api/momoapi-proxy/pull/48)，main 8087a6e。本地 Windows/Alpine 构建/运行最终均 289/289，tray 11 断言；实现/补充测试提交前均已 Secret scan。
+
+下一步 P4b：普通请求日志仍为同步 append，最近日志仍为整文件读，诊断事件另有同步写入。需分别验证有界队列/溢出计数、文件容量及轮转、退出限时刷新、只读尾部、磁盘失败与并发 writer 行为，不能把 P4a 指标完成写成日志已优化。P4a 未发布/未安装；P4b/P5/P6 未完成。
