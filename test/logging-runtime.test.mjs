@@ -7,6 +7,7 @@ import { recordDiagnosticEvent } from "../src/diagnostics.mjs";
 import { legacyLogPath, logPath, logRequest, readRecentLogs } from "../src/logger.mjs";
 import { createLoggingRuntime, diagnosticEventPath, requestEventPath } from "../src/logging-runtime.mjs";
 import { closeLoggingWithinDeadline, closeServerAndLogging, createSignalStopper } from "../src/process-shutdown.mjs";
+import { createMomoSwitch } from "../src/server.mjs";
 
 function scratchRuntime(t, options = {}) {
   const home = mkdtempSync(join(tmpdir(), "momo-logging-runtime-"));
@@ -99,4 +100,22 @@ test("signal stopper is idempotent and exits after bounded close", async () => {
   const stop = createSignalStopper({ server: { listening: false }, loggingRuntime: { close: async () => { closes++; } },
     beforeStop: () => { before++; }, exitImpl: () => { exits++; }, timeoutMs: 50 });
   assert.equal(stop(), stop()); await stop(); assert.equal(before, 1); assert.equal(closes, 1); assert.equal(exits, 1);
+});
+
+test("server close callback waits for its internally owned logging runtime", async () => {
+  let release, closeCalls = 0;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const runtime = { env: process.env, enqueueRequest: () => true, enqueueDiagnostic: () => true,
+    snapshot: () => ({ request: {}, diagnostic: {} }), close: () => { closeCalls++; return gate; } };
+  const server = createMomoSwitch({ endpoint: "https://gateway.example", apiKey: "synthetic",
+    localToken: "synthetic-local", host: "127.0.0.1", port: 0 }, { loggingRuntimeFactory: () => runtime });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  let callbackCalled = false;
+  const closed = new Promise((resolve) => server.close(() => { callbackCalled = true; resolve(); }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closeCalls, 1);
+  assert.equal(callbackCalled, false);
+  release({ completed: true });
+  await closed;
+  assert.equal(callbackCalled, true);
 });

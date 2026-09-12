@@ -94,7 +94,7 @@
 | 2026-09-12 | 运行核实 | 127.0.0.1:18789 健康、version 0.13.12、service momo-codex-bridge | 本轮未发布/未替换本机/未操作 VPS；不得把 main 合并当运行升级 |
 | 2026-09-12 | P3a 本地 | 新增 10 项；Windows/Alpine 构建/运行各 252/252；tray 11 断言；历史/工作树扫描通过；工具字节哈希相同；18 个隔离 loopback 样本 | perf/incremental-stream-state；待 PR/CI；未发布 |
 | 2026-09-12 | P3a 合并 | d1cb70d 最终 Node/container/windows-tray/secret-scan 全绿后合并 | main 2e2c1a4；[PR #44](https://github.com/momo-api/momoapi-proxy/pull/44)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34685748125)；未发布/未安装 |
-| 2026-09-12 | P4b2b 本地 | Windows 343 passed + 3 POSIX skips；Node 24 Alpine 346/346；tray 11 断言；CLI/HTTP/SIGTERM、端口占用、在线/离线版本与 daemon 指标及工具/checkpoint 回归通过 | perf/integrate-bounded-logging；待提交/PR/CI；未发布/未安装 |
+| 2026-09-12 | P4b2b 本地 | Windows 344 passed + 3 POSIX skips；Node 24 Alpine 347/347；tray 11 断言；CLI/HTTP/SIGTERM、端口占用、在线/离线版本与 daemon 指标、短命 server 日志生命周期及工具/checkpoint 回归通过 | perf/integrate-bounded-logging；PR #54 CI 中；未发布/未安装 |
 
 ## 首批性能记录与取舍
 
@@ -358,6 +358,6 @@ P4b2a 已合并，未接入/未发布/未安装；P4b2b 接入、P5、P6 未完�
 - SIGINT/SIGTERM、启动失败和 HTTP shutdown 均进行限时 close；注入 close 永不 settle 时外层硬期限仍退出。HTTP 的最终 50ms exit delay 计入同一 drain 总预算。JS 无法强制取消已提交的 fs I/O，因此期限后仍可能有 uncertain/pending；不宣称 fsync 或断电耐久性。
 - 托盘构建的 SHA-256 改用 .NET API，避免 Windows PowerShell 5.1 经 cmd/npm 启动时 Get-FileHash 模块函数解析异常；托盘版本仍由 package.json 生成。
 
-本地验收：最终 Windows npm test 343 passed + 3 POSIX skips；Node 24 Alpine 346/346（含真实 SIGTERM、symlink/FIFO 和多进程竞争）；Windows tray 11/11；完整历史与当前工作树 Secret scan 均通过。额外覆盖离线 status 不伪造 daemon 日志计数、doctor 同时透传 logging/diagnostics。测试只使用临时 profile、本地 mock 和合成数据，未读真实日志/会话/密钥，未发送模型请求，未替换 0.13.12 运行实例或操作 VPS。暂存区 scan、提交、PR/CI 尚待完成。
+本地验收：最终 Windows npm test 344 passed + 3 POSIX skips；Node 24 Alpine 347/347（含真实 SIGTERM、symlink/FIFO 和多进程竞争）；Windows tray 11/11；完整历史、当前工作树和暂存区 Secret scan 均通过。额外覆盖离线 status 不伪造 daemon 日志计数、doctor 同时透传 logging/diagnostics，以及普通 server.close callback 等待其自有日志 runtime 限时收口，避免临时目录清理竞态。测试只使用临时 profile、本地 mock 和合成数据，未读真实日志/会话/密钥，未发送模型请求，未替换 0.13.12 运行实例或操作 VPS。PR #54 CI 尚待完成。
 
 P4b2b 当前为本地验证通过，未合并/未发布/未安装。下一步完成 secret scan、PR 与四类 CI；P5 再按生命周期/adapter/tool state 聚焦拆分 server.mjs，P6 独立做安装、运行验收与发布。

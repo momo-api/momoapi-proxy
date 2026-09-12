@@ -2102,9 +2102,11 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
 }
 
 export function createMomoSwitch(settings, options = {}) {
-  const { fetchImpl = fetch, exitImpl = process.exit, assetStore, loggingRuntime = createLoggingRuntime({
+  const { fetchImpl = fetch, exitImpl = process.exit, assetStore } = options;
+  const ownsLoggingRuntime = !options.loggingRuntime;
+  const loggingRuntime = options.loggingRuntime || (options.loggingRuntimeFactory || createLoggingRuntime)({
     diagnosticsEnabled: settings.diagnosticsEnabled, consoleMirror: false,
-  }) } = options;
+  });
   const requestMetrics = new RequestMetrics();
   const originalFetch = fetchImpl;
   metricsState.isDraining = false;
@@ -2615,6 +2617,20 @@ export function createMomoSwitch(settings, options = {}) {
   server.on("error", () => {
     if (shutdownLifecycle) shutdownLifecycle.forceShutdown();
   });
+
+  // Library/test callers commonly await server.close(callback) and then remove
+  // their temporary profile. When this server created the async logger, make
+  // that callback a lifecycle barrier so pending appends cannot race cleanup.
+  // Explicitly injected runtimes remain owned by their caller (the CLI does
+  // its own signal/HTTP deadline handling).
+  if (ownsLoggingRuntime) {
+    const closeServer = server.close.bind(server);
+    let closeOwnedLogging = null;
+    server.close = (callback) => closeServer((...args) => {
+      closeOwnedLogging ||= closeLoggingWithinDeadline({ loggingRuntime, timeoutMs: 1000 });
+      if (typeof callback === "function") void closeOwnedLogging.finally(() => callback(...args));
+    });
+  }
 
   return server;
 }
