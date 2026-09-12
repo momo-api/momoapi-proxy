@@ -384,8 +384,17 @@ P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开
 | P5m | Public route dispatch helpers | [#72](https://github.com/momo-api/momoapi-proxy/pull/72) / `36cf5c1` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；完整本地 352/356（既有日志竞争测试复跑通过）；路由矩阵定向回归 61 passed | 已合并 |
 | P5n | Model routing helper | [#74](https://github.com/momo-api/momoapi-proxy/pull/74) / `5396c2b` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；模型协议矩阵与空模型回归通过 | 已合并 |
 | P5o | Context trace helpers | [#76](https://github.com/momo-api/momoapi-proxy/pull/76) / `2c8eced` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；trace 计数幂等与日志字段回归 61 passed | 已合并 |
+| P5p | Internal authentication helpers | [#78](https://github.com/momo-api/momoapi-proxy/pull/78) / `d836c2e` | Windows/Alpine/tray/secret-scan 四类 CI 全绿；loopback/token 及内部端点集成回归 8 passed | 已合并 |
 
-截至 `2c8eced`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,153 行，减少约 1,491 行；这只是维护性指标，不代表端到端性能自动提升。HTTP 生命周期、compact endpoint、公共路由判定、模型协议判定与 context trace 边界已完成；剩余主要是响应/图片路由编排，完成后再收口 P5 并进入 P6 验收规划。
+截至 `d836c2e`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,148 行，减少约 1,496 行；这只是维护性指标，不代表端到端性能自动提升。HTTP 生命周期、compact endpoint、公共路由判定、模型协议判定、context trace 与内部鉴权边界已完成。剩余响应/图片主编排属于高副作用区域，本阶段不再为降行数硬拆；P5 模块化拆分完成，下一步进入 P6 最终验收规划。
+
+### P6 验收入口（待单独授权执行）
+
+1. 在干净 `main` 上确认版本、安装脚本、自启项与 `momo-codex-bridge` / `momoapi-proxy-tray` 品牌命名。
+2. 仅使用明确的本机运行目录和已确认的远程发布入口做安装验收；不猜测 SSH 主机，不覆盖当前运行实例。
+3. 发布前重新执行 Windows、Node 24 Alpine、tray、secret scan，并生成可回滚的版本化包和校验值。
+4. 生产部署只允许 immutable digest、单服务重建、健康检查、公开路由验收和回滚记录；CDN 三份产物需逐一回下载校验。
+5. 若缺少远程入口或授权，保持 GitHub Release draft、现网版本与 CDN 产物不变。
 
 P5 验收共同约束：
 
