@@ -18,7 +18,7 @@ import {
 } from "./responses-compat.mjs";
 import { ResponseStreamEmitter, customToolEvents, functionEvents } from "./responses-sse.mjs";
 import { logRequest as writeRequestLog } from "./logger.mjs";
-import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock, summarizeToolEvents } from "./tool-audit.mjs";
+import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
 import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay } from "./compaction.mjs";
@@ -45,6 +45,7 @@ import { expandCurrentImageVisionReferences, withImageVisionReferences } from ".
 import { asArray, authorized, json, openCodeUpstreamHeaders, upstreamHeaders, writeSse } from "./http-lifecycle.mjs";
 import { isChatCompletionsRoute, isCompactRoute, isModelsRoute, isResponsesRoute } from "./route-dispatch.mjs";
 import { resolveTargetModel as resolveModelRoute } from "./model-routing.mjs";
+import { contextLogFields, recordContextTrace as applyContextTrace } from "./context-trace.mjs";
 
 export const metricsState = {
   startedAt: Date.now(),
@@ -72,6 +73,10 @@ export const metricsState = {
   replayDedupHits: 0,
   replayBytesSkipped: 0,
 };
+
+function recordContextTrace(response, trace, admitted = true) {
+  return applyContextTrace(response, trace, metricsState, admitted);
+}
 
 export function resetMetrics() {
   metricsState.startedAt = Date.now();
@@ -102,34 +107,6 @@ export function resetMetrics() {
 
 export function resolveTargetModel(model) {
   return resolveModelRoute(model);
-}
-
-function recordContextTrace(response, trace, admitted = true) {
-  if (!trace) return;
-  response.momoContextTrace = trace;
-  if (trace.metricsRecorded) return;
-  trace.metricsRecorded = true;
-  if (admitted) metricsState.contextRequestsAdmitted++;
-  else metricsState.contextRequestsRejected++;
-  if (trace.softLimitHit) metricsState.outboundBodySoftLimitHits++;
-  if (trace.hardLimitRejected) metricsState.outboundBodyHardLimitRejects++;
-  metricsState.imageBytesRemoved += trace.imageBytesRemoved || 0;
-  metricsState.imageBytesForwarded += trace.imageBytesForwarded || 0;
-  metricsState.imageDedupHits += trace.imageDedupHits || 0;
-  metricsState.historicalImagesRemoved += trace.historicalImagesRemoved || 0;
-  metricsState.maxSerializedBodyBytes = Math.max(metricsState.maxSerializedBodyBytes, trace.maxOutboundBytes || trace.outboundBytes || 0);
-}
-
-function contextLogFields(response, request) {
-  const trace = response.momoContextTrace;
-  return {
-    toolAudit: response.momoToolAudit ? { ...response.momoToolAudit, events: summarizeToolEvents(response.momoToolEvents) } : undefined,
-    requestBytes: trace?.requestBytes || request.momoRequestBodyBytes,
-    outboundBytes: trace?.outboundBytes,
-    imageCount: trace?.imageCount,
-    imageBytes: trace?.imageBytes,
-    policyAction: trace?.policyActions?.join(",") || (trace?.hardLimitRejected ? "hard_limit_rejected" : undefined),
-  };
 }
 
 function compactJson(response, status, body, headers = {}) {
