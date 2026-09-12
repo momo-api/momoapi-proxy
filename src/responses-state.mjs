@@ -6,6 +6,7 @@ const MAX_STATE_BYTES = 2 * 1024 * 1024;
 const MAX_FINGERPRINT_BYTES = 8 * 1024;
 const MAX_FINGERPRINT_DEPTH = 64;
 const MAX_TOTAL_STATE_FINGERPRINTS = 32_768;
+const MAX_IDENTITY_BYTES = 8192;
 
 const responseStates = new Map();
 let totalStateFingerprints = 0;
@@ -161,6 +162,7 @@ export function preparePreviousResponseReplay(payload) {
 
 export function rememberResponseState(responseId, seed, outputItems) {
   if (typeof responseId !== "string" || !responseId || !seed || !Array.isArray(outputItems) || outputItems.length === 0) return false;
+  if (Buffer.byteLength(responseId, "utf8") > MAX_IDENTITY_BYTES || typeof seed.model !== "string" || Buffer.byteLength(seed.model, "utf8") > MAX_IDENTITY_BYTES) return false;
   const output = fingerprintsFor(outputItems);
   if (!output) return false;
   const fingerprints = [...seed.fingerprints, ...output.fingerprints];

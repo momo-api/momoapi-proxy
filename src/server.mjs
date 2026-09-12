@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { RequestAdmission } from "./request-admission.mjs";
+import { BoundedCallCache, RetainedOutputBudget, budgetedOutputBody, resolveOutputPolicy, readBoundedOutputText } from "./output-budget.mjs";
 import { bodyOf, requestReservationBytes } from "./request-body.mjs";
 export { bodyOf, getMaxRequestBodyBytes } from "./request-body.mjs";
 import { streamSseBlocks, sseDataPayload, replaceSseDataPayload, waitForResponseDrain, writeResponseChunk, forwardResponseBody } from "./stream-transport.mjs";
@@ -301,6 +302,16 @@ function rememberCall(calls, callId, value) {
     if (oldest === undefined) break;
     calls.delete(oldest);
   }
+}
+
+function emitRememberedCall(emitter, calls, mapped, args, callId, context = {}) {
+  const id = callId || "call_" + randomUUID();
+  rememberCall(calls, id, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: args, ...context });
+  try {
+    return mapped.kind === "custom"
+      ? emitter.writeCustomToolCall({ callId: id, name: mapped.originalName, input: customInput(args) })
+      : emitter.writeFunctionCall({ callId: id, name: mapped.originalName, arguments: args });
+  } catch (error) { calls.delete(id); throw error; }
 }
 
 function dataImage(value) {
@@ -720,6 +731,7 @@ function geminiUsage(usage) {
 
 export function buildClaudeMessages(input, calls) {
   const items = asArray(input);
+  calls?.requireContinuation?.(items, "claudeMessages");
   const hasOnlyToolResults = items.length > 0 && items.every((i) => i && (i.type === "function_call_output" || i.type === "custom_tool_call_output"));
   const firstCallId = hasOnlyToolResults ? items[0].call_id : null;
   const knownFirst = firstCallId ? calls?.get(firstCallId) : null;
@@ -844,6 +856,7 @@ export function buildClaudeMessages(input, calls) {
 
 export function buildGeminiContents(input, calls) {
   const items = asArray(input);
+  calls?.requireContinuation?.(items, "geminiContents");
   const historyCalls = new Map();
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
@@ -1031,8 +1044,8 @@ function writeSse(response, chunks) {
   response.end();
 }
 
-async function* streamSseLines(body, response, signal) {
-  for await (const block of streamSseBlocks(body)) {
+async function* streamSseLines(body, response, signal, settings) {
+  for await (const block of streamSseBlocks(budgetedOutputBody(body, settings), resolveOutputPolicy(settings))) {
     const data = sseDataPayload(block)?.trim();
     if (!data || data === "[DONE]") continue;
     let parsed;
@@ -1082,7 +1095,7 @@ function contextLogFields(response, request) {
 }
 
 async function upstreamErrorMessage(upstream) {
-  const errText = await upstream.text();
+  const errText = await readBoundedOutputText(upstream);
   let message;
   try {
     const parsed = JSON.parse(errText);
@@ -1098,16 +1111,16 @@ async function upstreamErrorMessage(upstream) {
 
 function writeResponsesFailure(response, model, status, message, code = `http_${status}`) {
   if (!response.headersSent) initSseResponse(response, status);
-  const respId = "resp_err_" + randomUUID();
-  response.write(responseCreated(model, respId).data);
+  const respId = response.momoResponseId || "resp_err_" + randomUUID();
+  if (!response.momoResponseId) response.write(responseCreated(model, respId).data);
   response.write(failed(respId, model, message, code));
   response.write(sseError(message, code));
   response.end();
 }
 
-function collectResponsesState(response, replay) {
+function collectResponsesState(response, replay, settings) {
   if (!replay?.seed) return null;
-  const state = { responseId: null, output: [], terminal: false };
+  const state = { responseId: null, output: [], terminal: false, budget: new RetainedOutputBudget(settings) };
   response.momoResponsesState = state;
   return state;
 }
@@ -1118,12 +1131,16 @@ function observeResponsesEvent(state, event) {
     state.responseId = event.response.id;
   }
   if (event.type === "response.output_item.done" && event.item && typeof event.item === "object") {
+    state.budget.value(event.item);
     state.output.push(event.item);
   }
   if ((event.type === "response.completed" || event.type === "response.incomplete") && event.response) {
     state.terminal = true;
     if (typeof event.response.id === "string") state.responseId = event.response.id;
-    if (state.output.length === 0 && Array.isArray(event.response.output)) state.output.push(...event.response.output);
+    if (state.output.length === 0 && Array.isArray(event.response.output)) {
+      state.budget.value(event.response.output);
+      for (const item of event.response.output) state.output.push(item);
+    }
   }
 }
 
@@ -1131,7 +1148,9 @@ function observeResponsesBlock(state, block) {
   if (!state || typeof block !== "string") return;
   const data = sseDataPayload(block)?.trim();
   if (!data || data === "[DONE]") return;
-  try { observeResponsesEvent(state, JSON.parse(data)); } catch {}
+  let parsed;
+  try { parsed = JSON.parse(data); } catch { return; }
+  observeResponsesEvent(state, parsed);
 }
 
 function finalizeResponsesState(state, replay) {
@@ -1263,7 +1282,7 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
       const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
       response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
       initSseResponse(response);
-      const emitter = new ResponseStreamEmitter(response, payload.model);
+      const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
       emitter.start();
       const index = emitter.outputIndex++;
       emitter.outputItems.push(item);
@@ -1290,7 +1309,7 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
     const output = Array.isArray(compacted?.output) ? compacted.output : [];
     const encryptedContent = encodeRecoverableCompaction(payload.model, prepared.payload.input, output);
     initSseResponse(response);
-    const emitter = new ResponseStreamEmitter(response, payload.model);
+    const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
     emitter.start();
     const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
     const index = emitter.outputIndex++;
@@ -1303,7 +1322,7 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
       const output = Array.isArray(checkpoint.output) ? checkpoint.output : [];
       const encryptedContent = encodeRecoverableCompaction(payload.model, compactPayload.input, output);
       initSseResponse(response);
-      const emitter = new ResponseStreamEmitter(response, payload.model);
+      const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
       emitter.start();
       const item = { type: "compaction", id: `cmp_${randomUUID()}`, encrypted_content: encryptedContent };
       const index = emitter.outputIndex++;
@@ -1767,18 +1786,20 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
   }
 
   initSseResponse(response);
-  const emitter = new ResponseStreamEmitter(response, payload.model);
+  const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
   emitter.start();
 
   let fullAccumulatedText = "";
   const toolCallsByIndex = new Map();
+  const accumulatedBudget = new RetainedOutputBudget(settings);
 
-  for await (const data of streamSseLines(upstream.body || (await upstream.text()), response, signal)) {
+  for await (const data of streamSseLines(upstream.body || (await readBoundedOutputText(upstream)), response, signal, settings)) {
     const choice = data.choices?.[0];
     if (!choice) continue;
 
     const deltaContent = choice.delta?.content;
     if (deltaContent) {
+      accumulatedBudget.text(deltaContent);
       fullAccumulatedText += deltaContent;
       if (!fullAccumulatedText.includes("<｜｜DSML｜｜") && !fullAccumulatedText.includes("<||DSML||") && !fullAccumulatedText.includes("<tool_calls>") && !fullAccumulatedText.includes("<invoke ")) {
         emitter.writeTextDelta(deltaContent);
@@ -1787,6 +1808,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
 
     if (Array.isArray(choice.delta?.tool_calls)) {
       for (const tc of choice.delta.tool_calls) {
+        accumulatedBudget.value(tc);
         const idx = tc.index ?? 0;
         let existing = toolCallsByIndex.get(idx);
         if (!existing) {
@@ -1809,13 +1831,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
     }
     for (const call of dsmlCalls) {
       const mapped = restoreToolName(call.name, functions);
-      if (mapped.kind === "custom") {
-        const tool = emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
-        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: call.arguments, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
-      } else {
-        const tool = emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
-        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: call.arguments || {}, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
-      }
+      emitRememberedCall(emitter, calls, mapped, call.arguments || {}, undefined, { openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
     }
   }
 
@@ -1829,13 +1845,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
         parsedArgs = call.arguments;
       }
 
-      if (mapped.kind === "custom") {
-        const tool = emitter.writeCustomToolCall({ callId: call.id, name: mapped.originalName, input: customInput(parsedArgs) });
-        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: parsedArgs, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
-      } else {
-        const tool = emitter.writeFunctionCall({ callId: call.id, name: mapped.originalName, arguments: parsedArgs });
-        rememberCall(calls, tool.callId, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: parsedArgs, openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
-      }
+      emitRememberedCall(emitter, calls, mapped, parsedArgs, call.id, { openCodeSessionId: resolveOpenCodeSession(request, payload, calls) });
     }
   }
 
@@ -1891,16 +1901,17 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   recordContextTrace(response, prepared.trace, true);
   initSseResponse(response);
   if (!upstream.body) return response.end();
-  const responseState = collectResponsesState(response, replay);
+  const responseState = collectResponsesState(response, replay, settings);
 
   const allCustomNames = new Set(["exec", "apply_patch", ...customNames, ...searchNames]);
-  const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames);
+  const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames, settings);
   const functions = extractFunctions(payload);
   let hasDsml = false;
   let fullAccumulatedText = "";
   let currentResponseId = "resp_" + randomUUID();
+  const accumulatedBudget = new RetainedOutputBudget(settings);
 
-  for await (const block of streamSseBlocks(upstream.body)) {
+  for await (const block of streamSseBlocks(budgetedOutputBody(upstream.body, settings), resolveOutputPolicy(settings))) {
     if (!block.trim()) continue;
     let json = null;
     const rawJsonStr = sseDataPayload(block)?.trim();
@@ -1912,8 +1923,10 @@ async function forwardResponses(request, response, settings, payload, calls, fet
       observeToolEvent(response.momoToolEvents, "upstream", json);
       if (json.type === "response.created" && json.response?.id) {
         currentResponseId = json.response.id;
+        response.momoResponseId = currentResponseId;
       }
       if (json.type === "response.output_text.delta" && typeof json.delta === "string") {
+        accumulatedBudget.text(json.delta);
         fullAccumulatedText += json.delta;
         if (fullAccumulatedText.includes("<｜｜DSML｜｜") || fullAccumulatedText.includes("<||DSML||") || fullAccumulatedText.includes("<tool_calls>") || fullAccumulatedText.includes("<invoke ")) {
           hasDsml = true;
@@ -1923,7 +1936,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
       if (json.type === "response.completed" && hasDsml) {
         const dsmlCalls = parseDsmlCalls(fullAccumulatedText);
         const cleanText = stripDsmlMarkup(fullAccumulatedText).trim();
-        const emitter = new ResponseStreamEmitter(response, cleanPayload.model, currentResponseId);
+        const emitter = new ResponseStreamEmitter(response, cleanPayload.model, currentResponseId, settings);
         if (cleanText) {
           emitter.writeTextDelta(cleanText);
           emitter.flushTextMessage();
@@ -1967,6 +1980,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
       }
     }
   }
+  customToolBlockRewrite.finish?.();
   finalizeResponsesState(responseState, replay);
   response.end();
 }
@@ -1987,11 +2001,11 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
     return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
   }
   initSseResponse(response);
-  const emitter = new ResponseStreamEmitter(response, payload.model);
+  const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
   emitter.start();
   let usage;
 
-  for await (const data of streamSseLines(upstream.body || (await upstream.text()), response, signal)) {
+  for await (const data of streamSseLines(upstream.body || (await readBoundedOutputText(upstream)), response, signal, settings)) {
     const root = data?.response && typeof data.response === "object" ? data.response : data;
     if (root?.usageMetadata) usage = geminiUsage(root.usageMetadata);
     for (const part of root?.candidates?.[0]?.content?.parts || []) {
@@ -2004,14 +2018,7 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
           ? part.functionCall.id
           : undefined;
         const callId = upstreamCallId && !calls.has(upstreamCallId) ? upstreamCallId : undefined;
-        const tool = mapped.kind === "custom"
-          ? emitter.writeCustomToolCall({ callId, name: mapped.originalName, input: customInput(part.functionCall.args) })
-          : emitter.writeFunctionCall({ callId, name: mapped.originalName, arguments: part.functionCall.args || {} });
-        rememberCall(calls, tool.callId, {
-          name: mapped.name,
-          originalName: mapped.originalName,
-          kind: mapped.kind,
-          arguments: part.functionCall.args || {},
+        emitRememberedCall(emitter, calls, mapped, part.functionCall.args || {}, callId, {
           geminiContents: body.contents,
           geminiFunctionCallPart: structuredClone(part),
         });
@@ -2036,20 +2043,22 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
     return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
   }
   initSseResponse(response);
-  const emitter = new ResponseStreamEmitter(response, payload.model);
+  const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
   emitter.start();
 
   const toolBlocks = new Map();
-  for await (const data of streamSseLines(upstream.body || (await upstream.text()), response, signal)) {
+  const accumulatedBudget = new RetainedOutputBudget(settings);
+  for await (const data of streamSseLines(upstream.body || (await readBoundedOutputText(upstream)), response, signal, settings)) {
     if (data.type === "content_block_delta" && data.delta?.type === "text_delta") {
       emitter.writeTextDelta(data.delta.text);
     }
     if (data.type === "content_block_start" && data.content_block?.type === "tool_use") {
+      accumulatedBudget.value(data.content_block);
       toolBlocks.set(data.index, { id: data.content_block.id, name: data.content_block.name, input: data.content_block.input || {}, partialJson: "" });
     }
     if (data.type === "content_block_delta" && data.delta?.type === "input_json_delta") {
       const block = toolBlocks.get(data.index);
-      if (block) block.partialJson += data.delta.partial_json || "";
+      if (block) { accumulatedBudget.text(data.delta.partial_json || ""); block.partialJson += data.delta.partial_json || ""; }
     }
     if (data.type === "content_block_stop" && toolBlocks.has(data.index)) {
       const block = toolBlocks.get(data.index);
@@ -2059,14 +2068,7 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
         try { argumentsValue = JSON.parse(block.partialJson); } catch { argumentsValue = block.partialJson; }
       }
       const mapped = restoreToolName(block.name, functions);
-      const tool = mapped.kind === "custom"
-        ? emitter.writeCustomToolCall({ callId: block.id, name: mapped.originalName, input: customInput(argumentsValue) })
-        : emitter.writeFunctionCall({ callId: block.id, name: mapped.originalName, arguments: argumentsValue });
-      rememberCall(calls, tool.callId, {
-        name: mapped.name,
-        originalName: mapped.originalName,
-        kind: mapped.kind,
-        arguments: argumentsValue,
+      emitRememberedCall(emitter, calls, mapped, argumentsValue, block.id, {
         claudeMessages: body.messages,
         toolUseBlock: { type: "tool_use", id: block.id, name: block.name, input: argumentsValue },
       });
@@ -2095,9 +2097,9 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
   }
 
   if (upstream.body) {
-    await forwardResponseBody(upstream.body, response, signal);
+    await forwardResponseBody(budgetedOutputBody(upstream.body, settings), response, signal);
   } else {
-    const text = await upstream.text();
+    const text = await readBoundedOutputText(upstream, resolveOutputPolicy(settings).maxStreamMb * 1024 * 1024);
     await writeResponseChunk(response, text, signal);
   }
   response.end();
@@ -2105,7 +2107,7 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
 
 export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = process.exit, assetStore } = {}) {
   metricsState.isDraining = false;
-  const calls = new Map();
+  const calls = new BoundedCallCache(settings);
   const activeSockets = new Set();
   const activeSseEmitters = new Set();
   const activeAbortControllers = new Set();
@@ -2325,6 +2327,8 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
           resetTime: metricsState.resetTime,
           isDraining: metricsState.isDraining,
           admission: admission.snapshot(),
+          callCache: calls.snapshot(),
+          outputPolicy: resolveOutputPolicy(settings),
           requests: {
             total: metricsState.requestsTotal,
             success: metricsState.requestsSuccess,
@@ -2545,6 +2549,10 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         return json(response, 413, body);
       }
 
+      if (error.code === "tool_continuation_unavailable") {
+        return json(response, 409, { error: { message: error.message, type: "invalid_request_error", code: error.code } });
+      }
+
       if (error.statusCode === 400) {
         logRequest({ method: request.method, url: pathname, status: 400, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
         return json(response, 400, { error: { message: error.message, type: "invalid_request_error", code: "invalid_json" } });
@@ -2558,8 +2566,13 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
 
       logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, errorCode: error.code || "upstream_request_failed", ip: remoteIp, ...contextLogFields(response, request) });
       if (pathname === "/v1/responses" || pathname === "/responses") {
-        return writeResponsesFailure(response, requestedModel || "unknown", 502, error.message);
+        abortController.abort();
+        return writeResponsesFailure(response, requestedModel || "unknown", 502, error.message, error.code || "upstream_request_failed");
       }
+      abortController.abort();
+      // Raw Chat may already be streaming non-Responses bytes: close it as a
+      // truncated transport, never append incompatible JSON or a fake DONE.
+      if (response.headersSent) return response.destroy();
       return json(response, 502, { error: { message: error.message, type: "server_error" } });
     } finally {
       // Hold through parsing, normalization and upstream completion/cancellation.

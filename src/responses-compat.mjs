@@ -1,6 +1,7 @@
 // Responses tool compatibility: namespace tool flattening and custom tool conversion
 // Ported from OpenCodex for seamless Codex-Canvas and custom tool support in MOMO API.
 import { sseDataPayload, replaceSseDataPayload } from "./stream-transport.mjs";
+import { RetainedOutputBudget } from "./output-budget.mjs";
 
 export const BUILTIN_FUNCTIONS_NAMESPACE = "functions";
 export const ROUTED_CUSTOM_TOOL_PASSTHROUGH = new Set(["apply_patch"]);
@@ -490,11 +491,12 @@ function replaceSseEventName(block, type) {
   return next.join(newline);
 }
 
-export function createRoutedCustomToolRestoreBlockRewrite(names) {
+export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) {
   if (!names || names.size === 0) {
     return (block) => [block];
   }
   const itemNames = new Map();
+  const budget = new RetainedOutputBudget(settings);
   const ordinaryItemIds = new Set();
   const openCalls = new Map();
   let pendingArguments = [];
@@ -555,6 +557,8 @@ export function createRoutedCustomToolRestoreBlockRewrite(names) {
       const wireName = parsed.item.name;
       const routed = wireName !== undefined && names.has(wireName);
       if (upstreamItemId) {
+        budget.text(upstreamItemId, 1);
+        budget.text(wireName);
         if (routed) {
           itemNames.set(upstreamItemId, parsed.item.name);
           ordinaryItemIds.delete(upstreamItemId);
@@ -588,6 +592,7 @@ export function createRoutedCustomToolRestoreBlockRewrite(names) {
     const argumentEvent = type === "response.function_call_arguments.delta"
       || type === "response.function_call_arguments.done";
     if (argumentEvent && (!upstreamItemId || (!itemNames.has(upstreamItemId) && !ordinaryItemIds.has(upstreamItemId)))) {
+      budget.text(block, 1);
       pendingArguments.push({ block, itemId: upstreamItemId, outputIndex });
       return [];
     }
@@ -598,6 +603,7 @@ export function createRoutedCustomToolRestoreBlockRewrite(names) {
     ) {
       const open = openCalls.get(upstreamItemId) || { argumentsText: "", emittedInput: "" };
       const delta = typeof parsed.delta === "string" ? parsed.delta : "";
+      budget.text(delta);
       open.argumentsText += delta;
       openCalls.set(upstreamItemId, open);
       if (FREEFORM_WRAP_PREFIX.startsWith(open.argumentsText)) return [];
@@ -637,17 +643,31 @@ export function createRoutedCustomToolRestoreBlockRewrite(names) {
 
     const restored = restoreRoutedCustomCalls(parsed, names);
     const terminal = type === "response.completed" || type === "response.failed" || type === "response.incomplete";
+    const terminalPending = [];
+    if (type === "response.completed" && pendingArguments.length && Array.isArray(parsed.response?.output)) {
+      // Some providers identify the call only in the terminal output snapshot.
+      // Replay its pending deltas through the ordinary path before completion.
+      for (const [index, item] of parsed.response.output.entries()) {
+        if (item?.type !== "function_call" || !pendingArguments.some((pending) => pending.itemId !== undefined ? pending.itemId === item.id : pending.outputIndex === index)) continue;
+        terminalPending.push(...rewrite("data: " + JSON.stringify({ type: "response.output_item.done", output_index: index, item })));
+      }
+    }
     if (terminal) {
+      if (pendingArguments.length && type === "response.completed") throw unresolved();
       openCalls.clear();
       pendingArguments = [];
       itemNames.clear();
       ordinaryItemIds.clear();
     }
     return restored.changed
-      ? [replaceSseDataPayload(block, JSON.stringify(restored.value))]
-      : [block];
+      ? [...terminalPending, replaceSseDataPayload(block, JSON.stringify(restored.value))]
+      : [...terminalPending, block];
   };
 
+  function unresolved() {
+    return Object.assign(new Error("Upstream tool arguments have no matching call; response cannot be completed safely."), { statusCode: 502, code: "unmatched_tool_arguments" });
+  }
+  rewrite.finish = () => { if (pendingArguments.length) throw unresolved(); };
   return rewrite;
 }
 

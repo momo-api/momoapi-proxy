@@ -34,8 +34,8 @@
 | P0 | P0 | 基线、计划、合成回归、可重复基准 | 无 | 旧缺陷确定性失败；无生产请求 | 已合并 |
 | P1 | P0 | UTF-8/SSE 共用分帧；换行、多行 data、EOF；流写入背压 | P0 | 参数完全一致；首帧早于 EOF；慢写暂停读取；取消不回退 | 已合并 |
 | P2 | P1 | 大请求并发/总资源预算、队列与超时、body 副本、输出累计预算 | P1 | 1/2/4 并发 × 10/25/50MiB；记录 RSS/heap/external/GC/event-loop；超限明确拒绝，无 OOM | 进行中 |
-| P2a | P1 | 入站准入：并发/正文总预算、FIFO、超时/取消/关停、读取模块 | P1 | 等待不读正文；释放无泄漏；本地矩阵；错误不触达上游 | PR 待验收 |
-| P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 待开始 |
+| P2a | P1 | 入站准入：并发/正文总预算、FIFO、超时/取消/关停、读取模块 | P1 | 等待不读正文；释放无泄漏；本地矩阵；错误不触达上游 | 已合并 |
+| P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 本地验证通过 |
 | P3 | P1 | compact/checkpoint 增量预算，末尾精确序列化；保留语义不变 | P0 | 状态等价；全请求序列化次数不随删除项线性增长 | 待开始 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
@@ -77,6 +77,8 @@
 | 2026-09-12 | P0/P1 合并 | 356e66a 的最终四类 CI 全绿后合并 | [最终 PR 检查](https://github.com/momo-api/momoapi-proxy/actions/runs/34677225440)；main 7781d6e；未发布 |
 | 2026-09-12 | P2a 本地 | 18 项新增测试；Windows 214/214；Alpine 构建/运行各 214/214；tray 11 断言；54 次矩阵均 HTTP 200、无 OOM | 实现 695f16d；[PR #40](https://github.com/momo-api/momoapi-proxy/pull/40)；未合并/未发布 |
 | 2026-09-12 | P2a CI | 695f16d 的 Node/container/windows-tray/secret-scan 全绿 | [实现提交检查](https://github.com/momo-api/momoapi-proxy/actions/runs/34678248551)；后续提交需重新验收 |
+| 2026-09-12 | P2a 合并 | b7c2528 最终 Node/container/windows-tray/secret-scan 全绿后合并 | main 6e2150a；[PR #40](https://github.com/momo-api/momoapi-proxy/pull/40)；未发布 |
+| 2026-09-12 | P2b 本地 | 26 项新增测试；Windows/Alpine 构建/Alpine 运行各 240/240；tray 11 断言；18 个输出压力样本、4 并发溢出/3,000 次缓存 churn | feat/bounded-output-state；待 PR/CI；未发布 |
 
 ## 首批性能记录与取舍
 
@@ -131,3 +133,33 @@
 4×50MiB 时新实现峰值只准入 2 个（预留 104,939,866 bytes），其余 2 个排队；所有测试最终 active/queued/reservedBytes 回到 0。这个场景 RSS 中位数约降 16%，最大事件循环延迟中位数约降 39%，整组耗时基本持平。不宣称全面提速/降内存：10MiB×1、25MiB×2/4、50MiB×1 的 OS 峰值 RSS 有回退，25MiB×4 延迟也有回退，后续 P3 需优化同步解析/重复序列化并重新测量。
 
 报告同时记录采样 heapUsed/external/arrayBuffers、GC 次数/耗时、event-loop P95/max。5ms 采样会漏掉同步瞬时峰值；OS maxRSS 覆盖进程启动到结束，GC/分配策略使不同场景不严格单调。54 次结果为本地合成样本，不能替代生产基准、RSS 硬边界或超长 SSE 测试。
+
+## P2b 输出预算与续接缓存
+
+基线：main 6e2150a（PR #40）；干净新克隆分支 feat/bounded-output-state。先验证 1 项旧版红测：多帧累计可越过设定总预算仍 completed。修改未改变 checkpoint 保留策略、模型路由、认证或发布配置。
+
+- upstream 原始字节默认 64MiB；SSE 最多 65,536 blocks；现有单帧 32MiB 不变。raw Chat 只计字节；上游错误正文另限 1MiB，compact 保留原 32MiB 限制。
+- 单个累计器默认 16MiB 逻辑 UTF-8 bytes / 16,384 项或结构节点 / 最大深度 64。覆盖 custom pending/open state、原生 DSML text、Responses replay 输出、Chat/Claude 工具累计和 emitter 输出。预算单调，重复快照重复计费，不是总 heap/RSS 上限。
+- 当前 response ID 沿用；预算超限明确 response.failed/output_budget_exceeded，取消上游并释放 ingress lease；不吞掉预算异常、不缓存成功续接锚点。已写 HTTP 200 时只能依 SSE 终态判断；已送达片段不能撤回。
+- 未配对参数到 terminal/EOF 仍无身份时明确 unmatched_tool_arguments；支持最终 snapshot 才提供身份时恢复配对，不静默丢弃。
+- per-server call cache 从仅 512 条改为 512 条 + 64MiB 逻辑字节；整条准入/淘汰，超大单条在发出工具前拒绝。Gemini/Claude 仅结果续接缺缓存时，409/tool_continuation_unavailable 要求完整提供方历史或新 handoff，不拼假的调用。
+- replay 指纹原有限额保持，仅增加 8KiB response/model identity 上限，防止巨大 cache key。
+
+### 本地输出压力样本
+
+命令 npm run benchmark:output；--server-root 可指向 PR #40 的 b7c2528 基线源码。Windows x64、Node v24.16.0、Xeon E5-2696 v3，每种场景 3 个全新 server 进程；独立 client 边读边丢弃，mock/loopback 无生产请求。两个长场景批次存在部分同时运行，因此耗时不能当严格隔离 A/B；本轮只验证边界与记录样本，后续性能验收需交错、隔离和更多样本。
+
+| 请求输出 | 旧结果 → 新结果 | 耗时中位数 ms（旧 → 新） | OS 峰值 RSS MiB 中位数（旧 → 新） |
+| --- | --- | --- | --- |
+| 16KiB / 4 deltas | completed → completed，输出 bytes 相同 | 24.60 → 32.09 | 61.29 → 61.45 |
+| 1MiB / 256 deltas | completed → completed，输出 bytes 相同 | 177.08 → 184.94 | 115.00 → 115.17 |
+| 32MiB / 8192 deltas | completed → failed，第 4097 个 4KiB delta 触达 16MiB 累计上限 | 94111.71 → 25464.38 | 483.89 → 303.68 |
+
+所有 18 个服务进程正常退出、上游 iterator finally 释放。大流结果是有意提前拒绝，不是相同工作量的提速。普通场景有检查开销；OS 峰值包含启动、RSS 采样漏瞬态、heapUsed 是结束值，不宣称生产内存硬上限。另有 4 并发溢出后所有 ingress reservations 归零、3,000 次工具缓存 churn 的确定性测试。
+
+### 剩余风险 / 下一阶段
+
+- 重复 fullAccumulatedText.includes、custom partial input 重新解码、pending 匹配扫描仍可能呈二次 CPU 开销。默认 16MiB 只是边界，不是这些算法已优化；应优先纳入 P3 的增量扫描工作。
+- 接受的终态输出序列化仍可能复制多份内存，P5 生命周期拆分时继续核查背压与峰值；不能把 per-accumulator bytes 相加当作准确 RSS。
+- 独立遗留缺陷：Chat/Gemini/Claude 的 customInput 对裸 text(...) 未识别为 JS，会自动包成 shell。正常闭环回归采用现有已认可的 const ...; text(...)，不以预算 PR 顺手改变既有输入改写语义。需聚焦工具输入完整性修复 PR（与原生 Responses custom 恢复分开验证）。
+- GET、图像结果、模型/SSE idle/总时限不在本批；发布与本机替换仍属于 P6。
