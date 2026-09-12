@@ -13,7 +13,9 @@
   },
   "scripts": {
     "start": "node bin/momoapi-proxy.mjs serve",
-    "test": "node --test test/stream-transport.test.mjs test/stream-transport-integration.test.mjs test/autostart.test.mjs test/desktop-install.test.mjs test/server.test.mjs test/setup.test.mjs test/plugin-install.test.mjs test/updater.test.mjs test/update-supervisor.test.mjs test/diagnostics.test.mjs test/compat.test.mjs test/config.test.mjs test/body-limit.test.mjs test/context-policy.test.mjs test/compaction.test.mjs test/internal-endpoints.test.mjs test/metrics.test.mjs test/doctor-metrics.test.mjs test/graceful-shutdown.test.mjs test/gemini-custom-tool.test.mjs test/image-service.test.mjs test/image-assets.test.mjs test/image-e2e.test.mjs",
+    "test": "node --test test/request-admission.test.mjs test/request-admission-integration.test.mjs test/stream-transport.test.mjs test/stream-transport-integration.test.mjs test/autostart.test.mjs test/desktop-install.test.mjs test/server.test.mjs test/setup.test.mjs test/plugin-install.test.mjs test/updater.test.mjs test/update-supervisor.test.mjs test/diagnostics.test.mjs test/compat.test.mjs test/config.test.mjs test/body-limit.test.mjs test/context-policy.test.mjs test/compaction.test.mjs test/internal-endpoints.test.mjs test/metrics.test.mjs test/doctor-metrics.test.mjs test/graceful-shutdown.test.mjs test/gemini-custom-tool.test.mjs test/image-service.test.mjs test/image-assets.test.mjs test/image-e2e.test.mjs",
+    "test:admission": "node --test test/request-admission.test.mjs test/request-admission-integration.test.mjs",
+    "benchmark:admission": "node scripts/benchmark-request-admission.mjs",
     "test:stream": "node --test test/stream-transport.test.mjs test/stream-transport-integration.test.mjs",
     "benchmark:stream": "node scripts/benchmark-stream-transport.mjs",
     "build:tray": "powershell -NoProfile -File scripts/build-tray.ps1 -Embed",

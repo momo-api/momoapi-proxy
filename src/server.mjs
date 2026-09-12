@@ -1,4 +1,7 @@
 import { createServer } from "node:http";
+import { RequestAdmission } from "./request-admission.mjs";
+import { bodyOf, requestReservationBytes } from "./request-body.mjs";
+export { bodyOf, getMaxRequestBodyBytes } from "./request-body.mjs";
 import { streamSseBlocks, sseDataPayload, replaceSseDataPayload, waitForResponseDrain, writeResponseChunk, forwardResponseBody } from "./stream-transport.mjs";
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { extractFunctions, parseDsmlCalls, restoreToolName, stripDsmlMarkup } from "./tools.mjs";
@@ -131,43 +134,6 @@ function json(response, status, body, headers = {}) {
   response.end(JSON.stringify(body));
 }
 
-export function getMaxRequestBodyBytes(settings = {}) {
-  const envVal = process.env.MOMO_MAX_REQUEST_BODY_MB;
-  const configVal = settings.maxRequestBodyMb;
-  const mb = parseInt(envVal || configVal || "64", 10);
-  const validMb = (isNaN(mb) || mb < 1 || mb > 256) ? 64 : mb;
-  return validMb * 1024 * 1024;
-}
-
-export async function bodyOf(request, settings = {}) {
-  const maxBytes = getMaxRequestBodyBytes(settings);
-  const chunks = [];
-  let totalLength = 0;
-
-  for await (const chunk of request) {
-    totalLength += chunk.length;
-    request.momoRequestBodyBytes = totalLength;
-    if (totalLength > maxBytes) {
-      const err = new Error("Payload Too Large: request body exceeds limit of " + (maxBytes / (1024 * 1024)) + "MB.");
-      err.statusCode = 413;
-      err.code = "payload_too_large";
-      throw err;
-    }
-    chunks.push(chunk);
-  }
-
-  const raw = Buffer.concat(chunks, totalLength).toString("utf8");
-  try {
-    const parsed = JSON.parse(raw);
-    request.momoRequestBodyBytes = totalLength;
-    return parsed;
-  } catch {
-    const err = new Error("Request body must be valid JSON.");
-    err.statusCode = 400;
-    err.code = "invalid_json";
-    throw err;
-  }
-}
 function authorized(request, settings) {
   const auth = request.headers.authorization;
   if (auth) {
@@ -2144,6 +2110,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
   const activeSseEmitters = new Set();
   const activeAbortControllers = new Set();
   const compactLocks = new Set();
+  const admission = new RequestAdmission(settings);
   const imageAssetStore = assetStore || createImageAssetStore(settings);
   let serverInstance = null;
   let shutdownLifecycle = null;
@@ -2173,6 +2140,13 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
     };
 
     const abortController = new AbortController();
+    request.once("aborted", () => abortController.abort());
+    request.on("error", () => abortController.abort());
+    let admissionLease;
+    const receiveBody = async () => {
+      admissionLease = await admission.acquire(requestReservationBytes(request, settings), abortController.signal);
+      return bodyOf(request, settings, { signal: abortController.signal, timeoutMs: admission.policy.bodyReadTimeoutMs });
+    };
     activeAbortControllers.add(abortController);
     response.on("finish", () => activeAbortControllers.delete(abortController));
     response.on("close", () => activeAbortControllers.delete(abortController));
@@ -2260,6 +2234,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         }
 
         metricsState.isDraining = true;
+        admission.close();
         const configuredDrainTimeoutMs = Number(settings.drainTimeoutMs);
         const drainTimeoutMs = Number.isFinite(configuredDrainTimeoutMs) && configuredDrainTimeoutMs > 0
           ? configuredDrainTimeoutMs
@@ -2349,6 +2324,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
           uptimeSeconds: Math.floor((Date.now() - metricsState.startedAt) / 1000),
           resetTime: metricsState.resetTime,
           isDraining: metricsState.isDraining,
+          admission: admission.snapshot(),
           requests: {
             total: metricsState.requestsTotal,
             success: metricsState.requestsSuccess,
@@ -2408,7 +2384,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
           return json(response, 200, capabilities);
         }
         if (request.method === "POST" && (pathname === "/internal/images/generate" || pathname === "/internal/images/edit")) {
-          const payload = await bodyOf(request, settings);
+          const payload = await receiveBody();
           const operation = pathname.endsWith("/edit") ? "edit" : "generate";
           const result = await generateImage({
             settings,
@@ -2462,7 +2438,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
 
       // 7. chat completions
       if (request.method === "POST" && (pathname === "/v1/chat/completions" || pathname === "/chat/completions")) {
-        const payload = await bodyOf(request, settings);
+        const payload = await receiveBody();
         requestedModel = payload.model;
         await forwardChatCompletions(request, response, settings, payload, fetchImpl, abortController.signal);
         logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp, ...contextLogFields(response, request) });
@@ -2471,7 +2447,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
 
       // 8. responses
       if (request.method === "POST" && (pathname === "/v1/responses/compact" || pathname === "/responses/compact")) {
-        const payload = await bodyOf(request, settings);
+        const payload = await receiveBody();
         requestedModel = payload.model;
         if (!payload.model) {
           return json(response, 400, { error: { message: "model is required", type: "invalid_request_error" } });
@@ -2483,7 +2459,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       }
 
       if (request.method === "POST" && (pathname === "/v1/responses" || pathname === "/responses")) {
-        const payload = await bodyOf(request, settings);
+        const payload = await receiveBody();
         requestedModel = payload.model;
         if (!payload.model) {
           finalStatus = 400;
@@ -2528,6 +2504,24 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
       const rawUrl = request.url || "/";
       const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
 
+      if (error.admission) {
+        const status = error.statusCode;
+        if (status === 413) {
+          metricsState.inboundBodyRejects++;
+          metricsState.contextRequestsRejected++;
+        }
+        // Do not drain an arbitrarily large/slow rejected upload into memory.
+        // Send the structured error, then close only this request's connection.
+        const headers = status === 503 ? { "Retry-After": "1" } : {};
+        if (!request.readableEnded) {
+          request.pause();
+          headers.Connection = "close";
+          response.once("finish", () => request.destroy());
+        }
+        logRequest({ method: request.method, url: pathname, status, elapsedMs: Date.now() - t0, error: error.message, errorCode: error.code, ip: remoteIp });
+        return json(response, status, { error: { message: error.message, type: "request_admission_error", code: error.code } }, headers);
+      }
+
       if (pathname.startsWith("/internal/images") && Number.isInteger(error.statusCode)) {
         const status = error.statusCode;
         logRequest({ method: request.method, url: pathname, status, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
@@ -2567,6 +2561,10 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         return writeResponsesFailure(response, requestedModel || "unknown", 502, error.message);
       }
       return json(response, 502, { error: { message: error.message, type: "server_error" } });
+    } finally {
+      // Hold through parsing, normalization and upstream completion/cancellation.
+      // Response finish alone does not prove the handler released its body.
+      admissionLease?.release();
     }
   });
 
