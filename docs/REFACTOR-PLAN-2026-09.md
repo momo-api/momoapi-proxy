@@ -38,7 +38,7 @@
 | P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 已合并 |
 | T1 | P0 | 修复 JS host-helper 被 customInput 当作 shell 的分类缺陷 | P2b 发现 | 13 样例 × 3 adapter 原样；call_id 不变；shell 反向回归 | 已合并 |
 | P3 | P1 | 流累计增量处理 + compact/checkpoint 增量预算，末尾精确序列化 | P0/P2 | 状态与工具 wire 等价；避免逐片段/删项全量重扫 | 进行中 |
-| P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 本地验证通过 |
+| P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 已合并 |
 | P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 待开始 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
@@ -87,6 +87,7 @@
 | 2026-09-12 | T1 合并 | e700996 的 Node/container/windows-tray/secret-scan 全绿后合并 | main cda8423；[PR #42](https://github.com/momo-api/momoapi-proxy/pull/42)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34680993171)；未发布 |
 | 2026-09-12 | 运行核实 | 127.0.0.1:18789 健康、version 0.13.12、service momo-codex-bridge | 本轮未发布/未替换本机/未操作 VPS；不得把 main 合并当运行升级 |
 | 2026-09-12 | P3a 本地 | 新增 10 项；Windows/Alpine 构建/运行各 252/252；tray 11 断言；历史/工作树扫描通过；工具字节哈希相同；18 个隔离 loopback 样本 | perf/incremental-stream-state；待 PR/CI；未发布 |
+| 2026-09-12 | P3a 合并 | d1cb70d 最终 Node/container/windows-tray/secret-scan 全绿后合并 | main 2e2c1a4；[PR #44](https://github.com/momo-api/momoapi-proxy/pull/44)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34685748125)；未发布/未安装 |
 
 ## 首批性能记录与取舍
 
@@ -174,7 +175,7 @@
 
 ## 下一批执行顺序
 
-1. P3a：本地实现与测试通过，完成聚焦 PR/CI 后合并；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
+1. P3a 已通过本地/CI 并合并 PR #44；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
 2. P3b：compact/checkpoint 增量字节预算，最后精确序列化；约束、当前任务、pending call/result 与动态工具保留语义不变。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
 4. P4 指标/日志、P5 生命周期/适配器拆分、P6 包发布与安装验收仍未完成。当前没有挂起的发布或自动更新任务。
