@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { diagnosticPath, diagnosticsState, getDiagnosticsMetrics, normalizeDiagnosticEvent, readRecentDiagnostics, recordDiagnosticEvent } from "../src/diagnostics.mjs";
+import { flushLogging } from "../src/logging-runtime.mjs";
 
 function resetDiagnosticsState() {
   diagnosticsState.localRecorded = 0;
@@ -36,7 +37,7 @@ test("diagnostic error codes are normalized for local inspection", () => {
   assert.equal(event.error_code, "enetunreach_network");
 });
 
-test("errors are stored locally without creating a remote queue", () => {
+test("errors are stored locally without creating a remote queue", async () => {
   resetDiagnosticsState();
   const home = mkdtempSync(join(tmpdir(), "momo-diagnostics-"));
   const env = { MOMO_PROXY_HOME: home };
@@ -45,6 +46,7 @@ test("errors are stored locally without creating a remote queue", () => {
       env,
       settings: { diagnosticsEnabled: true, apiKey: "must-never-be-used", telemetryEnabled: true },
     });
+    await flushLogging({ env });
     const local = readFileSync(diagnosticPath(env), "utf8");
     assert.match(local, /upstream_unavailable/);
     assert.doesNotMatch(local, /must-never-be-used/);
@@ -55,6 +57,8 @@ test("errors are stored locally without creating a remote queue", () => {
       dropped: 0,
       mode: "local-only",
       localFileBytes: Buffer.byteLength(local),
+      pendingRecords: 0,
+      written: 1,
     });
   } finally {
     rmSync(home, { recursive: true, force: true });

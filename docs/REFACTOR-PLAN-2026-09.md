@@ -23,7 +23,7 @@
 | upstream compact | 24MiB 历史、18MiB 门限约 966ms，全请求序列化 16 次 | 非默认 local 模式；单独优化重复扫描 |
 | 背压 | 多处 response.write 未等待 drain | 慢客户端风险，生产峰值尚未量化 |
 | 指标 | TTFB 混合健康和业务；RSS 主要按请求边界采样 | 无法证明模型延迟和真实内存峰值 |
-| 日志 | 同步 append；最近日志先整文件读取 | 长期增长/阻塞风险，尚非量化瓶颈 |
+| 日志 | 历史基线为同步 append/整文件读取；P4b 已改为异步有界队列、两代轮转和有界尾读 | 降低请求路径阻塞与长期增长风险；尚无生产吞吐提速结论 |
 
 ## 计划与进度表
 
@@ -40,13 +40,13 @@
 | P3 | P1 | 流累计增量处理 + compact/checkpoint 增量预算，末尾精确序列化 | P0/P2 | 状态与工具 wire 等价；避免逐片段/删项全量重扫 | 已合并（P3a/P3b；未发布） |
 | P3a | P1 | DSML 增量检测、custom partial-input 增量解码、pending ID/index 桶 | P2b | 每片段等价；相同工作量 A/B；预算/取消不回退 | 已合并 |
 | P3b | P1 | compact/checkpoint 增量预算，末尾精确序列化 | P0 | 保留语义不变；全请求序列化次数不随删除项线性增长 | 已合并 |
-| P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 进行中（P4a 已合并，P4b 分批） |
+| P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 本地验证通过（P4b2b 待 PR/CI） |
 | P4a | P1 | 固定分组、分段计时、无样本语义、doctor 透传 | P0 | 健康查询不污染业务；有界；取消/失败计数正确；工具流回归 | 已合并（未发布） |
-| P4b | P1 | 日志有界异步队列、轮转、尾读、退出刷新 | P4a | 过载丢弃计数、磁盘失败/关停测试；不输出敏感内容 | 进行中（P4b1/P4b2） |
+| P4b | P1 | 日志有界异步队列、轮转、尾读、退出刷新 | P4a | 过载丢弃计数、磁盘失败/关停测试；不输出敏感内容 | 本地验证通过（P4b2b 待 PR/CI） |
 | P4b1 | P1 | 普通/诊断日志及启动失败摘要的有界尾读 | P4a | 字节/行上限、Unicode、短读/截断、CLI 提示、旧结果等价 | 已合并（未发布） |
-| P4b2 | P1 | 异步写队列、轮转、丢弃计数、退出刷新 | P4b1 | 多 writer/磁盘失败/限时刷新；不影响模型工具流 | 进行中（核心与接入分开） |
+| P4b2 | P1 | 异步写队列、轮转、丢弃计数、退出刷新 | P4b1 | 多 writer/磁盘失败/限时刷新；不影响模型工具流 | 本地验证通过（接入待 PR/CI） |
 | P4b2a | P1 | 独立有界队列与受锁保护的轮转文件 sink | P4b1 | 队列/等待者有界；故障不重放；跨进程/轮转/退出期限测试 | 已合并（未接入/未发布） |
-| P4b2b | P1 | 日志格式边界、专用新路径、daemon/CLI 接入与退出刷新 | P4b2a | 旧日志不迁移/删除；指标区分接收/写入；进程退出与工具 wire 回归 | 待开始 |
+| P4b2b | P1 | 日志格式边界、专用新路径、daemon/CLI 接入与退出刷新 | P4b2a | 旧日志不迁移/删除；指标区分接收/写入；进程退出与工具 wire 回归 | 本地验证通过（待 PR/CI） |
 | P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
 
@@ -94,6 +94,7 @@
 | 2026-09-12 | 运行核实 | 127.0.0.1:18789 健康、version 0.13.12、service momo-codex-bridge | 本轮未发布/未替换本机/未操作 VPS；不得把 main 合并当运行升级 |
 | 2026-09-12 | P3a 本地 | 新增 10 项；Windows/Alpine 构建/运行各 252/252；tray 11 断言；历史/工作树扫描通过；工具字节哈希相同；18 个隔离 loopback 样本 | perf/incremental-stream-state；待 PR/CI；未发布 |
 | 2026-09-12 | P3a 合并 | d1cb70d 最终 Node/container/windows-tray/secret-scan 全绿后合并 | main 2e2c1a4；[PR #44](https://github.com/momo-api/momoapi-proxy/pull/44)；[CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34685748125)；未发布/未安装 |
+| 2026-09-12 | P4b2b 本地 | Windows 343 passed + 3 POSIX skips；Node 24 Alpine 346/346；tray 11 断言；CLI/HTTP/SIGTERM、端口占用、在线/离线版本与 daemon 指标及工具/checkpoint 回归通过 | perf/integrate-bounded-logging；待提交/PR/CI；未发布/未安装 |
 
 ## 首批性能记录与取舍
 
@@ -184,7 +185,7 @@
 1. P3a 已通过本地/CI 并合并 PR #44；版本发布仍独立。保留跨块/乱序/Unicode/EOF 的 wire 等价回归，避免每 delta 扫描全文。
 2. P3b 已通过本地/CI 并合并 PR #46。上游 compact 增量计量并最后精确序列化；本地 checkpoint 已有逐项预算，保留算法不改，新增完整结果 golden 验证。
 3. 分开测量正常完成与预算拒绝，交错且隔离基线/新实现；记录样本数、分位数、GC、事件循环和真实峰值来源。
-4. P4a 已合并 PR #48；P4b1 尾读已合并 PR #50；P4b2a 写入核心通过最终 CI 并合并 PR #52；下一步 P4b2b 日志/退出刷新接入、P5 拆分、P6 发布。当前没有挂起的发布或自动更新任务。
+4. P4a 已合并 PR #48；P4b1 尾读已合并 PR #50；P4b2a 写入核心已合并 PR #52；P4b2b 接入已本地验证，下一步是 PR/CI，随后 P5 拆分与 P6 发布。当前没有挂起的发布或自动更新任务。
 
 ## P3a 增量流状态（2026-09-12）
 
@@ -345,3 +346,18 @@ P4b1 已合并、未发布/未安装；P4b2 同步 append/诊断压缩、异步�
 验收：实现 f3ffa92 的 Node/container/windows-tray/secret-scan 全绿（[最终 CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34691452757)），已合并 [PR #52](https://github.com/momo-api/momoapi-proxy/pull/52)，main a12cfbd。最终 Windows 330 passed + 2 POSIX skips，Alpine 构建/运行各 332/332，tray 11 断言；完整历史 143 commits、工作树和暂存区 Secret scan 无泄漏。
 
 P4b2a 已合并，未接入/未发布/未安装；P4b2b 接入、P5、P6 未完成。下一步先确定新专用日志路径与旧日志只读 fallback、严格格式/脱敏边界和可见失败指标，再接入 daemon/CLI 并验证 HTTP shutdown、SIGINT/SIGTERM、启动失败及限时退出；不直接轮转历史 proxy.log/daemon.log/diagnostic-events.jsonl。
+
+## P4b2b 异步日志运行接入（2026-09-12）
+
+基线干净 main 59bd78f（PR #53），分支 perf/integrate-bounded-logging。P4b2a 的 writer/sink 接入 request 与 diagnostic 通道；未改模型路由、认证、checkpoint 选择、工具转换、版本或当前运行实例。
+
+- 新专用路径为 request-events.jsonl 和 diagnostic-events-v2.jsonl，各保留当前文件与 .1 两代。旧 proxy.log、diagnostic-events.jsonl、daemon.log 只读保留；仅当新两代均不存在时 CLI 才 fallback，不能用旧文件参与轮转。
+- 日志统一为单行 JSON v2。字段只含有界路由/模型/状态/字节/耗时/计数和工具类型/hash 审计；不记录聊天正文、工具参数/结果、schema、完整工具名、原始 call ID、Authorization 或密钥。toolCalls 只写 executed_tools_count。非法 Unicode、控制字符、换行和已知 credential/inline data/长 opaque 数据在入队前清理。
+- daemon 拥有 request/diagnostic 两个 runtime；HTTP /internal/metrics 暴露 accepted、written、writeFailed、uncertain、各类 rejected、shutdownDropped、pending、rotation、lock/sink error safe code。doctor 透传；status 分开显示 CLI version 与 daemon runtimeVersion，并从带 local token 的 loopback metrics 读取真实 daemon logging/diagnostics；离线不伪造 0。
+- start daemon、Windows startup/service、systemd、launchd 明确 MOMO_PROXY_CONSOLE_MIRROR=0，避免 request-events 与 daemon.log 重复。前台 serve 默认保留 live JSON mirror，可用同变量关闭。
+- SIGINT/SIGTERM、启动失败和 HTTP shutdown 均进行限时 close；注入 close 永不 settle 时外层硬期限仍退出。HTTP 的最终 50ms exit delay 计入同一 drain 总预算。JS 无法强制取消已提交的 fs I/O，因此期限后仍可能有 uncertain/pending；不宣称 fsync 或断电耐久性。
+- 托盘构建的 SHA-256 改用 .NET API，避免 Windows PowerShell 5.1 经 cmd/npm 启动时 Get-FileHash 模块函数解析异常；托盘版本仍由 package.json 生成。
+
+本地验收：最终 Windows npm test 343 passed + 3 POSIX skips；Node 24 Alpine 346/346（含真实 SIGTERM、symlink/FIFO 和多进程竞争）；Windows tray 11/11；完整历史与当前工作树 Secret scan 均通过。额外覆盖离线 status 不伪造 daemon 日志计数、doctor 同时透传 logging/diagnostics。测试只使用临时 profile、本地 mock 和合成数据，未读真实日志/会话/密钥，未发送模型请求，未替换 0.13.12 运行实例或操作 VPS。暂存区 scan、提交、PR/CI 尚待完成。
+
+P4b2b 当前为本地验证通过，未合并/未发布/未安装。下一步完成 secret scan、PR 与四类 CI；P5 再按生命周期/adapter/tool state 聚焦拆分 server.mjs，P6 独立做安装、运行验收与发布。

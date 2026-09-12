@@ -124,6 +124,7 @@ export function buildWindowsServiceWrapperCmd(binPath, logPath) {
   return [
     "@echo off",
     "setlocal",
+    "set MOMO_PROXY_CONSOLE_MIRROR=0",
     `:loop`,
     `>>"${logPath}" 2>&1 node "${binPath}" serve`,
     `if %ERRORLEVEL% NEQ 0 (`,

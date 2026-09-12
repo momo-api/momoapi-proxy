@@ -17,7 +17,7 @@ import {
   createRoutedCustomToolRestoreBlockRewrite,
 } from "./responses-compat.mjs";
 import { ResponseStreamEmitter, customToolEvents, failed, functionEvents, responseCreated, sseError } from "./responses-sse.mjs";
-import { logRequest } from "./logger.mjs";
+import { logRequest as writeRequestLog } from "./logger.mjs";
 import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock, summarizeToolEvents } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
@@ -26,6 +26,8 @@ import { preparePreviousResponseReplay, rememberResponseState } from "./response
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { createImageAssetStore, persistImageResult } from "./image-assets.mjs";
 import { getDiagnosticsMetrics } from "./diagnostics.mjs";
+import { createLoggingRuntime } from "./logging-runtime.mjs";
+import { closeLoggingWithinDeadline } from "./process-shutdown.mjs";
 
 const GEMINI_PREFIX = /^gemini-/;
 const CLAUDE_PREFIX = /^claude-/;
@@ -2099,7 +2101,10 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
   response.end();
 }
 
-export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = process.exit, assetStore } = {}) {
+export function createMomoSwitch(settings, options = {}) {
+  const { fetchImpl = fetch, exitImpl = process.exit, assetStore, loggingRuntime = createLoggingRuntime({
+    diagnosticsEnabled: settings.diagnosticsEnabled, consoleMirror: false,
+  }) } = options;
   const requestMetrics = new RequestMetrics();
   const originalFetch = fetchImpl;
   metricsState.isDraining = false;
@@ -2110,6 +2115,7 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
   const compactLocks = new Set();
   const admission = new RequestAdmission(settings);
   const imageAssetStore = assetStore || createImageAssetStore(settings);
+  const logRequest = (fields) => writeRequestLog(fields, loggingRuntime.env, { runtime: loggingRuntime, settings });
   let serverInstance = null;
   let shutdownLifecycle = null;
 
@@ -2250,13 +2256,22 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
         const drainTimeoutMs = Number.isFinite(configuredDrainTimeoutMs) && configuredDrainTimeoutMs > 0
           ? configuredDrainTimeoutMs
           : 5000;
+        const shutdownStartedAt = Date.now();
         let shutdownFinished = false;
         let deadlineTimer = null;
 
+        let exitStarted = false;
         const exitProcess = () => {
-          setTimeout(() => {
-            try { exitImpl(0); } catch {}
-          }, 50);
+          if (exitStarted) return;
+          exitStarted = true;
+          const elapsedMs = Date.now() - shutdownStartedAt;
+          const remainingMs = Math.max(1, Math.min(1000, drainTimeoutMs - elapsedMs - 50));
+          void closeLoggingWithinDeadline({ loggingRuntime, timeoutMs: remainingMs }).finally(() => {
+            const exitDelayMs = Math.max(0, Math.min(50, drainTimeoutMs - (Date.now() - shutdownStartedAt)));
+            setTimeout(() => {
+              try { exitImpl(0); } catch {}
+            }, exitDelayMs);
+          });
         };
 
         const finishNaturally = () => {
@@ -2379,7 +2394,8 @@ export function createMomoSwitch(settings, { fetchImpl = fetch, exitImpl = proce
             dnsCache: { supported: false },
             connectionPooling: { supported: true, backend: "node-native-fetch" },
           },
-          diagnostics: getDiagnosticsMetrics(),
+          diagnostics: getDiagnosticsMetrics(loggingRuntime.env, { runtime: loggingRuntime }),
+          logging: loggingRuntime.snapshot(),
           version: getCurrentVersion(),
         });
       }

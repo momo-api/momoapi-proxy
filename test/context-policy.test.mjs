@@ -3,6 +3,7 @@ import test from "node:test";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
 import { ContextBudgetError, getContextPolicy, prepareMediaPayload, shouldFallbackResponses } from "../src/context-policy.mjs";
 import { logRequest, readRecentLogs } from "../src/logger.mjs";
+import { flushLogging } from "../src/logging-runtime.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -143,11 +144,12 @@ test("context metrics expose rewrites and hard-limit rejections", async () => {
   });
 });
 
-test("request logging redacts credentials and inline images", () => {
+test("request logging redacts credentials and inline images", async () => {
   const directory = mkdtempSync(join(tmpdir(), "momo-context-log-"));
   const env = { MOMO_PROXY_HOME: directory };
   try {
     logRequest({ method: "POST", url: "/v1/responses", status: 413, error: `Bearer secret-token data:image/png;base64,${"A".repeat(2000)}` }, env);
+    await flushLogging({ env });
     const logs = readRecentLogs(5, env).join("\n");
     assert.doesNotMatch(logs, /secret-token/);
     assert.doesNotMatch(logs, /AAAAAA/);

@@ -17,7 +17,9 @@ import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/ser
 import { installWindowsDesktop } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
 import { createImageAssetStore } from "../src/image-assets.mjs";
-import { configureDiagnostics, getDiagnosticsMetrics, readRecentDiagnosticReport, recordDiagnosticEvent } from "../src/diagnostics.mjs";
+import { configureDiagnostics, readRecentDiagnosticReport, recordDiagnosticEvent } from "../src/diagnostics.mjs";
+import { closeLogging, configureLoggingRuntime, createLoggingRuntime } from "../src/logging-runtime.mjs";
+import { createSignalStopper } from "../src/process-shutdown.mjs";
 import { getImagePluginStatus, installImagePlugin } from "../src/plugin-install.mjs";
 
 process.on("uncaughtException", (err) => {
@@ -32,7 +34,8 @@ function reportLogTailLimit(report) {
     console.error("Log tail unavailable: " + report.error);
     process.exitCode = 1;
   } else if (report.byteLimitReached) {
-    console.error("Log tail reached the 1 MiB read limit; older data and a leading partial record were omitted. Fewer than the requested lines may be shown.");
+    const maxMiB = Math.max(1, Math.ceil((report.maxBytes || 1024 * 1024) / (1024 * 1024)));
+    console.error("Log tail reached the " + maxMiB + " MiB read limit; older data and a leading partial record were omitted. Fewer than the requested lines may be shown.");
   }
 }
 
@@ -99,6 +102,7 @@ async function startDaemon(binFile, scriptDir, port) {
   const daemon = spawn(process.execPath, [binFile, "serve"], {
     detached: true,
     stdio: ["ignore", outStream, outStream],
+    env: { ...process.env, MOMO_PROXY_CONSOLE_MIRROR: "0" },
     windowsHide: true,
   });
   daemon.unref();
@@ -313,7 +317,9 @@ async function main() {
     console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
   } else if (command === "serve") {
     const settings = resolveSettings();
-    configureDiagnostics({ settings });
+    const loggingRuntime = createLoggingRuntime({ settings, diagnosticsEnabled: settings.diagnosticsEnabled });
+    configureLoggingRuntime(loggingRuntime);
+    configureDiagnostics({ settings, runtime: loggingRuntime });
     const previousUpdateStatus = readUpdateStatus();
     if (previousUpdateStatus?.rolledBack && !previousUpdateStatus.failureReportedAt) {
       recordDiagnosticEvent({
@@ -325,7 +331,7 @@ async function main() {
         failureReportedAt: new Date().toISOString(),
       });
     }
-    const server = await listen(settings);
+    const server = await listen(settings, { loggingRuntime });
     console.log("MOMO Codex Bridge listening at http://" + settings.host + ":" + settings.port + "/v1");
     writeRuntimePort(settings.port, process.pid);
     writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint });
@@ -387,14 +393,13 @@ async function main() {
       writeHeartbeat({ running: true, port: settings.port, endpoint: settings.endpoint });
     }, 5000);
 
-    const stop = () => {
+    const stop = createSignalStopper({ server, loggingRuntime, timeoutMs: 1000, beforeStop: () => {
       console.log("\nStopping MOMO Codex Bridge...");
       clearInterval(heartbeatTimer);
       writeHeartbeat({ running: false, port: settings.port });
       autoSync.stop();
       updateChecker.stop();
-      server.close(() => process.exit(0));
-    };
+    } });
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
   } else if (command === "mcp" && args[0] === "image") {
@@ -440,10 +445,26 @@ async function main() {
       settings = readSettings();
     }
     let isRunning = false;
+    let health = null;
+    let daemonMetrics = null;
+    let metricsReason = "daemon_offline";
     if (settings.port) {
       try {
-        const res = await fetch("http://127.0.0.1:" + settings.port + "/healthz");
-        if (res.ok) isRunning = true;
+        const res = await fetch("http://127.0.0.1:" + settings.port + "/healthz", { signal: AbortSignal.timeout(1000) });
+        if (res.ok) {
+          isRunning = true;
+          try { health = await res.json(); } catch {}
+          if (settings.localToken) {
+            try {
+              const metricsResponse = await fetch("http://127.0.0.1:" + settings.port + "/internal/metrics", {
+                headers: { "x-local-token": settings.localToken },
+                signal: AbortSignal.timeout(1000),
+              });
+              if (metricsResponse.ok) daemonMetrics = await metricsResponse.json();
+              else metricsReason = "daemon_metrics_rejected";
+            } catch { metricsReason = "daemon_metrics_unavailable"; }
+          } else metricsReason = "local_token_unavailable";
+        }
       } catch {}
     }
     const catalog = readCatalog();
@@ -460,7 +481,10 @@ async function main() {
       lastSyncStatus: settings.lastSyncStatus || null,
       lastError: settings.lastError || null,
       update: readUpdateStatus(),
-      diagnostics: getDiagnosticsMetrics(),
+      version: getCurrentVersion(),
+      runtimeVersion: daemonMetrics?.version || health?.version || null,
+      diagnostics: daemonMetrics?.diagnostics || { available: false, reason: metricsReason },
+      logging: daemonMetrics?.logging || { available: false, reason: metricsReason },
     }, null, 2));
   } else if (command === "models") {
     const catalog = readCatalog();
@@ -644,5 +668,5 @@ main().catch((err) => {
   try { settings = resolveSettings(); } catch { settings = { diagnosticsEnabled: true }; }
   recordDiagnosticEvent({ event: "proxy_start_error", errorCode: err.code || "proxy_start_failed" }, { settings });
   console.error("Fatal error:", err.message);
-  process.exit(1);
+  void closeLogging({ timeoutMs: 1000 }).finally(() => process.exit(1));
 });

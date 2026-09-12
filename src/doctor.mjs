@@ -127,6 +127,8 @@ export async function runDoctor({ env = process.env, fetchImpl = fetch } = {}) {
         ttfbMs: metricsData.ttfbMs,
         requestMetrics: metricsData.requestMetrics,
         memory: metricsData.memory,
+        logging: metricsData.logging,
+        diagnostics: metricsData.diagnostics,
       };
     } else {
       results.checks.daemonMetrics = {

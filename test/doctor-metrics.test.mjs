@@ -10,6 +10,8 @@ test("doctor correctly reports daemon metrics when daemon is online", async () =
     ttfbMs: { p50: 120, p95: 350, p99: 500, samples: 15 },
     requestMetrics: { schemaVersion: 1, groups: { business: { stages: {} } } },
     memory: { rssBytes: 45000000, heapUsedBytes: 25000000, maxRssBytes: 50000000 },
+    logging: { request: { accepted: 10 }, diagnostic: { accepted: 1 } },
+    diagnostics: { mode: "local-only", localRecorded: 1, dropped: 0 },
   };
 
   const fakeFetch = async (url) => {
@@ -40,6 +42,8 @@ test("doctor correctly reports daemon metrics when daemon is online", async () =
   assert.equal(res.checks.daemonMetrics.requests.total, 15);
   assert.equal(res.checks.daemonMetrics.ttfbMs.p50, 120);
   assert.deepEqual(res.checks.daemonMetrics.requestMetrics, fakeMetrics.requestMetrics);
+  assert.deepEqual(res.checks.daemonMetrics.logging, fakeMetrics.logging);
+  assert.deepEqual(res.checks.daemonMetrics.diagnostics, fakeMetrics.diagnostics);
 });
 
 test("doctor reports offline reason without fabricating zero values when daemon is unreachable", async () => {

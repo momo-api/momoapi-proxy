@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { autostartTarget, installAutostart, isAutostartInstalled, migrateWindowsAutostart, uninstallAutostart, WINDOWS_SERVICE_STARTUP, WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_SERVICE_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP } from "../src/autostart.mjs";
+import { buildWindowsServiceWrapperCmd } from "../src/service.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "momo-startup-test-"));
@@ -44,10 +45,24 @@ test("Windows install and uninstall use branded names and support legacy lifecyc
   const result = installAutostart({}, { osPlatform: "win32", env });
   assert.equal(result.target, join(dir, WINDOWS_SERVICE_STARTUP));
   assert.match(readFileSync(result.target, "utf8"), /momoapi-proxy\.mjs/);
+  assert.match(readFileSync(result.target, "utf8"), /MOMO_PROXY_CONSOLE_MIRROR=0/);
   assert.equal(existsSync(join(dir, LEGACY_WINDOWS_SERVICE_STARTUP)), false);
   writeFileSync(join(dir, LEGACY_WINDOWS_SERVICE_STARTUP), "duplicate legacy");
   assert.equal(uninstallAutostart({ osPlatform: "win32", env }).uninstalled, true);
   assert.equal(isAutostartInstalled("win32", env), false);
+});
+
+test("background launchers explicitly disable request-log console mirroring", (t) => {
+  const linux = fixture(t);
+  const service = installAutostart({}, { osPlatform: "linux", env: { ...linux.env, HOME: linux.env.USERPROFILE } });
+  assert.match(readFileSync(service.target, "utf8"), /Environment=MOMO_PROXY_CONSOLE_MIRROR=0/);
+
+  const mac = fixture(t);
+  const plist = installAutostart({}, { osPlatform: "darwin", env: { ...mac.env, HOME: mac.env.USERPROFILE } });
+  assert.match(readFileSync(plist.target, "utf8"), /<key>MOMO_PROXY_CONSOLE_MIRROR<\/key><string>0<\/string>/);
+
+  const wrapper = buildWindowsServiceWrapperCmd("C:\\app\\momoapi-proxy.mjs", "C:\\logs\\daemon.log");
+  assert.match(wrapper, /set MOMO_PROXY_CONSOLE_MIRROR=0\r\n/);
 });
 
 test("Windows migration preserves approval state before rename and aborts on failure", (t) => {
