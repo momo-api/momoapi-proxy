@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Show the actual running version in the native tray menu and tooltip, with installed-version fallback when stopped. Remove the PowerShell tray's fixed version.
+- Brand Windows startup entries as MOMO API Proxy Service.cmd and MOMO API Proxy Tray.lnk, preserving existing entry data and startup approval state during migration.
+- Stop only the exact installed tray before replacing its locked executable; leave an unchanged running tray alive. Generate Windows product/file version metadata from package.json.
+
 ## 0.13.12 - 2026-09-12
 
 - Preserve bounded checkpoint task/constraint text, latest execution evidence, pending calls and cross-boundary call/result associations. Refuse required state that cannot fit with explicit `checkpoint_state_budget_exceeded` (413), instead of silently discarding it.

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,4 +13,8 @@ export const TRAY_EXE_BASE64 = "${buffer.toString("base64")}";
 `;
 
 writeFileSync(outputFile, content, "utf8");
+// These shipped aliases must match the canonical embedded companion.
+for (const name of ["MomoApiProxyTray.exe", "momoapi-tray.exe"]) {
+  copyFileSync(trayExe, join(root, "bin", name));
+}
 console.log(`Embedded ${buffer.length} bytes from ${trayExe} into ${outputFile}`);

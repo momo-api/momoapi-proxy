@@ -7,12 +7,38 @@ using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace MomoApi.Tray
 {
+    public static class TrayPresentation
+    {
+        public const string StartupName = "MOMO API Proxy Tray.lnk";
+        public const string LegacyStartupName = "momoapi-proxy-tray.lnk";
+
+        public static string VersionFromJson(string json)
+        {
+            var match = Regex.Match(json ?? "", "\"version\"\\s*:\\s*\"([0-9]+\\.[0-9]+\\.[0-9]+(?:-[A-Za-z0-9.-]+)?(?:\\+[A-Za-z0-9.-]+)?)\"");
+            return match.Success ? match.Groups[1].Value : "";
+        }
+
+        public static string Title(bool healthy, string runningVersion, string installedVersion, int port)
+        {
+            string version = healthy ? runningVersion : installedVersion;
+            string label = string.IsNullOrEmpty(version) ? "版本未知" : "v" + version;
+            return "MOMO API Proxy " + label + (healthy ? " (运行中 :" + port + ")" : " (已停止 / 已安装)");
+        }
+
+        public static string Tooltip(string title)
+        {
+            // .NET Framework NotifyIcon.Text has a 63-character limit.
+            return title.Length <= 63 ? title : title.Substring(0, 60) + "...";
+        }
+    }
+
     static class Program
     {
         private static Mutex singleMutex;
@@ -79,6 +105,7 @@ namespace MomoApi.Tray
         private bool isRunning = false;
         private bool isCliRunning = false;
         private string lastNotifiedVersion = "";
+        private volatile string runningVersion = "";
 
         public TrayApplicationContext(int port)
         {
@@ -94,7 +121,7 @@ namespace MomoApi.Tray
 
             ContextMenuStrip menu = new ContextMenuStrip();
 
-            titleItem = new ToolStripMenuItem("MOMO API Proxy (: " + port + ")");
+            titleItem = new ToolStripMenuItem(TrayPresentation.Title(false, "", ReadInstalledVersion(), port));
             titleItem.Enabled = false;
             titleItem.Font = new Font(menu.Font, FontStyle.Bold);
             menu.Items.Add(titleItem);
@@ -141,7 +168,7 @@ namespace MomoApi.Tray
             updateItem = (ToolStripMenuItem)menu.Items.Add("检查并更新版本 (Update)");
             updateItem.Click += async (s, e) => await RunCliAsync("update", true);
 
-            autostartItem = new ToolStripMenuItem("开机自动启动");
+            autostartItem = new ToolStripMenuItem("托盘开机自动启动");
             autostartItem.CheckOnClick = true;
             autostartItem.Checked = CheckAutostart();
             autostartItem.Click += (s, e) => ToggleAutostart(autostartItem.Checked);
@@ -170,7 +197,7 @@ namespace MomoApi.Tray
             {
                 Icon = this.activeIcon,
                 ContextMenuStrip = menu,
-                Text = "MOMO API Proxy (127.0.0.1:" + port + ")",
+                Text = TrayPresentation.Tooltip(titleItem.Text),
                 Visible = true
             };
 
@@ -265,17 +292,18 @@ namespace MomoApi.Tray
 
         private void UpdateHealthUI(bool healthy)
         {
-            if (healthy != isRunning)
-            {
-                isRunning = healthy;
-                notifyIcon.Icon = isRunning ? activeIcon : inactiveIcon;
-                titleItem.Text = isRunning
-                    ? "MOMO API Proxy (运行中 :" + port + ")"
-                    : "MOMO API Proxy (已停止)";
-                notifyIcon.Text = isRunning
-                    ? "MOMO API Proxy 运行中 (127.0.0.1:" + port + ")"
-                    : "MOMO API Proxy 服务已停止";
-            }
+            isRunning = healthy;
+            notifyIcon.Icon = isRunning ? activeIcon : inactiveIcon;
+            // Refresh even if health is unchanged: the daemon can be updated
+            // between heartbeats while this tray process remains alive.
+            titleItem.Text = TrayPresentation.Title(healthy, runningVersion, ReadInstalledVersion(), port);
+            notifyIcon.Text = TrayPresentation.Tooltip(titleItem.Text);
+        }
+
+        private string ReadInstalledVersion()
+        {
+            try { return TrayPresentation.VersionFromJson(File.ReadAllText(Path.Combine(proxyHome, "app", "package.json"))); }
+            catch { return ""; }
         }
 
         private async Task<bool> CheckHealthOnceAsync(int timeoutMs)
@@ -287,6 +315,10 @@ namespace MomoApi.Tray
                 req.ReadWriteTimeout = timeoutMs;
                 using (var resp = (HttpWebResponse)await req.GetResponseAsync())
                 {
+                    using (var reader = new StreamReader(resp.GetResponseStream()))
+                    {
+                        runningVersion = TrayPresentation.VersionFromJson(await reader.ReadToEndAsync());
+                    }
                     return resp.StatusCode == HttpStatusCode.OK;
                 }
             }
@@ -631,41 +663,45 @@ namespace MomoApi.Tray
         private bool CheckAutostart()
         {
             string startupDir = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            return File.Exists(Path.Combine(startupDir, "momoapi-proxy-tray.lnk"));
+            return File.Exists(Path.Combine(startupDir, TrayPresentation.StartupName))
+                || File.Exists(Path.Combine(startupDir, TrayPresentation.LegacyStartupName));
         }
 
         private void ToggleAutostart(bool enable)
         {
             string startupDir = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-            string lnkPath = Path.Combine(startupDir, "momoapi-proxy-tray.lnk");
+            string lnkPath = Path.Combine(startupDir, TrayPresentation.StartupName);
+            string legacyPath = Path.Combine(startupDir, TrayPresentation.LegacyStartupName);
             string currentExe = Application.ExecutablePath;
 
             try
             {
                 if (enable)
                 {
-                    CreateShortcut(lnkPath, currentExe, "MOMO API Proxy Tray Companion");
+                    CreateShortcut(lnkPath, currentExe, "MOMO API Proxy Tray", "-p " + port);
                 }
                 else
                 {
                     if (File.Exists(lnkPath)) File.Delete(lnkPath);
                 }
+                if (File.Exists(legacyPath)) File.Delete(legacyPath);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                autostartItem.Checked = CheckAutostart();
+                MessageBox.Show("自启设置失败: " + ex.Message, "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
-        private static void CreateShortcut(string shortcutPath, string targetPath, string description)
+        private static void CreateShortcut(string shortcutPath, string targetPath, string description, string arguments)
         {
-            try
-            {
-                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                dynamic shell = Activator.CreateInstance(shellType);
-                dynamic shortcut = shell.CreateShortcut(shortcutPath);
-                shortcut.TargetPath = targetPath;
-                shortcut.Description = description;
-                shortcut.Save();
-            }
-            catch { }
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            dynamic shell = Activator.CreateInstance(shellType);
+            dynamic shortcut = shell.CreateShortcut(shortcutPath);
+            shortcut.TargetPath = targetPath;
+            shortcut.Description = description;
+            shortcut.Arguments = arguments;
+            shortcut.Save();
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)]

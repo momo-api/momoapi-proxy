@@ -11,6 +11,16 @@ permissions:
   contents: read
 
 jobs:
+  windows-tray:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: ./scripts/test-tray.ps1
+      - run: node --test test/autostart.test.mjs
+
   node:
     runs-on: ubuntu-latest
     steps:

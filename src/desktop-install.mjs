@@ -1,27 +1,27 @@
 import { spawnSync, spawn } from "node:child_process";
-import { writeFileSync, copyFileSync, existsSync, mkdirSync, unlinkSync, statSync } from "node:fs";
+import { writeFileSync, readFileSync, copyFileSync, existsSync, mkdirSync, unlinkSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { TRAY_EXE_BASE64 } from "./tray-binary.mjs";
 import { APP_ICO_BASE64 } from "./ico-binary.mjs";
+import { migrateWindowsAutostart, WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP } from "./autostart.mjs";
 
-function isWindowsProcessRunning(pattern) {
-  if (process.platform !== "win32") return false;
+function isWindowsProcessRunning(executable, spawnSyncImpl) {
   try {
-    const wql = "CommandLine LIKE '%" + pattern.replace(/'/g, "''") + "%' OR Name LIKE '%" + pattern.replace(/'/g, "''") + "%'";
-    const res = spawnSync("powershell.exe", [
+    const res = spawnSyncImpl("powershell.exe", [
       "-NoProfile",
       "-Command",
-      "Get-CimInstance Win32_Process -Filter \"" + wql + "\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessId",
-    ], { encoding: "utf8" });
+      "Get-CimInstance Win32_Process -Filter \"Name = 'MomoApiProxyTray.exe'\" | Where-Object { $_.ExecutablePath -eq '" + executable.replace(/'/g, "''") + "' } | Select-Object -ExpandProperty ProcessId",
+    ], { encoding: "utf8", windowsHide: true });
     return Boolean(res.stdout && res.stdout.trim());
   } catch {
     return false;
   }
 }
 
-export function installWindowsDesktop({ port = 18789, env = process.env } = {}) {
-  if (process.platform !== "win32") return { installed: false, reason: "not_windows" };
+export function installWindowsDesktop({ port = 18789, autostart = true, env = process.env, osPlatform = process.platform, spawnSyncImpl = spawnSync, spawnImpl = spawn } = {}) {
+  if (osPlatform !== "win32") return { installed: false, reason: "not_windows" };
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid tray port.");
   const userHome = env.USERPROFILE || homedir();
   const proxyHome = join(userHome, ".momoapi-proxy");
   const proxyBinDir = join(proxyHome, "bin");
@@ -49,9 +49,17 @@ export function installWindowsDesktop({ port = 18789, env = process.env } = {}) 
 
   // 2. Extract embedded tray and true-alpha ICO binaries
   if (TRAY_EXE_BASE64) {
-    try {
-      writeFileSync(targetTray, Buffer.from(TRAY_EXE_BASE64, "base64"));
-    } catch {}
+    const trayBytes = Buffer.from(TRAY_EXE_BASE64, "base64");
+    if (!existsSync(targetTray) || !readFileSync(targetTray).equals(trayBytes)) {
+      // Windows locks running executables. Stop only our installed tray before
+      // replacement, never a similarly named process or the proxy daemon.
+      const stopped = spawnSyncImpl("powershell.exe", [
+        "-NoProfile", "-Command",
+        "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process -Filter \"Name = 'MomoApiProxyTray.exe'\" | Where-Object { $_.ExecutablePath -eq '" + targetTray.replace(/'/g, "''") + "' } | ForEach-Object { $p=Get-Process -Id $_.ProcessId; $p.Kill(); $p.WaitForExit() }",
+      ], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+      if (stopped.error || stopped.status !== 0) throw new Error("Could not stop the installed MOMO API Proxy tray for replacement.");
+      writeFileSync(targetTray, trayBytes);
+    }
   }
 
   if (APP_ICO_BASE64) {
@@ -67,7 +75,9 @@ export function installWindowsDesktop({ port = 18789, env = process.env } = {}) 
 
   const desktopLnk = join(desktopDir, "MOMO API Proxy.lnk");
   const startMenuLnk = join(startMenuDir, "MOMO API Proxy.lnk");
-  const startupLnk = join(startupDir, "momoapi-proxy-tray.lnk");
+  const startupLnk = join(startupDir, WINDOWS_TRAY_STARTUP);
+  const startupMigration = migrateWindowsAutostart({ env });
+  if (startupMigration.conflicts.length) throw new Error("Both legacy and current MOMO startup entries exist; resolve the conflict before reinstalling.");
 
   const targetForShortcut = existsSync(targetTray) ? targetTray : targetExe;
 
@@ -81,6 +91,7 @@ function Make-Lnk($Path, $Target, $Desc, $Icon) {
   $Shortcut = $WshShell.CreateShortcut($Path)
   $Shortcut.TargetPath = $Target
   $Shortcut.Description = $Desc
+  $Shortcut.Arguments = '-p ${Number(port)}'
   if ($Icon -and (Test-Path $Icon)) {
     $Shortcut.IconLocation = "$Icon,0"
   }
@@ -92,30 +103,29 @@ if (Test-Path '${desktopDir.replace(/'/g, "''")}') {
 if (Test-Path '${startMenuDir.replace(/'/g, "''")}') {
   Make-Lnk '${startMenuLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy' '${targetIco.replace(/'/g, "''")}'
 }
-if (Test-Path '${startupDir.replace(/'/g, "''")}') {
+if ($${autostart ? "true" : "false"} -and (Test-Path '${startupDir.replace(/'/g, "''")}')) {
   Make-Lnk '${startupLnk.replace(/'/g, "''")}' '${targetForShortcut.replace(/'/g, "''")}' 'MOMO API Proxy Tray Companion' '${targetIco.replace(/'/g, "''")}'
 }
 `;
 
-  try {
-    spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript], { stdio: "ignore" });
-  } catch {}
+  const shortcuts = spawnSyncImpl("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "$ErrorActionPreference='Stop';" + psScript], { encoding: "utf8", windowsHide: true });
+  if (shortcuts.error || shortcuts.status !== 0) throw new Error("Could not create MOMO API Proxy shortcuts.");
 
-  // 4. Force restart Native Tray Companion with fresh binary
+  if (!autostart) {
+    for (const name of [WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP]) {
+      const path = join(startupDir, name);
+      if (existsSync(path)) unlinkSync(path);
+    }
+  }
+
+  // 4. Launch the installed companion only if it is not already running.
   let trayLaunched = false;
-  if (existsSync(targetTray)) {
+  if (existsSync(targetTray) && !isWindowsProcessRunning(targetTray, spawnSyncImpl)) {
     try {
-      const wql = "CommandLine LIKE '%tray.ps1%' OR Name LIKE '%MomoApiProxyTray%' OR Name LIKE '%momoapi-tray%'";
-      spawnSync("powershell.exe", [
-        "-NoProfile",
-        "-Command",
-        "Get-CimInstance Win32_Process -Filter \"" + wql + "\" -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
-      ], { stdio: "ignore" });
-
-      const p = spawn(targetTray, ["-p", String(port)], {
+      const p = spawnImpl(targetTray, ["-p", String(port)], {
         detached: true,
         stdio: "ignore",
-        windowsHide: false,
+        windowsHide: true,
       });
       p.unref();
       trayLaunched = true;
@@ -129,5 +139,6 @@ if (Test-Path '${startupDir.replace(/'/g, "''")}') {
     startupShortcut: startupLnk,
     trayPath: targetTray,
     trayLaunched,
+    startupMigration,
   };
 }
