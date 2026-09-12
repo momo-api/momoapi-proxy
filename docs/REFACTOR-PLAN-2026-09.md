@@ -34,7 +34,7 @@
 | P0 | P0 | 基线、计划、合成回归、可重复基准 | 无 | 旧缺陷确定性失败；无生产请求 | 已合并 |
 | P1 | P0 | UTF-8/SSE 共用分帧；换行、多行 data、EOF；流写入背压 | P0 | 参数完全一致；首帧早于 EOF；慢写暂停读取；取消不回退 | 已合并 |
 | P2 | P1 | 大请求并发/总资源预算、队列与超时、body 副本、输出累计预算 | P1 | 1/2/4 并发 × 10/25/50MiB；记录 RSS/heap/external/GC/event-loop；超限明确拒绝，无 OOM | 进行中 |
-| P2a | P1 | 入站准入：并发/正文总预算、FIFO、超时/取消/关停、读取模块 | P1 | 等待不读正文；释放无泄漏；本地矩阵；错误不触达上游 | 本地验证通过 |
+| P2a | P1 | 入站准入：并发/正文总预算、FIFO、超时/取消/关停、读取模块 | P1 | 等待不读正文；释放无泄漏；本地矩阵；错误不触达上游 | PR 待验收 |
 | P2b | P1 | 输出累计、pendingArguments、response state / DSML 预算 | P2a | 完整工具状态不截断；超限明确失败；全流与缓存压测 | 待开始 |
 | P3 | P1 | compact/checkpoint 增量预算，末尾精确序列化；保留语义不变 | P0 | 状态等价；全请求序列化次数不随删除项线性增长 | 待开始 |
 | P4 | P1 | 业务/健康指标分离、分段耗时；日志有界队列/轮转/尾读 | P0 | 无敏感内容；无样本明确不可用；丢日志计数、退出刷新、磁盘失败测试 | 待开始 |
@@ -75,7 +75,8 @@
 | 2026-09-12 | P1 | 15 项新增测试；Windows 全量 196/196；Alpine 构建/运行各 196/196；tray 11 断言 | 实现 225cc25；[PR #39](https://github.com/momo-api/momoapi-proxy/pull/39)；未合并/未发布 |
 | 2026-09-12 | P0/P1 CI | Node、container、windows-tray、secret-scan 全绿 | [实现提交 PR 检查](https://github.com/momo-api/momoapi-proxy/actions/runs/34677141559)；本行仅记录 225cc25 的结果 |
 | 2026-09-12 | P0/P1 合并 | 356e66a 的最终四类 CI 全绿后合并 | [最终 PR 检查](https://github.com/momo-api/momoapi-proxy/actions/runs/34677225440)；main 7781d6e；未发布 |
-| 2026-09-12 | P2a 本地 | 18 项新增测试；Windows 214/214；Alpine 构建/运行各 214/214；tray 11 断言；54 次矩阵均 HTTP 200、无 OOM | feat/bounded-request-admission；待 PR/CI；未发布 |
+| 2026-09-12 | P2a 本地 | 18 项新增测试；Windows 214/214；Alpine 构建/运行各 214/214；tray 11 断言；54 次矩阵均 HTTP 200、无 OOM | 实现 695f16d；[PR #40](https://github.com/momo-api/momoapi-proxy/pull/40)；未合并/未发布 |
+| 2026-09-12 | P2a CI | 695f16d 的 Node/container/windows-tray/secret-scan 全绿 | [实现提交检查](https://github.com/momo-api/momoapi-proxy/actions/runs/34678248551)；后续提交需重新验收 |
 
 ## 首批性能记录与取舍
 
