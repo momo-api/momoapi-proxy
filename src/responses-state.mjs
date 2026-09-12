@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { RetainedOutputBudget } from "./output-budget.mjs";
+import { sseDataPayload } from "./stream-transport.mjs";
 
 const MAX_STORED_RESPONSES = 256;
 const MAX_STATE_ITEMS = 2048;
@@ -189,6 +191,46 @@ export function rememberResponseState(responseId, seed, outputItems) {
     deleteState(oldest);
   }
   return true;
+}
+
+export function collectResponsesState(response, replay, settings) {
+  if (!replay?.seed) return null;
+  const state = { responseId: null, output: [], terminal: false, budget: new RetainedOutputBudget(settings) };
+  response.momoResponsesState = state;
+  return state;
+}
+
+export function observeResponsesEvent(state, event) {
+  if (!state || !event || typeof event !== "object") return;
+  if (event.type === "response.created" && typeof event.response?.id === "string") {
+    state.responseId = event.response.id;
+  }
+  if (event.type === "response.output_item.done" && event.item && typeof event.item === "object") {
+    state.budget.value(event.item);
+    state.output.push(event.item);
+  }
+  if ((event.type === "response.completed" || event.type === "response.incomplete") && event.response) {
+    state.terminal = true;
+    if (typeof event.response.id === "string") state.responseId = event.response.id;
+    if (state.output.length === 0 && Array.isArray(event.response.output)) {
+      state.budget.value(event.response.output);
+      for (const item of event.response.output) state.output.push(item);
+    }
+  }
+}
+
+export function observeResponsesBlock(state, block) {
+  if (!state || typeof block !== "string") return;
+  const data = sseDataPayload(block)?.trim();
+  if (!data || data === "[DONE]") return;
+  let parsed;
+  try { parsed = JSON.parse(data); } catch { return; }
+  observeResponsesEvent(state, parsed);
+}
+
+export function finalizeResponsesState(state, replay) {
+  if (!state?.terminal || !replay?.seed || !state.responseId || state.output.length === 0) return;
+  rememberResponseState(state.responseId, replay.seed, state.output);
 }
 
 export function resetResponseStateForTests() {
