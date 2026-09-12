@@ -54,6 +54,7 @@ test("diagnostic reporting and update checks have safe configurable defaults", (
       updateMode: "notify",
       updateCheckIntervalHours: 24,
       imagePluginEnabled: false,
+      requestAdmission: { maxConcurrent: 2, maxBodyBudgetMb: 64 },
     }));
     const settings = resolveSettings({ MOMO_PROXY_HOME: home });
     assert.equal(settings.endpoint, "https://momoapi.us");
@@ -62,6 +63,7 @@ test("diagnostic reporting and update checks have safe configurable defaults", (
     assert.equal(settings.autoUpdateEnabled, false);
     assert.equal(settings.updateCheckIntervalHours, 24);
     assert.equal(settings.imagePluginEnabled, false);
+    assert.deepEqual(settings.requestAdmission, { maxConcurrent: 2, maxBodyBudgetMb: 64 });
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

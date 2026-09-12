@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add bounded per-server ingress admission for Responses, compact, raw Chat and internal image POSTs: FIFO slots/body reservations, queue/read deadlines, shutdown and cancellation cleanup, and aggregate-only local metrics.
+- Validate Content-Length before allocating/reading, count actual uploaded bytes, and return explicit pre-upstream JSON admission errors; no automatic model replay, version bump or live runtime replacement.
+- Track P2a separately from future output/cache budgets and record the full synthetic 10/25/50MiB concurrency matrix, including memory/latency regressions.
+
 - Unify incremental UTF-8/SSE framing for native Responses and protocol bridges: preserve split Chinese/emoji tool arguments, forward CRLF/CR events before EOF, and handle multi-line data through tool restoration and audits.
 - Await downstream drain for native Responses, raw Chat passthrough, and between bridge input events; preserve cancellation. Reject malformed UTF-8 and oversized individual SSE frames instead of silently corrupting or buffering them indefinitely.
 - Add a staged refactor plan, transport regression matrix, and local-only framing benchmark; no checkpoint policy, package version, or runtime installation changes.
