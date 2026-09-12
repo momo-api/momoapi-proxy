@@ -47,7 +47,7 @@
 | P4b2 | P1 | 异步写队列、轮转、丢弃计数、退出刷新 | P4b1 | 多 writer/磁盘失败/限时刷新；不影响模型工具流 | 已合并（未发布） |
 | P4b2a | P1 | 独立有界队列与受锁保护的轮转文件 sink | P4b1 | 队列/等待者有界；故障不重放；跨进程/轮转/退出期限测试 | 已合并（未接入/未发布） |
 | P4b2b | P1 | 日志格式边界、专用新路径、daemon/CLI 接入与退出刷新 | P4b2a | 旧日志不迁移/删除；指标区分接收/写入；进程退出与工具 wire 回归 | 已合并（未发布） |
-| P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 待开始 |
+| P5 | P2 | 按 HTTP 生命周期、适配器、工具恢复、状态管理拆分 server.mjs | P1–P4 | wire/tool-call golden 无差异；逐个模块/PR 回滚 | 进行中（P5a–P5i 已合并） |
 | P6 | P1 | Windows/Linux/容器、真实 fetch 基准、升级/回滚、发布 | 对应阶段 | CI/Secret scan 全绿；tag/包/哈希一致；工具闭环及健康 | 待开始 |
 
 首批：P0 + P1。资源准入、checkpoint 策略、版本升级和运行目录替换不混入本批。
@@ -362,3 +362,27 @@ P4b2a 已合并，未接入/未发布/未安装；P4b2b 接入、P5、P6 未完�
 本地验收：最终 Windows npm test 344 passed + 3 POSIX skips；Node 24 Alpine 347/347（含真实 SIGTERM、symlink/FIFO 和多进程竞争）；Windows tray 11/11；完整历史、当前工作树和暂存区 Secret scan 均通过。额外覆盖离线 status 不伪造 daemon 日志计数、doctor 同时透传 logging/diagnostics，以及普通 server.close callback 等待其自有日志 runtime 限时收口，避免临时目录清理竞态。测试只使用临时 profile、本地 mock 和合成数据，未读真实日志/会话/密钥，未发送模型请求，未替换 0.13.12 运行实例或操作 VPS。最终 [CI](https://github.com/momo-api/momoapi-proxy/actions/runs/34696248074) 四类检查全绿。
 
 P4b2b 已通过 [PR #54](https://github.com/momo-api/momoapi-proxy/pull/54) 合并为 main 2f5ca6e，未发布/未安装。下一步 P5 按生命周期/adapter/tool state 聚焦拆分 server.mjs，P6 独立做安装、运行验收与发布。
+
+## P5 模块化拆分进度（2026-09-12）
+
+P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开始，只做等价抽离；没有改变路由、认证、模型选择��工具 wire、版本、tag、daemon 或生产运行实例。
+
+| 切片 | 抽离边界 | PR / 合并提交 | 验收 | 状态 |
+| --- | --- | --- | --- | --- |
+| P5a | `protocol-content` 共用内容转换 | [#56](https://github.com/momo-api/momoapi-proxy/pull/56) / `5c655d0` | CI 四门禁全绿；内容与二进制附件回归 | 已合并 |
+| P5b | Responses payload normalization | [#57](https://github.com/momo-api/momoapi-proxy/pull/57) / `aa1ca8d` | CI 四门禁全绿；Responses schema 回归 | 已合并 |
+| P5c | Gemini adapter | [#58](https://github.com/momo-api/momoapi-proxy/pull/58) / `a25fc25` | CI 四门禁全绿；Gemini 工具/图片/Unicode 回归 | 已合并 |
+| P5d | Claude adapter | [#59](https://github.com/momo-api/momoapi-proxy/pull/59) / `bfff59c` | CI 四门禁全绿；Claude tool-use/Unicode 回归 | 已合并 |
+| P5e | Chat message adapter | [#60](https://github.com/momo-api/momoapi-proxy/pull/60) / `6d55856` | CI 四门禁全绿；Chat/Qwen/tool ordering 回归 | 已合并 |
+| P5f | tool-call state helpers | [#61](https://github.com/momo-api/momoapi-proxy/pull/61) / `8d9f8e1` | CI 四门禁全绿；call/result/cache/JS helper 回归 | 已合并 |
+| P5g | OpenCode session helpers | [#62](https://github.com/momo-api/momoapi-proxy/pull/62) / `dc1046f` | 66 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
+| P5h | Responses stream state helpers | [#63](https://github.com/momo-api/momoapi-proxy/pull/63) / `1db2704` | 105 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
+| P5i | Responses transport helpers | [#64](https://github.com/momo-api/momoapi-proxy/pull/64) / `b42432b` | 122 定向；Windows 345/3；Alpine 348；tray 11 | 已合并 |
+
+截至 `b42432b`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,351 行，减少约 1,293 行；这只是维护性指标，不代表端到端性能自动提升。当前仍需继续拆分 HTTP 生命周期/图片引用/compact 及路由编排边界，并为每个切片保持 wire、tool-call、背压和取消回归。P5 未完成，尚未进入 P6 发布。
+
+P5 验收共同约束：
+
+- 只使用本地合成数据和 mock；不读取真实日志、会话、密钥或生产账户。
+- 每个 PR 均执行 Windows 全量、Node 24 Alpine、Windows tray、历史/工作树/staged secret scan。
+- 所有合并只进入 GitHub `main`；未制作新版本、未打新 tag、未上传公开包、未更新本机 18789 的运行实例。
