@@ -388,7 +388,7 @@ P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开
 
 截至 `d836c2e`，`server.mjs` 已从 P5 前基线约 2,644 行降至约 1,148 行，减少约 1,496 行；这只是维护性指标，不代表端到端性能自动提升。HTTP 生命周期、compact endpoint、公共路由判定、模型协议判定、context trace 与内部鉴权边界已完成。剩余响应/图片主编排属于高副作用区域，本阶段不再为降行数硬拆；P5 模块化拆分完成，下一步进入 P6 最终验收规划。
 
-### P6 验收入口（待单独授权执行）
+### P6 验收入口（已完成）
 
 1. 在干净 `main` 上确认版本、安装脚本、自启项与 `momo-codex-bridge` / `momoapi-proxy-tray` 品牌命名。
 2. 仅使用明确的本机运行目录和已确认的远程发布入口做安装验收；不猜测 SSH 主机，不覆盖当前运行实例。
@@ -401,6 +401,16 @@ P5 采用每次一个边界清晰的小 PR。所有切片均从干净 `main` 开
 只读验收确认手动更新后的 `127.0.0.1:18789/healthz` 返回 `0.13.12`；`momoapi-proxy --version`、`momo-codex-bridge --version`、CLI `status.version` / `runtimeVersion` 与托盘心跳均为 `0.13.12`。已安装托盘的文件版本和产品版本也是 `0.13.12`。Windows Startup 中当前入口为 `MOMO API Proxy Service.cmd`，旧 `momo-codex-bridge.cmd` 与 `momoapi-proxy-tray.lnk` 均不存在；代码仍保留旧名称兼容迁移。
 
 GitHub `v0.13.12` Release 已公开，但 P1-P5 的性能、稳定性和模块化重构仍位于 `main` 的 Unreleased 区域，包版本继续为 `0.13.12` 会使更新器无法识别这些变化。因此 P6 使用独立 `release/prepare-v0.13.13` 分支准备补丁版本，只更新版本元数据、Changelog 和由该版本生成的托盘二进制；不替换当前 daemon，不修改 VPS/CDN。发布前门禁包括 Windows 全量、Node 24 Alpine、tray、完整历史/工作树/staged secret scan 和发布包内容核验。
+
+### P6 发布结果（2026-09-13）
+
+- 发布准备 [PR #80](https://github.com/momo-api/momoapi-proxy/pull/80) 已合并为 `ad02daf`；annotated tag `v0.13.13` 指向该提交。
+- Windows 全量 359 passed / 3 POSIX skips，Node 24 Alpine 365/365，Windows tray 11/11；PR 与 tag 的 node/container/windows-tray/secret-scan 全绿。
+- GitHub Release `v0.13.13` 已公开；唯一归档大小 435,549 bytes，SHA-256 `c2e3da7725a4e7c13a34960e6a26e81f5d03b103dd816a68a03f7b49fc1979e4`。
+- 生产 CDN 工作流 [34704118541](https://github.com/momo-api/momo-vps-production/actions/runs/34704118541) 成功。versioned、latest、legacy latest 三包和两个 manifest 均从公网回下载复核为相同 SHA-256。
+- 公共 status/home/price/console 为 HTTP 200，未认证 `/v1/models` 为 401；`Verify origin is hidden` [34704169091](https://github.com/momo-api/momo-vps-production/actions/runs/34704169091) 通过。
+- CDN 回滚备份：`/home/ubuntu/backups/momoapi-proxy-cdn-20260912T160431Z`；生产发布记录见 `momo-vps-production` PR #85。
+- 本机 `127.0.0.1:18789` 未被发布流程覆盖或重启，仍为 `0.13.12`；可由用户通过已验证 updater 激活 `0.13.13`。
 
 P5 验收共同约束：
 
