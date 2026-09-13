@@ -39,6 +39,7 @@ export function attachmentFromPart(part) {
         ...(fileId ? { file_id: fileId } : {}),
         ...(fileData ? { file_data: fileData } : {}),
         ...(fileUrl ? { file_url: fileUrl } : {}),
+        ...(part.momo_asset && typeof part.momo_asset === "object" ? { momo_asset: { ...part.momo_asset } } : {}),
       },
     };
   }

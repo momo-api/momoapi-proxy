@@ -40,11 +40,11 @@ export async function upstreamErrorMessage(upstream) {
     .slice(0, 4000);
 }
 
-export function writeResponsesFailure(response, model, status, message, code = `http_${status}`) {
+export function writeResponsesFailure(response, model, status, message, code = `http_${status}`, details = null) {
   if (!response.headersSent) initSseResponse(response, status);
   const respId = response.momoResponseId || "resp_err_" + randomUUID();
   if (!response.momoResponseId) response.write(responseCreated(model, respId).data);
-  response.write(failed(respId, model, message, code));
-  response.write(sseError(message, code));
+  response.write(failed(respId, model, message, code, details));
+  response.write(sseError(message, code, details));
   response.end();
 }

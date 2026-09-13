@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { bodyOf, getMaxRequestBodyBytes } from "../src/server.mjs";
 
 test("getMaxRequestBodyBytes respects env and settings", () => {
-  assert.equal(getMaxRequestBodyBytes({}), 64 * 1024 * 1024);
+  assert.equal(getMaxRequestBodyBytes({}), 144 * 1024 * 1024);
   assert.equal(getMaxRequestBodyBytes({ maxRequestBodyMb: 10 }), 10 * 1024 * 1024);
   process.env.MOMO_MAX_REQUEST_BODY_MB = "32";
   assert.equal(getMaxRequestBodyBytes({ maxRequestBodyMb: 10 }), 32 * 1024 * 1024);

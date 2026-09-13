@@ -11,6 +11,15 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function assertChatFileCapability(files) {
+  if (!Array.isArray(files) || files.length === 0) return;
+  const hasUrl = files.some((file) => typeof file?.file_url === "string");
+  if (!hasUrl) return;
+  throw Object.assign(new Error(
+    "This Chat Completions model route does not support file URL attachments. Use a Responses, Gemini, or supported Claude model.",
+  ), { statusCode: 400, code: "attachment_url_unsupported" });
+}
+
 export function buildOpenAIChatMessages(input, instructions) {
   const messages = [];
   if (instructions && String(instructions).trim().length > 0) {
@@ -68,6 +77,7 @@ export function buildOpenAIChatMessages(input, instructions) {
     if (item.type === "message" || item.role) {
       const role = item.role === "assistant" ? "assistant" : (item.role === "developer" || item.role === "system" ? "system" : "user");
       const output = outputParts(item.content);
+      assertChatFileCapability(output.files);
       const textContent = output.text;
       if (role === "assistant") {
         flushPendingToolCalls();
@@ -123,6 +133,7 @@ export function buildOpenAIChatMessages(input, instructions) {
     if (item.type === "function_call_output" || item.type === "custom_tool_call_output") {
       const callId = item.call_id || "call_unknown";
       const output = outputParts(item.output);
+      assertChatFileCapability(output.files);
       const textOutput = output.text;
       const matchIdx = pendingToolCalls.findIndex((c) => c.id === callId);
       if (matchIdx >= 0) {

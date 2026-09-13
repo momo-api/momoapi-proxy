@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { RetainedOutputBudget } from "./output-budget.mjs";
 import { sseDataPayload } from "./stream-transport.mjs";
+import { stableAttachmentFingerprintObject } from "./attachment-routing.mjs";
 
 const MAX_STORED_RESPONSES = 256;
 const MAX_STATE_ITEMS = 2048;
@@ -39,6 +40,8 @@ function canonicalize(value, state, depth = 0) {
     return value.map((item) => canonicalize(item, state, depth + 1));
   }
   if (value && typeof value === "object") {
+    const stableAttachment = stableAttachmentFingerprintObject(value);
+    if (stableAttachment) value = stableAttachment;
     state.bytes += 2;
     if (state.bytes > MAX_FINGERPRINT_BYTES) throw new RangeError("fingerprint size exceeded");
     const out = {};

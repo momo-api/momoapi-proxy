@@ -1,5 +1,5 @@
 const MIB = 1024 * 1024;
-const DEFAULTS = { maxConcurrent: 4, maxQueued: 8, maxBodyBudgetMb: 128, queueTimeoutMs: 30000, bodyReadTimeoutMs: 120000 };
+const DEFAULTS = { maxConcurrent: 4, maxQueued: 8, maxBodyBudgetMb: 288, queueTimeoutMs: 30000, bodyReadTimeoutMs: 180000 };
 
 export function admissionError(statusCode, code, message) {
   return Object.assign(new Error(message), { statusCode, code, admission: true });

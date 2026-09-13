@@ -46,6 +46,7 @@ export function resolveSettings(env = process.env) {
   const saved = readSettings(env);
   const updateMode = saved.updateMode === "notify" ? "notify" : "automatic";
   const imageAssets = saved.imageAssets && typeof saved.imageAssets === "object" ? saved.imageAssets : {};
+  const attachmentAssets = saved.attachmentAssets && typeof saved.attachmentAssets === "object" ? saved.attachmentAssets : {};
   // An installed daemon must remain pinned to its saved credential. Long-lived
   // shells (Codex/Desktop in particular) can retain an older process-level
   // MOMO_API_KEY after the user's credential has been updated. Treat the env
@@ -72,11 +73,21 @@ export function resolveSettings(env = process.env) {
     lastError: saved.lastError || null,
     diagnosticsEnabled: saved.diagnosticsEnabled !== false,
     imagePluginEnabled: saved.imagePluginEnabled !== false,
-    maxRequestBodyMb: saved.maxRequestBodyMb ? Number(saved.maxRequestBodyMb) : 64,
+    maxRequestBodyMb: saved.maxRequestBodyMb ? Number(saved.maxRequestBodyMb) : 144,
     requestAdmission: saved.requestAdmission && typeof saved.requestAdmission === "object" ? saved.requestAdmission : {},
     outputPolicy: saved.outputPolicy && typeof saved.outputPolicy === "object" ? saved.outputPolicy : {},
     contextPolicy: saved.contextPolicy && typeof saved.contextPolicy === "object" ? saved.contextPolicy : {},
     imageAssetDirectory: join(appHome(env), "images"),
+    attachmentAssetDirectory: join(appHome(env), "attachments"),
+    attachmentAssets: {
+      enabled: attachmentAssets.enabled !== false,
+      maxFileMb: attachmentAssets.maxFileMb === undefined ? 50 : Number(attachmentAssets.maxFileMb),
+      maxBatchMb: attachmentAssets.maxBatchMb === undefined ? 100 : Number(attachmentAssets.maxBatchMb),
+      inlineImageMb: attachmentAssets.inlineImageMb === undefined ? 6 : Number(attachmentAssets.inlineImageMb),
+      inlineFileMb: attachmentAssets.inlineFileMb === undefined ? 2 : Number(attachmentAssets.inlineFileMb),
+      inlineBatchMb: attachmentAssets.inlineBatchMb === undefined ? 5.5 : Number(attachmentAssets.inlineBatchMb),
+      uploadTimeoutMs: attachmentAssets.uploadTimeoutMs === undefined ? 180000 : Number(attachmentAssets.uploadTimeoutMs),
+    },
     imageAssets: {
       maxAssetMb: imageAssets.maxAssetMb === undefined ? 20 : Number(imageAssets.maxAssetMb),
       maxTotalMb: imageAssets.maxTotalMb === undefined ? 2048 : Number(imageAssets.maxTotalMb),

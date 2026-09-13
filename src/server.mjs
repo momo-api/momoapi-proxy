@@ -26,6 +26,8 @@ import { encodeRecoverableCompaction, parseCompactResponseText, readCompactRespo
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { createImageAssetStore, persistImageResult } from "./image-assets.mjs";
+import { createAttachmentAssetStore } from "./attachment-assets.mjs";
+import { assetizeAttachments, stripAttachmentMetadata } from "./attachment-routing.mjs";
 import { getDiagnosticsMetrics } from "./diagnostics.mjs";
 import { createLoggingRuntime } from "./logging-runtime.mjs";
 import { closeLoggingWithinDeadline } from "./process-shutdown.mjs";
@@ -73,6 +75,12 @@ export const metricsState = {
   activeCompactions: 0,
   replayDedupHits: 0,
   replayBytesSkipped: 0,
+  attachmentRequests: 0,
+  attachmentCount: 0,
+  attachmentCurrentBytes: 0,
+  attachmentUploadedCount: 0,
+  attachmentResignedCount: 0,
+  attachmentUploadedBytes: 0,
 };
 
 function recordContextTrace(response, trace, admitted = true) {
@@ -104,6 +112,25 @@ export function resetMetrics() {
   metricsState.activeCompactions = 0;
   metricsState.replayDedupHits = 0;
   metricsState.replayBytesSkipped = 0;
+  metricsState.attachmentRequests = 0;
+  metricsState.attachmentCount = 0;
+  metricsState.attachmentCurrentBytes = 0;
+  metricsState.attachmentUploadedCount = 0;
+  metricsState.attachmentResignedCount = 0;
+  metricsState.attachmentUploadedBytes = 0;
+}
+
+function recordAttachmentTrace(response, trace) {
+  if (!trace) return;
+  response.momoAttachmentTrace = trace;
+  if (trace.metricsRecorded) return;
+  trace.metricsRecorded = true;
+  metricsState.attachmentRequests += 1;
+  metricsState.attachmentCount += trace.attachmentCount || 0;
+  metricsState.attachmentCurrentBytes += trace.currentAttachmentBytes || 0;
+  metricsState.attachmentUploadedCount += trace.uploadedCount || 0;
+  metricsState.attachmentResignedCount += trace.resignedCount || 0;
+  metricsState.attachmentUploadedBytes += trace.uploadedBytes || 0;
 }
 
 export function resolveTargetModel(model) {
@@ -247,7 +274,7 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
   }
   const safePayload = prepared.payload;
   const functions = extractFunctions(safePayload);
-  const builtMessages = buildOpenAIChatMessages(safePayload.input || [], safePayload.instructions);
+  const builtMessages = stripAttachmentMetadata(buildOpenAIChatMessages(safePayload.input || [], safePayload.instructions));
   const messages = String(payload.model || "").toLowerCase().includes("qwen")
     ? normalizeQwenSystemMessages(builtMessages)
     : builtMessages;
@@ -385,8 +412,10 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
     prepared.trace.policyActions.push("local_history_checkpoint");
   }
-  const outboundBody = serializeOutboundBody(prepared.payload, settings, prepared.trace);
-  response.momoToolAudit.upstream = summarizeToolRequest(prepared.payload);
+  const statePayload = prepared.payload;
+  const outboundPayload = stripAttachmentMetadata(statePayload);
+  const outboundBody = serializeOutboundBody(outboundPayload, settings, prepared.trace);
+  response.momoToolAudit.upstream = summarizeToolRequest(outboundPayload);
   // Attach trace for network-error logging, but defer metric finalization until
   // a possible Responses -> Chat fallback has passed its own final admission.
   response.momoContextTrace = prepared.trace;
@@ -497,7 +526,8 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
   if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
     prepared.trace.policyActions.push("local_history_checkpoint");
   }
-  const { body, functions } = geminiRequest(prepared.payload, prepared.payload.model, calls);
+  const { body: rawBody, functions } = geminiRequest(prepared.payload, prepared.payload.model, calls);
+  const body = stripAttachmentMetadata(rawBody);
   const endpoint = settings.endpoint + "/v1beta/models/" + encodeURIComponent(payload.model) + ":streamGenerateContent?alt=sse";
   const outboundBody = serializeOutboundBody(body, settings, prepared.trace);
   recordContextTrace(response, prepared.trace, true);
@@ -540,7 +570,8 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
   if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
     prepared.trace.policyActions.push("local_history_checkpoint");
   }
-  const { body, functions } = claudeRequest(prepared.payload, prepared.payload.model, calls);
+  const { body: rawBody, functions } = claudeRequest(prepared.payload, prepared.payload.model, calls);
+  const body = stripAttachmentMetadata(rawBody);
   const outboundBody = serializeOutboundBody(body, settings, prepared.trace);
   recordContextTrace(response, prepared.trace, true);
   const upstream = await fetchImpl(settings.endpoint + "/v1/messages", { method: "POST", headers: { ...upstreamHeaders(settings), "anthropic-version": "2023-06-01" }, body: outboundBody, signal });
@@ -585,7 +616,7 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
 
 async function forwardChatCompletions(request, response, settings, payload, fetchImpl, signal) {
   const prepared = prepareMediaPayload(payload, settings, { kind: "chat", requestBytes: request.momoRequestBodyBytes || 0 });
-  const outboundBody = serializeOutboundBody(prepared.payload, settings, prepared.trace);
+  const outboundBody = serializeOutboundBody(stripAttachmentMetadata(prepared.payload), settings, prepared.trace);
   recordContextTrace(response, prepared.trace, true);
   const upstream = await fetchImpl(settings.endpoint + "/v1/chat/completions", {
     method: "POST",
@@ -612,7 +643,7 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
 }
 
 export function createMomoSwitch(settings, options = {}) {
-  const { fetchImpl = fetch, exitImpl = process.exit, assetStore } = options;
+  const { fetchImpl = fetch, exitImpl = process.exit, assetStore, attachmentAssetStore: suppliedAttachmentAssetStore } = options;
   const ownsLoggingRuntime = !options.loggingRuntime;
   const loggingRuntime = options.loggingRuntime || (options.loggingRuntimeFactory || createLoggingRuntime)({
     diagnosticsEnabled: settings.diagnosticsEnabled, consoleMirror: false,
@@ -627,6 +658,7 @@ export function createMomoSwitch(settings, options = {}) {
   const compactLocks = new Set();
   const admission = new RequestAdmission(settings);
   const imageAssetStore = assetStore || createImageAssetStore(settings);
+  const attachmentAssetStore = suppliedAttachmentAssetStore || createAttachmentAssetStore(settings);
   const logRequest = (fields) => writeRequestLog(fields, loggingRuntime.env, { runtime: loggingRuntime, settings });
   let serverInstance = null;
   let shutdownLifecycle = null;
@@ -888,6 +920,14 @@ export function createMomoSwitch(settings, options = {}) {
             replayDedupHits: metricsState.replayDedupHits,
             replayBytesSkipped: metricsState.replayBytesSkipped,
           },
+          attachments: {
+            requests: metricsState.attachmentRequests,
+            count: metricsState.attachmentCount,
+            currentBytes: metricsState.attachmentCurrentBytes,
+            uploadedCount: metricsState.attachmentUploadedCount,
+            resignedCount: metricsState.attachmentResignedCount,
+            uploadedBytes: metricsState.attachmentUploadedBytes,
+          },
           ttfbMs: measured.groups.business.stages.clientFirstWriteMs,
           memory: {
             rssBytes: curMem.rss,
@@ -974,7 +1014,11 @@ export function createMomoSwitch(settings, options = {}) {
       if (isChatCompletionsRoute(request.method, pathname)) {
         const payload = await receiveBody();
         requestedModel = payload.model;
-        await forwardChatCompletions(request, response, settings, payload, fetchImpl, abortController.signal);
+        const attachmentResult = await assetizeAttachments(payload, settings, {
+          kind: "chat", targetProtocol: "chat", fetchImpl, signal: abortController.signal, store: attachmentAssetStore,
+        });
+        recordAttachmentTrace(response, attachmentResult.trace);
+        await forwardChatCompletions(request, response, settings, attachmentResult.payload, fetchImpl, abortController.signal);
         logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp, ...contextLogFields(response, request) });
         return;
       }
@@ -1001,9 +1045,14 @@ export function createMomoSwitch(settings, options = {}) {
           return json(response, 400, { error: { message: "model is required", type: "invalid_request_error" } });
         }
         const { targetModel, protocol } = resolveTargetModel(payload.model);
+        const attachmentResult = await assetizeAttachments({ ...payload, model: targetModel }, settings, {
+          kind: "responses", targetProtocol: protocol, fetchImpl, signal: abortController.signal, store: attachmentAssetStore,
+        });
+        recordAttachmentTrace(response, attachmentResult.trace);
+        const attachmentPayload = attachmentResult.payload;
         const replay = protocol === "responses"
-          ? preparePreviousResponseReplay({ ...payload, model: targetModel })
-          : { payload: { ...payload, model: targetModel }, seed: null, deduplicated: false, skippedBytes: 0 };
+          ? preparePreviousResponseReplay(attachmentPayload)
+          : { payload: attachmentPayload, seed: null, deduplicated: false, skippedBytes: 0 };
         if (replay.deduplicated) {
           metricsState.replayDedupHits += 1;
           metricsState.replayBytesSkipped += replay.skippedBytes;
@@ -1037,6 +1086,7 @@ export function createMomoSwitch(settings, options = {}) {
       if (abortController.signal.aborted) return;
       const rawUrl = request.url || "/";
       const pathname = rawUrl.split("?")[0].replace(/\/+$/, "") || "/";
+      if (error.attachmentTrace) recordAttachmentTrace(response, error.attachmentTrace);
 
       if (error.admission) {
         const status = error.statusCode;
@@ -1074,7 +1124,7 @@ export function createMomoSwitch(settings, options = {}) {
         logRequest({ method: request.method, url: pathname, model: requestedModel, status: 413, elapsedMs: Date.now() - t0, error: error.message, errorCode: code, ip: remoteIp, ...contextLogFields(response, request) });
         const body = { error: { message: error.message, type: "payload_too_large", code, ...(error.details ? { details: error.details } : {}) } };
         if ((pathname === "/v1/responses" || pathname === "/responses") && request.momoRequestBodyBytes) {
-          return writeResponsesFailure(response, requestedModel || "unknown", 413, error.message, code);
+          return writeResponsesFailure(response, requestedModel || "unknown", 413, error.message, code, error.details);
         }
         return json(response, 413, body);
       }
@@ -1084,14 +1134,28 @@ export function createMomoSwitch(settings, options = {}) {
       }
 
       if (error.statusCode === 400) {
-        logRequest({ method: request.method, url: pathname, status: 400, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
-        return json(response, 400, { error: { message: error.message, type: "invalid_request_error", code: "invalid_json" } });
+        const code = error.code || "invalid_json";
+        logRequest({ method: request.method, url: pathname, status: 400, elapsedMs: Date.now() - t0, error: error.message, errorCode: code, ip: remoteIp, ...contextLogFields(response, request) });
+        if (code.startsWith("attachment_") && (pathname === "/v1/responses" || pathname === "/responses")) {
+          return writeResponsesFailure(response, requestedModel || "unknown", 400, error.message, code, error.details);
+        }
+        return json(response, 400, { error: { message: error.message, type: "invalid_request_error", code, ...(error.details ? { details: error.details } : {}) } });
       }
 
       if (Number.isInteger(error.statusCode) && (pathname === "/v1/responses/compact" || pathname === "/responses/compact")) {
         const status = error.statusCode;
         logRequest({ method: request.method, url: pathname, model: requestedModel, status, elapsedMs: Date.now() - t0, error: error.message, errorCode: error.code || `http_${status}`, ip: remoteIp });
         return json(response, status, { error: { message: error.message, type: "compact_error", code: error.code || `http_${status}` } });
+      }
+
+      if (Number.isInteger(error.statusCode) && error.statusCode >= 400 && error.statusCode <= 599 && String(error.code || "").startsWith("attachment_")) {
+        const status = error.statusCode;
+        const code = error.code || `http_${status}`;
+        logRequest({ method: request.method, url: pathname, model: requestedModel, status, elapsedMs: Date.now() - t0, error: error.message, errorCode: code, ip: remoteIp, ...contextLogFields(response, request) });
+        if (pathname === "/v1/responses" || pathname === "/responses") {
+          return writeResponsesFailure(response, requestedModel || "unknown", status, error.message, code, error.details);
+        }
+        return json(response, status, { error: { message: error.message, type: status < 500 ? "invalid_request_error" : "server_error", code, ...(error.details ? { details: error.details } : {}) } });
       }
 
       logRequest({ method: request.method, url: pathname, model: requestedModel, status: 502, elapsedMs: Date.now() - t0, error: error.message, errorCode: error.code || "upstream_request_failed", ip: remoteIp, ...contextLogFields(response, request) });

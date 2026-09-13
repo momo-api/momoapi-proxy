@@ -55,6 +55,22 @@ export function getContextPolicy(settings = {}) {
     { maxMb: 18 },
   );
   const softLimitBytes = Math.min(requestedSoft, Math.max(1024, hardLimitBytes - 1024));
+  const maxCurrentTurnImageBytes = configuredBytes(
+    settings,
+    "maxCurrentTurnImageBytes",
+    "maxCurrentTurnImageBytesMb",
+    "MOMO_MAX_CURRENT_TURN_IMAGE_BYTES_MB",
+    8,
+    { maxMb: 18 },
+  );
+  const requestedSingleImageBytes = configuredBytes(
+    settings,
+    "maxSingleImageBytes",
+    "maxSingleImageBytesMb",
+    "MOMO_MAX_SINGLE_CONTEXT_IMAGE_BYTES_MB",
+    maxCurrentTurnImageBytes / MIB,
+    { maxMb: 18 },
+  );
 
   return {
     softLimitBytes,
@@ -68,22 +84,8 @@ export function getContextPolicy(settings = {}) {
       4,
       { maxMb: 16 },
     ),
-    maxCurrentTurnImageBytes: configuredBytes(
-      settings,
-      "maxCurrentTurnImageBytes",
-      "maxCurrentTurnImageBytesMb",
-      "MOMO_MAX_CURRENT_TURN_IMAGE_BYTES_MB",
-      8,
-      { maxMb: 18 },
-    ),
-    maxSingleImageBytes: configuredBytes(
-      settings,
-      "maxSingleImageBytes",
-      "maxSingleImageBytesMb",
-      "MOMO_MAX_SINGLE_CONTEXT_IMAGE_BYTES_MB",
-      2,
-      { maxMb: 18 },
-    ),
+    maxCurrentTurnImageBytes,
+    maxSingleImageBytes: Math.min(requestedSingleImageBytes, maxCurrentTurnImageBytes),
   };
 }
 
@@ -232,8 +234,9 @@ function removeRecord(record, marker, trace, reason) {
   if (!trace.policyActions.includes(reason)) trace.policyActions.push(reason);
 }
 
-function mediaBudgetError(trace, policy, message) {
+function mediaBudgetError(trace, policy, message, actualBytes) {
   return new ContextBudgetError(message, "media_budget_exceeded", {
+    actualBytes,
     imageCount: trace.imageCount,
     currentTurnImageBytes: trace.currentTurnImageBytes,
     maxCurrentTurnImageBytes: policy.maxCurrentTurnImageBytes,
@@ -271,10 +274,10 @@ export function prepareMediaPayload(payload, settings = {}, { kind = "responses"
 
   const oversizedCurrent = current.find((record) => record.bodyBytes > policy.maxSingleImageBytes);
   if (oversizedCurrent) {
-    throw mediaBudgetError(trace, policy, `Current-turn image exceeds the ${Math.floor(policy.maxSingleImageBytes / MIB)} MiB context-image limit.`);
+    throw mediaBudgetError(trace, policy, `Current-turn image exceeds the ${Math.floor(policy.maxSingleImageBytes / MIB)} MiB context-image limit.`, oversizedCurrent.bodyBytes);
   }
   if (trace.currentTurnImageBytes > policy.maxCurrentTurnImageBytes) {
-    throw mediaBudgetError(trace, policy, `Current-turn images exceed the ${Math.floor(policy.maxCurrentTurnImageBytes / MIB)} MiB context-image budget.`);
+    throw mediaBudgetError(trace, policy, `Current-turn images exceed the ${Math.floor(policy.maxCurrentTurnImageBytes / MIB)} MiB context-image budget.`, trace.currentTurnImageBytes);
   }
 
   // Current-turn images are protected. Historical duplicates of current images,

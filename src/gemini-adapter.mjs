@@ -41,18 +41,21 @@ function geminiOutputParts(value, name, callId) {
   return [
     { functionResponse },
     ...output.images.map(geminiImagePart),
-    ...output.files.map(geminiFilePart).filter(Boolean),
+    ...output.files.map((file) => geminiFilePart(file, file.momo_asset?.mime_type)).filter(Boolean),
   ];
 }
 
 function geminiImagePart(image) {
   return image.kind === "url"
-    ? { text: `[image: ${image.url}]` }
+    ? { fileData: { mimeType: image.mimeType, fileUri: image.url } }
     : { inline_data: { mime_type: image.mimeType, data: image.data } };
 }
 
-function geminiFilePart(file) {
+function geminiFilePart(file, mimeType = "application/octet-stream") {
   if (!file || typeof file !== "object") return null;
+  if (typeof file.file_url === "string" && /^https:\/\//i.test(file.file_url)) {
+    return { fileData: { mimeType, fileUri: file.file_url } };
+  }
   if (typeof file.file_data === "string") {
     const match = INLINE_DATA_URL.exec(file.file_data);
     if (match) {
@@ -65,6 +68,12 @@ function geminiFilePart(file) {
     }
   }
   return null;
+}
+
+function geminiAttachmentMimeType(file) {
+  if (typeof file?.momo_asset?.mime_type === "string") return file.momo_asset.mime_type;
+  const match = typeof file?.file_data === "string" ? INLINE_DATA_URL.exec(file.file_data) : null;
+  return match?.[1]?.toLowerCase() || "application/octet-stream";
 }
 
 function geminiFunctionResultText(part) {
@@ -241,7 +250,7 @@ export function buildGeminiContents(input, calls) {
           else {
             const attachment = attachmentFromPart(part);
             if (attachment) {
-              const nativePart = geminiFilePart(attachment.native);
+              const nativePart = geminiFilePart(attachment.native, geminiAttachmentMimeType(attachment.native));
               currentParts.push(nativePart || { text: attachment.marker });
             }
           }

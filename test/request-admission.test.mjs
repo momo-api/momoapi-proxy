@@ -9,7 +9,9 @@ const MIB = 1024 * 1024;
 test("admission policy keeps safe defaults for invalid settings and permits zero queue", () => {
   const defaults = resolveAdmissionPolicy();
   assert.equal(defaults.maxConcurrent, 4);
-  assert.equal(defaults.maxBodyBudgetMb, 128);
+  // The default ingress ceiling is 144 MiB; reserve two such bodies so an
+  // active upload and its handoff/replay bookkeeping cannot exhaust the gate.
+  assert.equal(defaults.maxBodyBudgetMb, 288);
   assert.deepEqual(resolveAdmissionPolicy({ requestAdmission: { maxConcurrent: 0, maxBodyBudgetMb: Infinity, maxQueued: -1 } }), defaults);
   assert.equal(resolveAdmissionPolicy({ requestAdmission: { maxQueued: 0 } }).maxQueued, 0);
 });
