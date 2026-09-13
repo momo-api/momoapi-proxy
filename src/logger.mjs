@@ -78,7 +78,8 @@ export function logError(title, error, env = process.env, { runtime, settings } 
 }
 
 export function logRequest({ method, url, model, status, elapsedMs, error, errorCode, ip, toolsCount, toolCalls,
-  requestBytes, outboundBytes, imageCount, imageBytes, policyAction, inputTokens, outputTokens, totalTokens, toolAudit },
+  requestBytes, outboundBytes, imageCount, imageBytes, policyAction, inputTokens, outputTokens, totalTokens, toolAudit,
+  attachmentCount, attachmentBytes, attachmentUploadedCount, attachmentResignedCount, attachmentUploadedBytes },
   env = process.env, { runtime, settings } = {}) {
   const accepted = enqueue({
     schema_version: 2, created_at: new Date().toISOString(), level: error ? "error" : "info", event: "proxy_request",
@@ -88,6 +89,9 @@ export function logRequest({ method, url, model, status, elapsedMs, error, error
     executed_tools_count: Array.isArray(toolCalls) ? toolCalls.length : undefined,
     request_bytes: finiteInteger(requestBytes), outbound_bytes: finiteInteger(outboundBytes), image_count: finiteInteger(imageCount),
     image_bytes: finiteInteger(imageBytes), policy_action: safeLogValue(policyAction, 160), tool_audit: safeToolAudit(toolAudit),
+    attachment_count: finiteInteger(attachmentCount), attachment_bytes: finiteInteger(attachmentBytes),
+    attachment_uploaded_count: finiteInteger(attachmentUploadedCount), attachment_resigned_count: finiteInteger(attachmentResignedCount),
+    attachment_uploaded_bytes: finiteInteger(attachmentUploadedBytes),
   }, env, runtime);
   const businessRoute = /^(?:(?:\/v1)?\/(?:responses|chat\/completions|images(?:\/|$)|messages|models(?:\/|$))|\/internal\/images(?:\/|$))/i.test(String(url || ""));
   if (businessRoute && Number(status) >= 400) {

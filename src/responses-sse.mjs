@@ -230,7 +230,7 @@ export function completed(responseId, model, output = []) {
   return event("response.completed", { response: { id: responseId, object: "response", status: "completed", model, output } });
 }
 
-export function failed(responseId, model, message, code = "server_error") {
+export function failed(responseId, model, message, code = "server_error", details = null) {
   return event("response.failed", {
     response: {
       id: responseId,
@@ -238,13 +238,13 @@ export function failed(responseId, model, message, code = "server_error") {
       status: "failed",
       model,
       output: [],
-      error: { type: "error", code, message },
+      error: { type: "error", code, message, ...(details ? { details } : {}) },
     },
   });
 }
 
-export function sseError(message, code = "server_error") {
-  return event("error", { error: { type: "error", code, message } });
+export function sseError(message, code = "server_error", details = null) {
+  return event("error", { error: { type: "error", code, message, ...(details ? { details } : {}) } });
 }
 
 export function parseSse(text) {

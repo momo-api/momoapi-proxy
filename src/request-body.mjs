@@ -2,8 +2,8 @@ import { admissionError } from "./request-admission.mjs";
 import { performance } from "node:perf_hooks";
 
 export function getMaxRequestBodyBytes(settings = {}) {
-  const mb = parseInt(process.env.MOMO_MAX_REQUEST_BODY_MB || settings.maxRequestBodyMb || "64", 10);
-  return (isNaN(mb) || mb < 1 || mb > 256 ? 64 : mb) * 1024 * 1024;
+  const mb = parseInt(process.env.MOMO_MAX_REQUEST_BODY_MB || settings.maxRequestBodyMb || "144", 10);
+  return (isNaN(mb) || mb < 1 || mb > 256 ? 144 : mb) * 1024 * 1024;
 }
 export function declaredBodyBytes(request, settings = {}) {
   const value = request.headers?.["content-length"];

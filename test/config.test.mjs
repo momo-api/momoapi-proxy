@@ -37,6 +37,11 @@ test("environment API key remains a fallback before setup creates settings", () 
     assert.equal(settings.imagePluginEnabled, true);
     assert.equal(settings.imageAssetDirectory, join(home, "images"));
     assert.deepEqual(settings.imageAssets, { maxAssetMb: 20, maxTotalMb: 2048, maxAssets: 2000, retentionDays: 30 });
+    assert.equal(settings.maxRequestBodyMb, 144);
+    assert.equal(settings.attachmentAssetDirectory, join(home, "attachments"));
+    assert.deepEqual(settings.attachmentAssets, {
+      enabled: true, maxFileMb: 50, maxBatchMb: 100, inlineImageMb: 6, inlineFileMb: 2, inlineBatchMb: 5.5, uploadTimeoutMs: 180000,
+    });
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { serializedBodyBytes } from "./context-policy.mjs";
+import { checkpointAttachmentReferences } from "./attachment-routing.mjs";
 
 const MIB = 1024 * 1024;
 const INLINE_DATA_URL = /^data:([^;,]+)(?:;[^,]*)?;base64,[A-Za-z0-9+/=\r\n]+$/i;
@@ -262,7 +263,8 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
   const isResult = (item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output";
   let bytes = 0;
   const add = (entries, required) => {
-    const fresh = entries.filter(([index]) => !selected.has(index));
+    const fresh = entries.filter(([index]) => !selected.has(index))
+      .map(([index, item]) => [index, checkpointAttachmentReferences(item)]);
     const size = fresh.reduce((sum, [, item]) => sum + serializedBodyBytes(item), 0);
     if (bytes + size > (required ? 900_000 : 400_000)) {
       if (!required) return;

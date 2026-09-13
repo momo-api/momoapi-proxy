@@ -18,7 +18,8 @@ export function recordContextTrace(response, trace, metrics, admitted = true) {
 
 export function contextLogFields(response, request) {
   const trace = response.momoContextTrace;
-  return {
+  const attachments = response.momoAttachmentTrace;
+  const fields = {
     toolAudit: response.momoToolAudit ? { ...response.momoToolAudit, events: summarizeToolEvents(response.momoToolEvents) } : undefined,
     requestBytes: trace?.requestBytes || request.momoRequestBodyBytes,
     outboundBytes: trace?.outboundBytes,
@@ -26,4 +27,12 @@ export function contextLogFields(response, request) {
     imageBytes: trace?.imageBytes,
     policyAction: trace?.policyActions?.join(",") || (trace?.hardLimitRejected ? "hard_limit_rejected" : undefined),
   };
+  if (attachments) {
+    fields.attachmentCount = attachments.attachmentCount;
+    fields.attachmentBytes = attachments.currentAttachmentBytes;
+    fields.attachmentUploadedCount = attachments.uploadedCount;
+    fields.attachmentResignedCount = attachments.resignedCount;
+    fields.attachmentUploadedBytes = attachments.uploadedBytes;
+  }
+  return fields;
 }

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildClaudeMessages, buildGeminiContents, buildOpenAIChatMessages, createMomoSwitch, normalizeResponsesPayload, sanitizeGeminiFunctionHistory } from "../src/server.mjs";
+import { buildClaudeMessages, buildGeminiContents, buildOpenAIChatMessages, createMomoSwitch, normalizeResponsesPayload, resetMetrics, sanitizeGeminiFunctionHistory } from "../src/server.mjs";
 import { startAutoSync } from "../src/sync.mjs";
 import { ImageAssetStore } from "../src/image-assets.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { attachmentFromPart, imageFromPart, outputParts, responsesToolOutput, safePartJson, safeTextValue } from "../src/protocol-content.mjs";
+import { createHash } from "node:crypto";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "momo-secret", localToken: "local-secret", host: "127.0.0.1", port: 0 };
 
@@ -53,6 +54,197 @@ async function withServer(fetchImpl, run) {
   const address = server.address();
   try { await run("http://127.0.0.1:" + address.port); } finally { await new Promise((resolve) => server.close(resolve)); }
 }
+
+const attachmentSettings = {
+  ...settings,
+  attachmentAssets: {
+    enabled: true, maxFileMb: 50, maxBatchMb: 100, inlineImageMb: 0.00001, inlineFileMb: 0.00001, inlineBatchMb: 0.00001, uploadTimeoutMs: 180_000,
+  },
+};
+
+function attachmentPng(size = 64) {
+  const bytes = Buffer.alloc(Math.max(8, size));
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
+  return bytes;
+}
+
+function attachmentPdf(size = 64) {
+  const bytes = Buffer.alloc(Math.max(5, size), 0x20);
+  bytes.write("%PDF-", 0, "ascii");
+  return bytes;
+}
+
+function attachmentDataUrl(mimeType, bytes) {
+  return `data:${mimeType};base64,${bytes.toString("base64")}`;
+}
+
+function attachmentStore() {
+  const values = new Map();
+  return {
+    async getBySha256(sha) { return values.get(sha) || null; },
+    async put(value) { values.set(value.sha256, { ...value }); return { ...value }; },
+  };
+}
+
+function attachmentServerFetch({ upstream, presignStatus = 200, presignCode = "attachment_storage_error" } = {}) {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith("/api/uploads/presign")) {
+      if (presignStatus !== 200) return Response.json({ error: "storage unavailable", code: presignCode }, { status: presignStatus });
+      const request = JSON.parse(init.body);
+      return Response.json({
+        assetId: `asset_${request.sha256}`,
+        objectKey: `chat-temp/u_aaaaaaaaaaaa/${request.purpose}/assets/${request.sha256}.bin`,
+        uploadUrl: `https://r2.example.test/upload/${request.sha256}`,
+        downloadUrl: `https://r2.example.test/download/${request.sha256}?signature=private`,
+        uploadHeaders: { "Content-Type": request.contentType, "Content-Length": String(request.size) },
+      });
+    }
+    if (init.method === "PUT") return new Response(null, { status: 200 });
+    if (upstream) return upstream(String(url), init);
+    return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  return { calls, fetchImpl };
+}
+
+async function withAttachmentServer(fetchImpl, run, overrides = {}) {
+  const server = createMomoSwitch({ ...attachmentSettings, ...overrides }, { fetchImpl, attachmentAssetStore: attachmentStore() });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  try { await run("http://127.0.0.1:" + address.port); } finally { await new Promise((resolve) => server.close(resolve)); }
+}
+
+test("Responses sends signed attachment URLs upstream without Base64 or MOMO metadata", async () => {
+  let captured;
+  const storage = attachmentServerFetch({ upstream: async (url, init) => {
+    assert.equal(url, "https://gateway.example/v1/responses");
+    captured = JSON.parse(init.body);
+    return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  } });
+  await withAttachmentServer(storage.fetchImpl, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: [{ type: "input_image", image_url: attachmentDataUrl("image/png", attachmentPng()) }] }] }),
+    });
+    assert.equal(response.status, 200);
+  });
+  const text = JSON.stringify(captured);
+  assert.match(text, /https:\/\/r2\.example\.test\/download\//);
+  assert.doesNotMatch(text, /base64,|momo_asset|asset:asset_/);
+});
+
+test("Gemini receives files through fileData.fileUri without internal metadata", async () => {
+  let captured;
+  const storage = attachmentServerFetch({ upstream: async (url, init) => {
+    assert.match(url, /streamGenerateContent/);
+    captured = JSON.parse(init.body);
+    return new Response("data: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  } });
+  await withAttachmentServer(storage.fetchImpl, async (base) => {
+    const response = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({
+      model: "gemini-3.5-flash", input: [{ role: "user", content: [{ type: "input_file", filename: "report.pdf", file_data: attachmentDataUrl("application/pdf", attachmentPdf()) }] }],
+    }) });
+    assert.equal(response.status, 200);
+  });
+  assert.ok(captured.contents[0].parts[0].fileData.fileUri.startsWith("https://r2.example.test/download/"));
+  assert.equal(captured.contents[0].parts[0].fileData.mimeType, "application/pdf");
+  assert.doesNotMatch(JSON.stringify(captured), /momo_asset|base64,/);
+});
+
+test("Claude receives PDF document URLs and rejects non-PDF URL files", async () => {
+  let captured;
+  const storage = attachmentServerFetch({ upstream: async (url, init) => {
+    assert.equal(url, "https://gateway.example/v1/messages");
+    captured = JSON.parse(init.body);
+    return new Response("data: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  } });
+  await withAttachmentServer(storage.fetchImpl, async (base) => {
+    const response = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({
+      model: "claude-sonnet-4-6", input: [{ role: "user", content: [{ type: "input_file", filename: "report.pdf", file_data: attachmentDataUrl("application/pdf", attachmentPdf()) }] }],
+    }) });
+    assert.equal(response.status, 200);
+  });
+  assert.equal(captured.messages[0].content[0].type, "document");
+  assert.ok(captured.messages[0].content[0].source.url.startsWith("https://r2.example.test/download/"));
+  assert.doesNotMatch(JSON.stringify(captured), /momo_asset|base64,/);
+
+  const textBytes = Buffer.alloc(64, 0x61);
+  await withAttachmentServer(attachmentServerFetch().fetchImpl, async (base) => {
+    const response = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({
+      model: "claude-sonnet-4-6", input: [{ role: "user", content: [{ type: "input_file", filename: "notes.txt", file_data: attachmentDataUrl("text/plain", textBytes) }] }],
+    }) });
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /attachment_url_unsupported/);
+  });
+});
+
+test("Chat routes accept image URLs and reject files that require URL transport", async () => {
+  let captured;
+  const storage = attachmentServerFetch({ upstream: async (url, init) => {
+    assert.equal(url, "https://gateway.example/v1/chat/completions");
+    captured = JSON.parse(init.body);
+    return new Response("data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  } });
+  await withAttachmentServer(storage.fetchImpl, async (base) => {
+    const imageResponse = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({
+      model: "gpt-4o", input: [{ role: "user", content: [{ type: "input_image", image_url: attachmentDataUrl("image/png", attachmentPng()) }] }],
+    }) });
+    assert.equal(imageResponse.status, 200);
+    const fileResponse = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({
+      model: "gpt-4o", input: [{ role: "user", content: [{ type: "input_file", filename: "large.pdf", file_data: attachmentDataUrl("application/pdf", attachmentPdf()) }] }],
+    }) });
+    assert.equal(fileResponse.status, 400);
+    assert.match(await fileResponse.text(), /attachment_url_unsupported/);
+  });
+  const imagePart = captured.messages[0].content.find((part) => part?.type === "image_url");
+  assert.ok(imagePart.image_url.url.startsWith("https://r2.example.test/download/"));
+});
+
+test("attachment storage 409 and 504 statuses remain structured Responses failures", async () => {
+  for (const [status, code] of [[409, "attachment_asset_conflict"], [504, "attachment_storage_timeout"]]) {
+    const storage = attachmentServerFetch({ presignStatus: status, presignCode: code });
+    await withAttachmentServer(storage.fetchImpl, async (base) => {
+      const response = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({
+        model: "gpt-5.6-sol", input: [{ role: "user", content: [{ type: "input_image", image_url: attachmentDataUrl("image/png", attachmentPng()) }] }],
+      }) });
+      assert.equal(response.status, status);
+      const body = await response.text();
+      assert.match(body, new RegExp(code));
+      assert.match(body, /response.failed/);
+    });
+  }
+});
+
+test("attachment 413 includes decoded byte and both ingress limits", async () => {
+  const sha = createHash("sha256").update("oversized").digest("hex");
+  const part = { type: "input_file", file_url: `asset:asset_${sha}`, filename: "large.pdf", momo_asset: {
+    asset_id: `asset_${sha}`, object_key: `chat-temp/u_aaaaaaaaaaaa/chat-document/assets/${sha}.pdf`, sha256: sha, bytes: 50 * 1024 * 1024 + 1, mime_type: "application/pdf", file_name: "large.pdf",
+  } };
+  await withAttachmentServer(attachmentServerFetch().fetchImpl, async (base) => {
+    const response = await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: [part] }] }) });
+    assert.equal(response.status, 413);
+    const body = await response.text();
+    assert.match(body, /"actualBytes":52428801/);
+    assert.match(body, /"maxFileBytes":52428800/);
+    assert.match(body, /"maxBatchBytes":104857600/);
+  });
+});
+
+test("attachment metrics expose only numeric aggregates", async () => {
+  resetMetrics();
+  const storage = attachmentServerFetch();
+  await withAttachmentServer(storage.fetchImpl, async (base) => {
+    await fetch(base + "/v1/responses", { method: "POST", headers: { authorization: "Bearer local-secret", "content-type": "application/json" }, body: JSON.stringify({
+      model: "gpt-5.6-sol", input: [{ role: "user", content: [{ type: "input_image", image_url: attachmentDataUrl("image/png", attachmentPng()) }] }],
+    }) });
+    const response = await fetch(base + "/internal/metrics", { headers: { authorization: "Bearer local-secret" } });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.ok(Object.values(payload.attachments).every((value) => Number.isFinite(value)));
+    assert.doesNotMatch(JSON.stringify(payload.attachments), /https?:|asset_|chat-temp|signature|sha256/i);
+  });
+});
 
 test("rejects access with an invalid local admission token", async () => {
   await withServer(fetch, async (base) => {
@@ -845,7 +1037,7 @@ test("preserves direct and native-shape images without converting bytes to text"
 
   const remoteUrl = "https://example.com/image.jpg";
   const remote = buildGeminiContents([{ role: "user", content: [{ type: "input_image", image_url: remoteUrl }] }], new Map());
-  assert.equal(remote[0].parts[0].text, `[image: ${remoteUrl}]`);
+  assert.deepEqual(remote[0].parts[0], { fileData: { mimeType: "image/jpeg", fileUri: remoteUrl } });
 });
 
 test("routes models cleanly: Claude to /v1/messages, Gemini to gemini endpoint, and others to /v1/responses", async () => {

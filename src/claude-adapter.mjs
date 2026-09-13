@@ -40,8 +40,21 @@ function claudeImagePart(image) {
   };
 }
 
-function claudeFilePart(file) {
-  if (!file || typeof file !== "object" || typeof file.file_data !== "string") return null;
+function claudeFilePart(file, mimeType = "application/octet-stream") {
+  if (!file || typeof file !== "object") return null;
+  const title = typeof file.filename === "string" && file.filename ? file.filename : null;
+  const isPdf = mimeType === "application/pdf" || /\.pdf$/i.test(title || "");
+  if (typeof file.file_url === "string" && /^https:\/\//i.test(file.file_url)) {
+    if (!isPdf) {
+      throw Object.assign(new Error("Claude URL attachments currently support PDF files only."), { statusCode: 400, code: "attachment_url_unsupported" });
+    }
+    return {
+      type: "document",
+      source: { type: "url", url: file.file_url },
+      ...(title ? { title } : {}),
+    };
+  }
+  if (typeof file.file_data !== "string") return null;
   const match = INLINE_DATA_URL.exec(file.file_data);
   if (!match || match[1].toLowerCase() !== "application/pdf") return null;
   return {
@@ -51,13 +64,19 @@ function claudeFilePart(file) {
       media_type: match[1],
       data: match[2].replace(/[\r\n]/g, ""),
     },
-    ...(typeof file.filename === "string" && file.filename ? { title: file.filename } : {}),
+    ...(title ? { title } : {}),
   };
+}
+
+function claudeAttachmentMimeType(file) {
+  if (typeof file?.momo_asset?.mime_type === "string") return file.momo_asset.mime_type;
+  const match = typeof file?.file_data === "string" ? INLINE_DATA_URL.exec(file.file_data) : null;
+  return match?.[1]?.toLowerCase() || "application/octet-stream";
 }
 
 function claudeToolResultContent(value) {
   const output = outputParts(value);
-  const documents = output.files.map(claudeFilePart).filter(Boolean);
+  const documents = output.files.map((file) => claudeFilePart(file, file.momo_asset?.mime_type)).filter(Boolean);
   if (output.images.length === 0 && documents.length === 0) return output.text;
   const safeText = output.responseText || (output.images.length ? "[image output attached]" : "");
   return [
@@ -152,7 +171,7 @@ export function buildClaudeMessages(input, calls) {
           } else {
             const attachment = attachmentFromPart(part);
             if (attachment) {
-              const document = claudeFilePart(attachment.native);
+              const document = claudeFilePart(attachment.native, claudeAttachmentMimeType(attachment.native));
               currentContent.push(document || { type: "text", text: attachment.marker });
             }
           }
