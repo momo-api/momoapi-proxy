@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.13.14 - 2026-09-14
+
+- Route current-turn attachments through authenticated, short-lived private R2 URLs when inline media would make the model request too large. Keep the 50 MiB per-file and 100 MiB current-turn limits, lower URLs to each provider's supported image/file protocol, and keep file bytes, signed URLs, object keys and credentials out of checkpoints and logs.
+- Keep the current user request authoritative after local history checkpointing: label the checkpoint as historical context, retain prior task text only once, place the active task after history, and sharply bound retained historical assistant prose.
+- Send Gemini system/developer constraints as `systemInstruction`, including tool-result continuations, so long multimodal sessions do not turn instructions into an ordinary user turn or resume an already answered task.
+
 ## 0.13.13 - 2026-09-12
 
 - Add bounded FIFO ingress admission, body reservations, queue/read deadlines and output/event/cache budgets so overload and oversized responses fail explicitly instead of exhausting memory or emitting false completion.
