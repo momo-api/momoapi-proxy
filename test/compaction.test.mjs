@@ -55,6 +55,41 @@ test("checkpoint retains dynamically loaded tools and exact latest long user tex
   assert.equal(again.output.find((item) => item.role === "user").content[0].text, text);
 });
 
+test("checkpoint never labels a historical task as the latest request during a new tool turn", () => {
+  const oldTask = "OLD_TASK_SENTINEL verify the prior bibliography";
+  const oldAnswer = "OLD_ANSWER_SENTINEL " + "x".repeat(600000);
+  const activeTask = "ACTIVE_TASK_SENTINEL design the training-data pipeline";
+  const input = [
+    { role: "developer", content: "CONSTRAINT_SENTINEL" },
+    { role: "user", content: oldTask },
+    { role: "assistant", content: oldAnswer },
+    { role: "user", content: activeTask },
+  ];
+
+  for (let index = 0; index < 10; index++) {
+    input.push(
+      { type: "custom_tool_call", name: "exec", call_id: `active_${index}`, input: `query ${index}` },
+      { type: "custom_tool_call_output", call_id: `active_${index}`, output: `ACTIVE_EVIDENCE_${index}` },
+    );
+    const replay = prepareOversizedHistoryReplay(
+      { model: "gemini-3.8-flash", input: structuredClone(input) },
+      { maxHistoricalReplayBytes: 128 * 1024 },
+    );
+    assert.equal(replay.rewritten, true);
+    const wire = JSON.stringify(replay.payload.input);
+    assert.doesNotMatch(wire, /Latest user request/);
+    assert.match(wire, /historical context only/i);
+    assert.equal(wire.split(oldTask).length - 1, 1);
+    assert.equal(wire.split(activeTask).length - 1, 1);
+    assert.equal(wire.split("OLD_ANSWER_SENTINEL").length - 1, 1);
+    assert.match(wire, /historical assistant context; not the active task/i);
+    const activeIndex = replay.payload.input.findIndex((item) => JSON.stringify(item).includes(activeTask));
+    const oldIndex = replay.payload.input.findIndex((item) => JSON.stringify(item).includes(oldTask));
+    assert.ok(activeIndex > oldIndex);
+    assert.equal(replay.payload.input.at(-1).call_id, `active_${index}`);
+  }
+});
+
 test("unterminated final SSE block restores namespace and custom call identity", async () => {
   const fakeFetch = async (_url, init) => {
     const wire = JSON.parse(init.body);
@@ -302,7 +337,8 @@ test("compact endpoint returns a recoverable local checkpoint when upstream lack
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.object, "response.compaction");
-    assert.match(JSON.stringify(body.output), /recovery checkpoint/);
+    assert.match(JSON.stringify(body.output), /historical checkpoint/);
+    assert.doesNotMatch(JSON.stringify(body.output), /Latest user request/);
     assert.match(JSON.stringify(body.output), /repair the proxy/);
   });
 });

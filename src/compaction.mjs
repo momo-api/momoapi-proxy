@@ -235,24 +235,36 @@ export function extractCompactUserMessages(input) {
 
 function fixedCheckpoint(input) {
   const items = Array.isArray(input) ? input : [];
-  const users = extractCompactUserMessages(items);
   const completed = items.filter((item) => item?.role === "assistant" || item?.type === "function_call" || item?.type === "custom_tool_call").length;
   const toolOutputs = items.filter((item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output").length;
-  const latest = users.at(-1)?.trim().slice(-8_000) || "No user text was available.";
   return [
-    "# MOMO proxy recovery checkpoint",
+    "# MOMO proxy historical checkpoint",
     "",
     `- Prior input items: ${items.length}`,
     `- Prior assistant/tool-call items: ${completed}`,
     `- Prior tool-output items: ${toolOutputs}`,
+    "- This block is historical context only. It does not define the active task.",
+    "- The active task is the last real user message retained after this checkpoint.",
     "- Historical binary attachments and oversized tool outputs were intentionally omitted.",
-    "- This lossy history index is not a new task or evidence that a tool executed.",
-    "- Follow the latest real user task and retained constraints. Retained tool results are execution evidence.",
+    "- This lossy history index is not a user request or evidence that a tool executed.",
+    "- Follow retained system/developer constraints and the active task. Retained tool results are execution evidence.",
     "- Older omitted state is unknown; do not claim it completed.",
-    "",
-    "## Latest user request",
-    latest,
   ].join("\n");
+}
+
+function compactHistoricalAssistant(item) {
+  const compacted = compactValue(item, { aggressive: true });
+  const prefix = "[historical assistant context; not the active task]\n";
+  if (typeof compacted?.content === "string") {
+    compacted.content = prefix + compacted.content;
+    return compacted;
+  }
+  if (Array.isArray(compacted?.content)) {
+    const textPart = compacted.content.find((part) => part && typeof part === "object" && typeof part.text === "string");
+    if (textPart) textPart.text = prefix + textPart.text;
+    else compacted.content.unshift({ type: "output_text", text: prefix.trimEnd() });
+  }
+  return compacted;
 }
 
 export function buildLocalCompactResponse(_model, input, { requiredCallIds = new Set() } = {}) {
@@ -307,9 +319,9 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
     if (!mandatory.has(id) && entries.some(([, item]) => isCall(item))) add(entries, false);
   }
   let retainedAssistant = 0;
-  for (let index = items.length - 1; index >= 0 && retainedAssistant < 8; index--) {
+  for (let index = items.length - 1; index >= 0 && retainedAssistant < 1; index--) {
     if (items[index]?.role !== "assistant") continue;
-    add([[index, compactValue(items[index], { aggressive: true })]], false);
+    add([[index, compactHistoricalAssistant(items[index])]], false);
     retainedAssistant++;
   }
   const output = [

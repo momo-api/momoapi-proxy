@@ -556,6 +556,7 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
         const callId = upstreamCallId && !calls.has(upstreamCallId) ? upstreamCallId : undefined;
         emitRememberedCall(emitter, calls, mapped, part.functionCall.args || {}, callId, {
           geminiContents: body.contents,
+          geminiSystemInstruction: body.systemInstruction || null,
           geminiFunctionCallPart: structuredClone(part),
         });
       }
