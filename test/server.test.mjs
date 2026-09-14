@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildClaudeMessages, buildGeminiContents, buildOpenAIChatMessages, createMomoSwitch, normalizeResponsesPayload, resetMetrics, sanitizeGeminiFunctionHistory } from "../src/server.mjs";
+import { geminiRequest } from "../src/gemini-adapter.mjs";
 import { startAutoSync } from "../src/sync.mjs";
 import { ImageAssetStore } from "../src/image-assets.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -571,12 +572,15 @@ test("preserves Gemini function-call context for the next function-response turn
   };
   await withServer(fakeFetch, async (base) => {
     const headers = { authorization: "Bearer local-secret", "content-type": "application/json" };
-    const first = await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.7-flash", input: [{ role: "user", content: [{ type: "input_text", text: "Run pwd" }] }], tools: [{ type: "function", name: "shell_command", parameters: { type: "object" } }] }) });
+    const first = await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.7-flash", instructions: "BASE_GEMINI_CONSTRAINT", input: [{ role: "developer", content: "DEVELOPER_GEMINI_CONSTRAINT" }, { role: "user", content: [{ type: "input_text", text: "Run pwd" }] }], tools: [{ type: "function", name: "shell_command", parameters: { type: "object" } }] }) });
     callId = (await first.text()).match(/"call_id":"([^"]+)"/)?.[1];
     assert.ok(callId);
-    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.7-flash", input: [{ type: "function_call_output", call_id: callId, output: "/tmp" }] }) });
+    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.7-flash", instructions: "BASE_GEMINI_CONSTRAINT", input: [{ type: "function_call_output", call_id: callId, output: "/tmp" }] }) });
   });
   assert.equal(requests[1].contents[0].parts[0].text, "Run pwd");
+  assert.match(requests[0].systemInstruction.parts.map((part) => part.text).join("\n"), /BASE_GEMINI_CONSTRAINT[\s\S]*DEVELOPER_GEMINI_CONSTRAINT/);
+  assert.deepEqual(requests[1].systemInstruction, requests[0].systemInstruction);
+  assert.doesNotMatch(JSON.stringify(requests[0].contents), /DEVELOPER_GEMINI_CONSTRAINT/);
   assert.deepEqual(requests[1].contents[1], { role: "model", parts: [{ thoughtSignature: "signature_for_tool_result", functionCall: { name: "shell_command", id: callId, args: { command: "pwd" } } }] });
   assert.deepEqual(requests[1].contents[2], { role: "user", parts: [{ functionResponse: { name: "shell_command", id: callId, response: { result: "/tmp" } } }] });
 });
@@ -654,6 +658,24 @@ test("replays a Gemini batch with matching names and ids for every tool result",
     ["exec", "call_a"],
     ["view_image", "call_b"],
   ]);
+});
+
+test("Gemini promotes system and developer messages into systemInstruction", () => {
+  const { body } = geminiRequest({
+    instructions: "BASE_INSTRUCTION_SENTINEL",
+    input: [
+      { role: "system", content: "SYSTEM_SENTINEL" },
+      { role: "developer", content: [{ type: "input_text", text: "DEVELOPER_SENTINEL" }] },
+      { role: "user", content: "ACTIVE_USER_SENTINEL" },
+    ],
+  }, "gemini-3.8-flash", new Map());
+
+  const systemText = body.systemInstruction.parts.map((part) => part.text).join("\n");
+  assert.match(systemText, /BASE_INSTRUCTION_SENTINEL/);
+  assert.match(systemText, /SYSTEM_SENTINEL/);
+  assert.match(systemText, /DEVELOPER_SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(body.contents), /SYSTEM_SENTINEL|DEVELOPER_SENTINEL/);
+  assert.match(JSON.stringify(body.contents), /ACTIVE_USER_SENTINEL/);
 });
 
 test("repairs a Gemini function response whose name disagrees with the matching call id", () => {

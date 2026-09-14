@@ -300,11 +300,55 @@ export function buildGeminiContents(input, calls) {
   return contents.length ? contents : [{ role: "user", parts: [{ text: "Continue." }] }];
 }
 
+function geminiInstructionParts(request) {
+  const parts = [];
+  if (request?.instructions !== undefined && request.instructions !== null && String(request.instructions).length > 0) {
+    parts.push({ text: safeTextValue(String(request.instructions)) });
+  }
+  for (const item of asArray(request?.input)) {
+    if (!item || typeof item !== "object" || (item.role !== "system" && item.role !== "developer")) continue;
+    for (const part of (Array.isArray(item.content) ? item.content : [item.content])) {
+      if (typeof part === "string") parts.push({ text: safeTextValue(part) });
+      else if (part && typeof part === "object" && ["input_text", "output_text", "text"].includes(part.type) && part.text) {
+        parts.push({ text: safeTextValue(part.text) });
+      }
+    }
+  }
+  return parts;
+}
+
+function geminiConversationInput(input) {
+  return asArray(input).filter((item) => !item || typeof item !== "object" || (item.role !== "system" && item.role !== "developer"));
+}
+
+function rememberedGeminiSystemInstruction(input, calls) {
+  const items = asArray(input);
+  if (!items.length || !items.every((item) => item && (item.type === "function_call_output" || item.type === "custom_tool_call_output"))) return null;
+  for (const item of items) {
+    const remembered = calls?.get(item.call_id)?.geminiSystemInstruction;
+    if (remembered) return structuredClone(remembered);
+  }
+  return null;
+}
+
+function mergedGeminiSystemInstruction(request, calls) {
+  const remembered = rememberedGeminiSystemInstruction(request?.input, calls);
+  const parts = [...geminiInstructionParts(request), ...asArray(remembered?.parts)];
+  const seen = new Set();
+  const unique = parts.filter((part) => {
+    if (!part || typeof part.text !== "string" || seen.has(part.text)) return false;
+    seen.add(part.text);
+    return true;
+  });
+  return unique.length ? { parts: unique } : null;
+}
+
 export function geminiRequest(request, model, calls) {
   const functions = extractFunctions(request);
-  const contents = sanitizeGeminiFunctionHistory(buildGeminiContents(request.input, calls));
+  const contents = sanitizeGeminiFunctionHistory(buildGeminiContents(geminiConversationInput(request.input), calls));
   const body = { contents };
-  if (request.instructions) body.systemInstruction = { parts: [{ text: safeTextValue(String(request.instructions)) }] };
+  const systemInstruction = mergedGeminiSystemInstruction(request, calls);
+  if (systemInstruction) body.systemInstruction = systemInstruction;
   if (functions.length) body.tools = [{ functionDeclarations: functions.map(({ name, description, parameters }) => ({ name, description, parameters })) }];
   const rawEffort = request.reasoning_effort || request.model_reasoning_effort || request.reasoning?.effort;
   if (rawEffort) {
