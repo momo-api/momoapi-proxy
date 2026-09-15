@@ -37,6 +37,26 @@ jobs:
       - run: docker build --tag momoapi-proxy:test .
       - run: docker run --rm momoapi-proxy:test
 
+  release-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node -e "const expected = 'v' + require('./package.json').version; if (process.env.GITHUB_REF_NAME !== expected) throw new Error('tag does not match package version')"
+      - run: npm run release:package -- --output-dir dist/release --json
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: release-package-${{ github.ref_name }}
+          path: |
+            dist/release/*.tgz
+            dist/release/*.sha256
+          if-no-files-found: error
+
   secret-scan:
     runs-on: ubuntu-latest
     steps:
