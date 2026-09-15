@@ -42,7 +42,7 @@ import { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-ada
 export { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-adapter.mjs";
 import { customInput, emitRememberedCall } from "./tool-call-state.mjs";
 import { resolveOpenCodeSession } from "./opencode-session.mjs";
-import { initSseResponse, streamSseLines, upstreamErrorMessage, writeResponsesFailure } from "./responses-transport.mjs";
+import { initSseResponse, streamSseLines, upstreamErrorDetails, upstreamErrorMessage, writeResponsesFailure } from "./responses-transport.mjs";
 import { expandCurrentImageVisionReferences, withImageVisionReferences } from "./image-vision.mjs";
 import { asArray, authorized, json, openCodeUpstreamHeaders, upstreamHeaders, writeSse } from "./http-lifecycle.mjs";
 import { isChatCompletionsRoute, isCompactRoute, isModelsRoute, isResponsesRoute } from "./route-dispatch.mjs";
@@ -312,8 +312,8 @@ export async function bridgeChatCompletionsToResponses(request, response, settin
   });
 
   if (!upstream.ok) {
-    const errMessage = await upstreamErrorMessage(upstream);
-    return writeResponsesFailure(response, safePayload.model, upstream.status, errMessage);
+    const error = await upstreamErrorDetails(upstream);
+    return writeResponsesFailure(response, safePayload.model, upstream.status, error.message, error.code);
   }
 
   initSseResponse(response);
@@ -421,16 +421,16 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   response.momoContextTrace = prepared.trace;
   const upstream = await fetchImpl(settings.endpoint + "/v1/responses", { method: "POST", headers: upstreamHeaders(settings), body: outboundBody, signal });
   if (!upstream.ok) {
-    const errMessage = await upstreamErrorMessage(upstream);
+    const error = await upstreamErrorDetails(upstream);
     // Only an explicit endpoint/protocol capability mismatch may be replayed once.
     // Payload, auth, throttling and server failures must preserve their status and never double-send.
-    if (shouldFallbackResponses(upstream.status, errMessage)) {
+    if (shouldFallbackResponses(upstream.status, error.message)) {
       prepared.trace.fallbackProtocol = "chat";
       if (!prepared.trace.policyActions.includes("responses_to_chat_fallback")) prepared.trace.policyActions.push("responses_to_chat_fallback");
       return bridgeChatCompletionsToResponses(request, response, settings, prepared.payload, calls, fetchImpl, signal, prepared);
     }
     recordContextTrace(response, prepared.trace, true);
-    return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
+    return writeResponsesFailure(response, prepared.payload.model, upstream.status, error.message, error.code);
   }
   recordContextTrace(response, prepared.trace, true);
   initSseResponse(response);
@@ -533,8 +533,8 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
   recordContextTrace(response, prepared.trace, true);
   const upstream = await fetchImpl(endpoint, { method: "POST", headers: upstreamHeaders(settings), body: outboundBody, signal });
   if (!upstream.ok) {
-    const errMessage = await upstreamErrorMessage(upstream);
-    return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
+    const error = await upstreamErrorDetails(upstream);
+    return writeResponsesFailure(response, prepared.payload.model, upstream.status, error.message, error.code);
   }
   initSseResponse(response);
   const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
@@ -577,8 +577,8 @@ async function bridgeClaude(response, settings, payload, calls, fetchImpl, signa
   recordContextTrace(response, prepared.trace, true);
   const upstream = await fetchImpl(settings.endpoint + "/v1/messages", { method: "POST", headers: { ...upstreamHeaders(settings), "anthropic-version": "2023-06-01" }, body: outboundBody, signal });
   if (!upstream.ok) {
-    const errMessage = await upstreamErrorMessage(upstream);
-    return writeResponsesFailure(response, prepared.payload.model, upstream.status, errMessage);
+    const error = await upstreamErrorDetails(upstream);
+    return writeResponsesFailure(response, prepared.payload.model, upstream.status, error.message, error.code);
   }
   initSseResponse(response);
   const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
@@ -625,6 +625,15 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
     body: outboundBody,
     signal,
   });
+
+  const upstreamContentType = String(upstream.headers?.get?.("content-type") || "").toLowerCase();
+  if ((upstream.ok === false || upstream.status >= 400)
+      && (upstream.status === 524 || upstreamContentType.includes("text/html"))) {
+    const error = await upstreamErrorDetails(upstream);
+    return json(response, upstream.status, {
+      error: { message: error.message, type: "upstream_error", code: error.code },
+    });
+  }
 
   response.statusCode = upstream.status;
   for (const [key, val] of upstream.headers.entries()) {

@@ -1216,6 +1216,73 @@ test("preserves upstream status and emits response.failed without a fake complet
   });
 });
 
+test("normalizes a Cloudflare 524 HTML page for Responses clients", async () => {
+  const fakeFetch = async () => new Response(
+    "<!DOCTYPE html><html><title>momoapi.us | 524: A timeout occurred</title><body>Cloudflare diagnostic</body></html>",
+    { status: 524, headers: { "content-type": "text/html; charset=UTF-8" } },
+  );
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: ["hi"] }),
+    });
+    assert.equal(response.status, 524);
+    assert.match(response.headers.get("content-type") || "", /text\/event-stream/);
+    const body = await response.text();
+    assert.match(body, /response.failed/);
+    assert.match(body, /upstream_timeout/);
+    assert.match(body, /Upstream timed out before returning a response/);
+    assert.doesNotMatch(body, /<html/i);
+    assert.doesNotMatch(body, /Cloudflare diagnostic/);
+    assert.doesNotMatch(body, /response.completed/);
+  });
+});
+
+test("normalizes a Cloudflare 524 HTML page for Chat Completions clients", async () => {
+  const fakeFetch = async () => new Response(
+    "<!DOCTYPE html><html><title>momoapi.us | 524: A timeout occurred</title><body>Cloudflare diagnostic</body></html>",
+    { status: 524, headers: { "content-type": "text/html; charset=UTF-8" } },
+  );
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5.6-sol", messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(response.status, 524);
+    assert.match(response.headers.get("content-type") || "", /application\/json/);
+    const body = await response.text();
+    assert.deepEqual(JSON.parse(body), {
+      error: {
+        message: "Upstream timed out before returning a response. Please retry.",
+        type: "upstream_error",
+        code: "upstream_timeout",
+      },
+    });
+    assert.doesNotMatch(body, /<html/i);
+    assert.doesNotMatch(body, /Cloudflare diagnostic/);
+  });
+});
+
+test("keeps ordinary Chat Completions JSON errors transparent", async () => {
+  const upstreamBody = { error: { message: "Quota exceeded", type: "rate_limit_error", code: "quota_exceeded" }, retry_after: 3 };
+  const fakeFetch = async () => new Response(JSON.stringify(upstreamBody), {
+    status: 429,
+    headers: { "content-type": "application/json", "retry-after": "3" },
+  });
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5.6-sol", messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get("retry-after"), "3");
+    assert.deepEqual(await response.json(), upstreamBody);
+  });
+});
+
 test("calculates Claude thinking token budget dynamically from reasoning_effort", async () => {
   let capturedBody;
   const fakeFetch = async (url, init) => {
