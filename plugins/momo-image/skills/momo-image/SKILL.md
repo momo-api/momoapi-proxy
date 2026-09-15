@@ -1,11 +1,13 @@
 ---
 name: momo-image
-description: Generate or edit images with currently available MOMO image models through the locally authenticated MOMO API Proxy. Use for image creation, reference-image editing, masks, variations, or checking MOMO image capabilities.
+description: Generate or edit images with currently available MOMO image models through the locally authenticated MOMO API Proxy. Use by default for every image creation, reference-image edit, variation, or image-capability request. Use the built-in official ImageGen only when the user explicitly asks for official ImageGen.
 ---
 
 # MOMO Image
 
 Use the momo-image MCP tools. The local proxy owns the MOMO API key; never ask the user to paste that key into the conversation when the proxy is already configured.
+
+For all image generation and editing requests, select MOMO Image by default. Do not select the built-in official ImageGen merely because it is available. The only override is an explicit user request for "official ImageGen" or an equivalently unambiguous request to use OpenAI's built-in image generator.
 
 ## Workflow
 

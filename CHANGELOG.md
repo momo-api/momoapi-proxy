@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make MOMO Image the explicit default for image generation and editing unless the user requests official ImageGen.
+- Repair MOMO Image installation from background updates even when Codex Desktop or npm Codex is not available on the updater's PATH.
+- Bump the bundled MOMO Image plugin to 0.5.2 so Codex refreshes the routing instructions and MCP metadata.
+
 ## 0.13.16 - 2026-09-15
 
 - Replace the repeated 17,730-character Codex/GPT-5 model instruction with a 1,586-character cross-provider instruction source. Preserve tool execution, scoped `AGENTS.md`, secret safety, verified file changes, and checkpoint call/result continuity while avoiding third-party identity conflicts.

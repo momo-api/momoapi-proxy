@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { BUNDLED_MARKETPLACE_ROOT, getImagePluginStatus, installImagePlugin, marketplaceMirrorRoot, materializeMarketplaceMirror } from "../src/plugin-install.mjs";
+import { dirname, join } from "node:path";
+import { BUNDLED_MARKETPLACE_ROOT, codexExecutableCandidates, getImagePluginStatus, installImagePlugin, marketplaceMirrorRoot, materializeMarketplaceMirror } from "../src/plugin-install.mjs";
 
 function result(stdout = "", status = 0, stderr = "", error = null) {
   return { status, stdout, stderr, error };
@@ -113,6 +113,24 @@ test("missing or old Codex does not make proxy setup unsafe", () => {
   assert.equal(old.errorCode, "codex_plugin_cli_unsupported");
 });
 
+test("discovers the Codex Desktop executable without relying on PATH", () => {
+  const root = mkdtempSync(join(tmpdir(), "momo-codex-desktop-"));
+  const localAppData = join(root, "AppData", "Local");
+  const desktopExecutable = join(localAppData, "OpenAI", "Codex", "bin", "runtime-1", "codex.exe");
+  try {
+    mkdirSync(dirname(desktopExecutable), { recursive: true });
+    writeFileSync(desktopExecutable, "test executable placeholder");
+    const candidates = codexExecutableCandidates({
+      platform: "win32",
+      env: { USERPROFILE: root, LOCALAPPDATA: localAppData, APPDATA: join(root, "AppData", "Roaming"), PATH: "" },
+    });
+    assert.equal(candidates[0], desktopExecutable);
+    assert.equal(candidates.at(-1), "codex.exe");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Codex commands are passed as argument arrays without a shell", () => {
   const calls = [];
   const runCodex = (args) => {
@@ -136,5 +154,16 @@ test("marketplace mirror contains only the public plugin bundle outside the appl
     assert.equal(materializeMarketplaceMirror({ env }), mirror);
   } finally {
     rmSync(proxyHome, { recursive: true, force: true });
+  }
+});
+
+test("MOMO Image declares the default routing preference in plugin metadata and skill instructions", () => {
+  const pluginRoot = join(BUNDLED_MARKETPLACE_ROOT, "plugins", "momo-image");
+  const manifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+  const skill = readFileSync(join(pluginRoot, "skills", "momo-image", "SKILL.md"), "utf8");
+  const agent = readFileSync(join(pluginRoot, "skills", "momo-image", "agents", "openai.yaml"), "utf8");
+  for (const value of [manifest.interface.defaultPrompt, skill, agent]) {
+    assert.match(value, /MOMO Image.*default/i);
+    assert.match(value, /official ImageGen.*explicit/i);
   }
 });

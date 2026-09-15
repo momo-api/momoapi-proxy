@@ -26,6 +26,9 @@ test("release package uses the updater-compatible root and version", () => {
     assert.ok(names.every((name) => name.startsWith("momoapi-proxy/")));
     assert.ok(names.includes("momoapi-proxy/bin/momoapi-proxy.mjs"));
     assert.ok(names.includes("momoapi-proxy/src/update-supervisor.mjs"));
+    assert.ok(names.includes("momoapi-proxy/.agents/plugins/marketplace.json"));
+    assert.ok(names.includes("momoapi-proxy/plugins/momo-image/.codex-plugin/plugin.json"));
+    assert.ok(names.includes("momoapi-proxy/plugins/momo-image/skills/momo-image/SKILL.md"));
 
     const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     assert.equal(result.version, packageJson.version);

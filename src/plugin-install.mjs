@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appHome } from "./config.mjs";
@@ -54,19 +54,83 @@ export function materializeMarketplaceMirror({ env = process.env, sourceRoot = B
   return target;
 }
 
+function existingExecutables(root, relativePath) {
+  if (!root || !existsSync(root)) return [];
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(root, entry.name, ...relativePath))
+      .filter((candidate) => existsSync(candidate))
+      .sort((left, right) => {
+        try { return statSync(right).mtimeMs - statSync(left).mtimeMs; } catch { return 0; }
+      });
+  } catch {
+    return [];
+  }
+}
+
+export function codexExecutableCandidates({ env = process.env, platform = process.platform } = {}) {
+  const explicit = env.MOMO_CODEX_CLI ? [resolve(env.MOMO_CODEX_CLI)] : [];
+  if (platform !== "win32") return [...explicit, "codex"];
+
+  const localAppData = env.LOCALAPPDATA || (env.USERPROFILE ? join(env.USERPROFILE, "AppData", "Local") : null);
+  const appData = env.APPDATA || (env.USERPROFILE ? join(env.USERPROFILE, "AppData", "Roaming") : null);
+  const desktop = existingExecutables(
+    localAppData ? join(localAppData, "OpenAI", "Codex", "bin") : null,
+    ["codex.exe"],
+  );
+  const npmNative = appData ? [join(
+    appData, "npm", "node_modules", "@openai", "codex", "node_modules",
+    "@openai", "codex-win32-x64", "vendor", "x86_64-pc-windows-msvc", "bin", "codex.exe",
+  )] : [];
+  const vscodeRoot = env.USERPROFILE ? join(env.USERPROFILE, ".vscode", "extensions") : null;
+  let vscode = [];
+  try {
+    vscode = vscodeRoot && existsSync(vscodeRoot)
+      ? readdirSync(vscodeRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.toLowerCase().startsWith("openai.chatgpt-"))
+        .map((entry) => join(vscodeRoot, entry.name, "bin", "windows-x86_64", "codex.exe"))
+        .filter((candidate) => existsSync(candidate))
+        .sort((left, right) => {
+          try { return statSync(right).mtimeMs - statSync(left).mtimeMs; } catch { return 0; }
+        })
+      : [];
+  } catch {}
+
+  return [...new Set([
+    ...explicit,
+    ...desktop,
+    ...npmNative.filter((candidate) => existsSync(candidate)),
+    ...vscode,
+    "codex.exe",
+  ])];
+}
+
 function executeCodex(args, { env = process.env, timeoutMs = 120_000 } = {}) {
-  const result = spawnSync("codex", args, {
-    encoding: "utf8",
-    env,
-    windowsHide: true,
-    timeout: timeoutMs,
-    shell: false,
-  });
+  let lastResult = null;
+  for (const command of codexExecutableCandidates({ env })) {
+    const result = spawnSync(command, args, {
+      encoding: "utf8",
+      env,
+      windowsHide: true,
+      timeout: timeoutMs,
+      shell: false,
+    });
+    lastResult = result;
+    if (result.error?.code === "ENOENT" || result.error?.code === "EINVAL") continue;
+    return {
+      status: result.status,
+      stdout: result.stdout || "",
+      stderr: result.stderr || "",
+      error: result.error || null,
+    };
+  }
+  const result = lastResult || {};
   return {
-    status: result.status,
+    status: result.status ?? null,
     stdout: result.stdout || "",
     stderr: result.stderr || "",
-    error: result.error || null,
+    error: result.error || Object.assign(new Error("Codex CLI was not found."), { code: "ENOENT" }),
   };
 }
 
