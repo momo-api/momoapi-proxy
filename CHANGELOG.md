@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.13.15 - 2026-09-15
+
+- Keep the complete Codex system/developer instruction set on Gemini routes while replacing only the leading `Codex`/`GPT-5` identity sentence that Antigravity rejects with a misleading `RESOURCE_EXHAUSTED` 429. Apply the same compatibility rewrite to remembered tool-continuation instructions without changing user messages, tool definitions, or non-Gemini routes.
+
 ## 0.13.14 - 2026-09-14
 
 - Route current-turn attachments through authenticated, short-lived private R2 URLs when inline media would make the model request too large. Keep the 50 MiB per-file and 100 MiB current-turn limits, lower URLs to each provider's supported image/file protocol, and keep file bytes, signed URLs, object keys and credentials out of checkpoints and logs.
