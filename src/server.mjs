@@ -21,7 +21,7 @@ import { logRequest as writeRequestLog } from "./logger.mjs";
 import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
-import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay } from "./compaction.mjs";
+import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "./compaction.mjs";
 import { encodeRecoverableCompaction, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
@@ -49,6 +49,7 @@ import { isChatCompletionsRoute, isCompactRoute, isModelsRoute, isResponsesRoute
 import { resolveTargetModel as resolveModelRoute } from "./model-routing.mjs";
 import { contextLogFields, recordContextTrace as applyContextTrace } from "./context-trace.mjs";
 import { isAuthorizedLoopbackRequest, localRequestToken } from "./internal-auth.mjs";
+import { commitProviderRoute, observeProviderRoute } from "./provider-switch-state.mjs";
 
 export const metricsState = {
   startedAt: Date.now(),
@@ -75,6 +76,9 @@ export const metricsState = {
   activeCompactions: 0,
   replayDedupHits: 0,
   replayBytesSkipped: 0,
+  providerSwitches: 0,
+  providerSwitchCheckpoints: 0,
+  providerSwitchBytesSkipped: 0,
   attachmentRequests: 0,
   attachmentCount: 0,
   attachmentCurrentBytes: 0,
@@ -112,6 +116,9 @@ export function resetMetrics() {
   metricsState.activeCompactions = 0;
   metricsState.replayDedupHits = 0;
   metricsState.replayBytesSkipped = 0;
+  metricsState.providerSwitches = 0;
+  metricsState.providerSwitchCheckpoints = 0;
+  metricsState.providerSwitchBytesSkipped = 0;
   metricsState.attachmentRequests = 0;
   metricsState.attachmentCount = 0;
   metricsState.attachmentCurrentBytes = 0;
@@ -131,6 +138,30 @@ function recordAttachmentTrace(response, trace) {
   metricsState.attachmentUploadedCount += trace.uploadedCount || 0;
   metricsState.attachmentResignedCount += trace.resignedCount || 0;
   metricsState.attachmentUploadedBytes += trace.uploadedBytes || 0;
+}
+
+function prepareRoutedHistoryReplay(payload, settings, response) {
+  const route = response.momoProviderSwitchTrace;
+  const replay = route?.switched
+    ? prepareProviderSwitchHistoryReplay(payload, settings)
+    : prepareOversizedHistoryReplay(payload, settings);
+  if (route?.switched) {
+    route.originalBytes = replay.originalBytes;
+    route.outboundBytes = replay.outboundBytes;
+    if (replay.rewritten) {
+      metricsState.providerSwitchCheckpoints += 1;
+      metricsState.providerSwitchBytesSkipped += Math.max(0, replay.originalBytes - replay.outboundBytes);
+    }
+  }
+  return replay;
+}
+
+function recordHistoryReplayPolicy(response, prepared, replay) {
+  if (!replay.rewritten) return;
+  const action = response.momoProviderSwitchTrace?.switched
+    ? "provider_switch_checkpoint"
+    : "local_history_checkpoint";
+  if (!prepared.trace.policyActions.includes(action)) prepared.trace.policyActions.push(action);
 }
 
 export function resolveTargetModel(model) {
@@ -267,11 +298,9 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
 }
 
 export async function bridgeChatCompletionsToResponses(request, response, settings, payload, calls, fetchImpl, signal, existingAdmission = null) {
-  const historyReplay = existingAdmission ? { payload, rewritten: false } : prepareOversizedHistoryReplay(payload, settings);
+  const historyReplay = existingAdmission ? { payload, rewritten: false } : prepareRoutedHistoryReplay(payload, settings, response);
   const prepared = existingAdmission || prepareMediaPayload(historyReplay.payload, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
-  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
-    prepared.trace.policyActions.push("local_history_checkpoint");
-  }
+  recordHistoryReplayPolicy(response, prepared, historyReplay);
   const safePayload = prepared.payload;
   const functions = extractFunctions(safePayload);
   const builtMessages = stripAttachmentMetadata(buildOpenAIChatMessages(safePayload.input || [], safePayload.instructions));
@@ -403,15 +432,14 @@ async function forwardResponses(request, response, settings, payload, calls, fet
     : nsBody;
   const cleanPayload = normalizeResponsesPayload(visionPayload);
   response.momoToolAudit.normalized = summarizeToolRequest(cleanPayload);
-  const historyReplay = prepareOversizedHistoryReplay(cleanPayload, settings);
-  const managedPayload = Array.isArray(cleanPayload.context_management)
-    && cleanPayload.context_management.some((item) => item?.type === "compaction")
-    ? prepareContextManagedPayload(cleanPayload)
-    : cleanPayload;
+  const historyReplay = prepareRoutedHistoryReplay(cleanPayload, settings, response);
+  const replayPayload = historyReplay.payload;
+  const managedPayload = Array.isArray(replayPayload.context_management)
+    && replayPayload.context_management.some((item) => item?.type === "compaction")
+    ? prepareContextManagedPayload(replayPayload)
+    : replayPayload;
   const prepared = prepareMediaPayload({ ...managedPayload, stream: true }, settings, { kind: "responses", requestBytes: request.momoRequestBodyBytes || 0 });
-  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
-    prepared.trace.policyActions.push("local_history_checkpoint");
-  }
+  recordHistoryReplayPolicy(response, prepared, historyReplay);
   const statePayload = prepared.payload;
   const outboundPayload = stripAttachmentMetadata(statePayload);
   const outboundBody = serializeOutboundBody(outboundPayload, settings, prepared.trace);
@@ -521,11 +549,9 @@ async function forwardResponses(request, response, settings, payload, calls, fet
 }
 
 async function bridgeGemini(response, settings, payload, calls, fetchImpl, signal) {
-  const historyReplay = prepareOversizedHistoryReplay(payload, settings);
+  const historyReplay = prepareRoutedHistoryReplay(payload, settings, response);
   const prepared = prepareMediaPayload(historyReplay.payload, settings, { kind: "responses" });
-  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
-    prepared.trace.policyActions.push("local_history_checkpoint");
-  }
+  recordHistoryReplayPolicy(response, prepared, historyReplay);
   const { body: rawBody, functions } = geminiRequest(prepared.payload, prepared.payload.model, calls);
   const body = stripAttachmentMetadata(rawBody);
   const endpoint = settings.endpoint + "/v1beta/models/" + encodeURIComponent(payload.model) + ":streamGenerateContent?alt=sse";
@@ -566,11 +592,9 @@ async function bridgeGemini(response, settings, payload, calls, fetchImpl, signa
 }
 
 async function bridgeClaude(response, settings, payload, calls, fetchImpl, signal) {
-  const historyReplay = prepareOversizedHistoryReplay(payload, settings);
+  const historyReplay = prepareRoutedHistoryReplay(payload, settings, response);
   const prepared = prepareMediaPayload(historyReplay.payload, settings, { kind: "responses" });
-  if (historyReplay.rewritten && !prepared.trace.policyActions.includes("local_history_checkpoint")) {
-    prepared.trace.policyActions.push("local_history_checkpoint");
-  }
+  recordHistoryReplayPolicy(response, prepared, historyReplay);
   const { body: rawBody, functions } = claudeRequest(prepared.payload, prepared.payload.model, calls);
   const body = stripAttachmentMetadata(rawBody);
   const outboundBody = serializeOutboundBody(body, settings, prepared.trace);
@@ -677,7 +701,7 @@ export function createMomoSwitch(settings, options = {}) {
     const t0 = Date.now();
     const metricPath = (request.url || "/").split("?")[0].replace(/\/+$/, "") || "/";
     const timing = requestMetrics.begin(request.method, metricPath);
-    const fetchImpl = timing.wrapFetch(originalFetch);
+    const fetchImpl = timing.wrapFetch(originalFetch, (elapsed) => { response.momoUpstreamHeadersMs = elapsed; });
     // This is a local body-write milestone, not socket delivery or first token.
     let measuredFirstWrite = false;
     const measureFirstWrite = (chunk) => {
@@ -929,6 +953,9 @@ export function createMomoSwitch(settings, options = {}) {
             activeCompactions: metricsState.activeCompactions,
             replayDedupHits: metricsState.replayDedupHits,
             replayBytesSkipped: metricsState.replayBytesSkipped,
+            providerSwitches: metricsState.providerSwitches,
+            providerSwitchCheckpoints: metricsState.providerSwitchCheckpoints,
+            providerSwitchBytesSkipped: metricsState.providerSwitchBytesSkipped,
           },
           attachments: {
             requests: metricsState.attachmentRequests,
@@ -1055,6 +1082,8 @@ export function createMomoSwitch(settings, options = {}) {
           return json(response, 400, { error: { message: "model is required", type: "invalid_request_error" } });
         }
         const { targetModel, protocol } = resolveTargetModel(payload.model);
+        response.momoProviderSwitchTrace = observeProviderRoute(request, protocol);
+        if (response.momoProviderSwitchTrace.switched) metricsState.providerSwitches += 1;
         const attachmentResult = await assetizeAttachments({ ...payload, model: targetModel }, settings, {
           kind: "responses", targetProtocol: protocol, fetchImpl, signal: abortController.signal, store: attachmentAssetStore,
         });
@@ -1085,6 +1114,7 @@ export function createMomoSwitch(settings, options = {}) {
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
 
         await handlerPromise;
+        if (response.statusCode < 400) commitProviderRoute(response.momoProviderSwitchTrace);
         logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp, ...contextLogFields(response, request) });
         return;
       }

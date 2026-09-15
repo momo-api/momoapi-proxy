@@ -10,6 +10,7 @@ const LOCAL_COMPACTION_PREFIX = "momo1:";
 const MAX_LOCAL_COMPACTION_ENVELOPE_CHARS = 2 * MIB;
 const MAX_LOCAL_COMPACTION_JSON_BYTES = 1024 * 1024;
 const DEFAULT_HISTORY_REPLAY_LIMIT_BYTES = 512 * 1024;
+const DEFAULT_PROVIDER_SWITCH_REPLAY_LIMIT_BYTES = 192 * 1024;
 
 export const SUMMARY_PREFIX = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
 
@@ -51,6 +52,18 @@ function configuredHistoryReplayLimit(settings = {}) {
   const mb = Number(rawMb);
   if (Number.isFinite(mb) && mb >= 0.0625 && mb <= 8) return Math.floor(mb * MIB);
   return DEFAULT_HISTORY_REPLAY_LIMIT_BYTES;
+}
+
+function configuredProviderSwitchReplayLimit(settings = {}) {
+  const policy = settings?.contextPolicy && typeof settings.contextPolicy === "object" ? settings.contextPolicy : {};
+  const explicit = Number(settings?.providerSwitchReplayBytes ?? policy.providerSwitchReplayBytes);
+  if (Number.isFinite(explicit) && explicit >= 64 * 1024 && explicit <= 2 * MIB) return Math.floor(explicit);
+  const rawMb = process.env.MOMO_PROVIDER_SWITCH_REPLAY_MB
+    ?? settings?.providerSwitchReplayMb
+    ?? policy.providerSwitchReplayMb;
+  const mb = Number(rawMb);
+  if (Number.isFinite(mb) && mb >= 0.0625 && mb <= 2) return Math.floor(mb * MIB);
+  return DEFAULT_PROVIDER_SWITCH_REPLAY_LIMIT_BYTES;
 }
 
 export function prefersLocalCompaction(settings = {}) {
@@ -342,15 +355,18 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
  * visible context counter is smaller. Preserve the current turn byte-for-byte
  * and replace only older items with a local checkpoint.
  */
-export function prepareOversizedHistoryReplay(payload, settings = {}) {
+export function prepareOversizedHistoryReplay(payload, settings = {}, options = {}) {
   const body = payload && typeof payload === "object" ? payload : {};
   const input = Array.isArray(body.input) ? body.input : (body.input == null ? [] : [body.input]);
   const hasUserTurn = input.some(isUserItem);
   // Some clients send only the tool-result delta after a tool call. It is the
   // current turn, not historical replay, and must never be checkpointed away.
-  if (!hasUserTurn) return { payload: body, rewritten: false, originalBytes: 0, outboundBytes: 0, limitBytes: configuredHistoryReplayLimit(settings) };
+  const configuredOverride = Number(options.limitBytes);
+  const limitBytes = Number.isFinite(configuredOverride) && configuredOverride >= 64 * 1024
+    ? Math.floor(configuredOverride)
+    : configuredHistoryReplayLimit(settings);
+  if (!hasUserTurn) return { payload: body, rewritten: false, originalBytes: 0, outboundBytes: 0, limitBytes };
   const boundary = currentTurnStart(input);
-  const limitBytes = configuredHistoryReplayLimit(settings);
   if (boundary <= 0) return { payload: body, rewritten: false, originalBytes: 0, outboundBytes: 0, limitBytes };
 
   const originalBytes = serializedBodyBytes(body);
@@ -365,6 +381,10 @@ export function prepareOversizedHistoryReplay(payload, settings = {}) {
     .map((item) => item.call_id));
   body.input = [...buildLocalCompactResponse(body.model, history, { requiredCallIds }).output, ...currentTurn];
   return { payload: body, rewritten: true, originalBytes, outboundBytes: serializedBodyBytes(body), limitBytes };
+}
+
+export function prepareProviderSwitchHistoryReplay(payload, settings = {}) {
+  return prepareOversizedHistoryReplay(payload, settings, { limitBytes: configuredProviderSwitchReplayLimit(settings) });
 }
 
 export function compactLockKey(request, payload) {

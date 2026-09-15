@@ -38,6 +38,24 @@ test("request records are sanitized and queued before asynchronous disk I/O", as
   assert.equal(runtime.snapshot().request.written, 1);
 });
 
+test("provider-switch logs retain only bounded anonymous routing metadata", async (t) => {
+  const records = [];
+  const { env, runtime } = scratchRuntime(t, { sinkFactory: () => ({ snapshot: () => ({}), append: async (batch) => records.push(...batch) }) });
+  assert.equal(logRequest({ method: "POST", url: "/v1/responses", model: "gemini-3.8-flash", status: 200,
+    providerSwitch: true, threadHash: "0123456789abcdef", previousProtocol: "responses", currentProtocol: "gemini",
+    historyOriginalBytes: 300000, historyOutboundBytes: 150000, upstreamHeadersMs: 12345.67 },
+  env, { runtime, settings: { diagnosticsEnabled: false } }), true);
+  await runtime.flush();
+  const record = JSON.parse(records[0].toString("utf8"));
+  assert.equal(record.provider_switch, true);
+  assert.equal(record.thread_hash, "0123456789abcdef");
+  assert.equal(record.previous_protocol, "responses");
+  assert.equal(record.current_protocol, "gemini");
+  assert.equal(record.history_original_bytes, 300000);
+  assert.equal(record.history_outbound_bytes, 150000);
+  assert.equal(record.upstream_headers_ms, 12345);
+});
+
 test("large metadata and invalid Unicode remain a single bounded record", async (t) => {
   const records = [];
   const { env, runtime } = scratchRuntime(t, { sinkFactory: () => ({ snapshot: () => ({}), append: async (batch) => records.push(...batch) }) });

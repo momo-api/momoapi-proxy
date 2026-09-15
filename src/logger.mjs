@@ -79,7 +79,8 @@ export function logError(title, error, env = process.env, { runtime, settings } 
 
 export function logRequest({ method, url, model, status, elapsedMs, error, errorCode, ip, toolsCount, toolCalls,
   requestBytes, outboundBytes, imageCount, imageBytes, policyAction, inputTokens, outputTokens, totalTokens, toolAudit,
-  attachmentCount, attachmentBytes, attachmentUploadedCount, attachmentResignedCount, attachmentUploadedBytes },
+  attachmentCount, attachmentBytes, attachmentUploadedCount, attachmentResignedCount, attachmentUploadedBytes,
+  providerSwitch, threadHash, previousProtocol, currentProtocol, historyOriginalBytes, historyOutboundBytes, upstreamHeadersMs },
   env = process.env, { runtime, settings } = {}) {
   const accepted = enqueue({
     schema_version: 2, created_at: new Date().toISOString(), level: error ? "error" : "info", event: "proxy_request",
@@ -92,6 +93,10 @@ export function logRequest({ method, url, model, status, elapsedMs, error, error
     attachment_count: finiteInteger(attachmentCount), attachment_bytes: finiteInteger(attachmentBytes),
     attachment_uploaded_count: finiteInteger(attachmentUploadedCount), attachment_resigned_count: finiteInteger(attachmentResignedCount),
     attachment_uploaded_bytes: finiteInteger(attachmentUploadedBytes),
+    provider_switch: providerSwitch === true ? true : undefined, thread_hash: safeLogValue(threadHash, 32),
+    previous_protocol: safeLogValue(previousProtocol, 24), current_protocol: safeLogValue(currentProtocol, 24),
+    history_original_bytes: finiteInteger(historyOriginalBytes), history_outbound_bytes: finiteInteger(historyOutboundBytes),
+    upstream_headers_ms: finiteInteger(upstreamHeadersMs),
   }, env, runtime);
   const businessRoute = /^(?:(?:\/v1)?\/(?:responses|chat\/completions|images(?:\/|$)|messages|models(?:\/|$))|\/internal\/images(?:\/|$))/i.test(String(url || ""));
   if (businessRoute && Number(status) >= 400) {

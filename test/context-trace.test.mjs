@@ -18,3 +18,18 @@ test("context log fields expose only bounded trace metadata", () => {
   const fields = contextLogFields({ momoContextTrace: { requestBytes: 10, outboundBytes: 8, imageCount: 1, imageBytes: 4, policyActions: ["dedup"] } }, { momoRequestBodyBytes: 12 });
   assert.deepEqual(fields, { toolAudit: undefined, requestBytes: 10, outboundBytes: 8, imageCount: 1, imageBytes: 4, policyAction: "dedup" });
 });
+
+test("context log fields expose anonymous provider-switch timing metadata", () => {
+  const fields = contextLogFields({
+    momoContextTrace: { requestBytes: 300000, outboundBytes: 150000, policyActions: ["provider_switch_checkpoint"] },
+    momoProviderSwitchTrace: { switched: true, threadHash: "0123456789abcdef", previousProtocol: "responses", currentProtocol: "gemini", originalBytes: 300000, outboundBytes: 150000 },
+    momoUpstreamHeadersMs: 12345.67,
+  }, { momoRequestBodyBytes: 300000 });
+  assert.equal(fields.providerSwitch, true);
+  assert.equal(fields.threadHash, "0123456789abcdef");
+  assert.equal(fields.previousProtocol, "responses");
+  assert.equal(fields.currentProtocol, "gemini");
+  assert.equal(fields.historyOriginalBytes, 300000);
+  assert.equal(fields.historyOutboundBytes, 150000);
+  assert.equal(fields.upstreamHeadersMs, 12345.67);
+});

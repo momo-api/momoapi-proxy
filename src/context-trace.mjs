@@ -27,6 +27,15 @@ export function contextLogFields(response, request) {
     imageBytes: trace?.imageBytes,
     policyAction: trace?.policyActions?.join(",") || (trace?.hardLimitRejected ? "hard_limit_rejected" : undefined),
   };
+  if (response.momoProviderSwitchTrace?.switched) {
+    fields.providerSwitch = true;
+    fields.threadHash = response.momoProviderSwitchTrace.threadHash;
+    fields.previousProtocol = response.momoProviderSwitchTrace.previousProtocol;
+    fields.currentProtocol = response.momoProviderSwitchTrace.currentProtocol;
+    fields.historyOriginalBytes = response.momoProviderSwitchTrace.originalBytes;
+    fields.historyOutboundBytes = response.momoProviderSwitchTrace.outboundBytes;
+  }
+  if (Number.isFinite(response.momoUpstreamHeadersMs)) fields.upstreamHeadersMs = response.momoUpstreamHeadersMs;
   if (attachments) {
     fields.attachmentCount = attachments.attachmentCount;
     fields.attachmentBytes = attachments.currentAttachmentBytes;

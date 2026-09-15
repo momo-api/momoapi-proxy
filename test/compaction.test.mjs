@@ -1,11 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLocalCompactResponse, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareOversizedHistoryReplay } from "../src/compaction.mjs";
+import { buildLocalCompactResponse, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
+import { commitProviderRoute, observeProviderRoute, resetProviderRouteStateForTests } from "../src/provider-switch-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
 import { compactFixture } from "../scripts/compact-fixtures.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "test_gateway_key", localToken: "test_local_token", host: "127.0.0.1", port: 0, compactionMode: "upstream" };
+
+test("provider route state detects protocol switches without retaining raw thread ids", () => {
+  resetProviderRouteStateForTests();
+  const request = { headers: { "thread-id": "sensitive-thread-id" } };
+  const first = observeProviderRoute(request, "responses");
+  assert.equal(commitProviderRoute(first), true);
+  const same = observeProviderRoute(request, "responses");
+  assert.equal(commitProviderRoute(same), true);
+  const switched = observeProviderRoute(request, "gemini");
+  assert.equal(first.switched, false);
+  assert.equal(same.switched, false);
+  assert.equal(switched.switched, true);
+  assert.equal(switched.previousProtocol, "responses");
+  assert.equal(switched.currentProtocol, "gemini");
+  assert.match(switched.threadHash, /^[a-f0-9]{16}$/);
+  assert.notEqual(switched.threadHash, request.headers["thread-id"]);
+});
+
+test("failed provider routes do not hide the switch on retry", () => {
+  resetProviderRouteStateForTests();
+  const request = { headers: { "thread-id": "retry-thread" } };
+  commitProviderRoute(observeProviderRoute(request, "responses"));
+  const failedAttempt = observeProviderRoute(request, "gemini");
+  assert.equal(failedAttempt.switched, true);
+  const retry = observeProviderRoute(request, "gemini");
+  assert.equal(retry.switched, true);
+  assert.equal(retry.previousProtocol, "responses");
+});
 
 function continuityFixture() {
   return { model: "gpt-5.6-sol", stream: true, tool_choice: "required",
@@ -34,6 +63,67 @@ test("checkpoint on/off retains constraints, execution evidence and cross-bounda
     assert.equal(result.payload.tool_choice, "required");
     if (result.rewritten) assert.ok(result.outboundBytes < 64000);
   }
+});
+
+test("provider switch replay uses a smaller safe history budget", () => {
+  const fixture = continuityFixture();
+  fixture.input[2].content = "x".repeat(240000);
+  const ordinary = prepareOversizedHistoryReplay(structuredClone(fixture), {});
+  const switched = prepareProviderSwitchHistoryReplay(structuredClone(fixture), {});
+  assert.equal(ordinary.rewritten, false);
+  assert.equal(switched.rewritten, true);
+  assert.equal(switched.limitBytes, 192 * 1024);
+  const wire = JSON.stringify(switched.payload.input);
+  for (const marker of ["CONSTRAINT_SENTINEL", "ORIGINAL_TASK_SENTINEL", "LATEST_TASK_SENTINEL", "VERIFIED_STATE_SENTINEL", "PENDING_RESULT_SENTINEL"]) assert.match(wire, new RegExp(marker));
+});
+
+test("server checkpoints both directions after an anonymous thread switches protocol families", async () => {
+  resetProviderRouteStateForTests();
+  resetMetrics();
+  const captured = [];
+  const fakeFetch = async (url, init) => {
+    captured.push({ url: String(url), body: JSON.parse(init.body) });
+    if (String(url).includes("streamGenerateContent")) {
+      return new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: "gemini ok" }] } }] })}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }
+    return new Response(responseSse("resp_switch_first", [{ id: "msg_switch_first", type: "message", role: "assistant", content: [{ type: "output_text", text: "gpt ok" }] }]), { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+
+  await withServer(fakeFetch, async (base) => {
+    const headers = authHeaders({ "thread-id": "private-thread-id-must-not-be-logged" });
+    const history = [
+      { role: "developer", content: "SWITCH_CONSTRAINT" },
+      { role: "user", content: "old task" },
+      { role: "assistant", content: "historical prose segment ".repeat(12000) },
+      { role: "user", content: "SWITCH_ACTIVE_TASK" },
+    ];
+    const first = await fetch(`${base}/v1/responses`, { method: "POST", headers, body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input: history }) });
+    assert.equal(first.status, 200);
+    await first.text();
+    const second = await fetch(`${base}/v1/responses`, { method: "POST", headers, body: JSON.stringify({ model: "gemini-3.8-flash", stream: true, input: history }) });
+    assert.equal(second.status, 200);
+    await second.text();
+    const third = await fetch(`${base}/v1/responses`, { method: "POST", headers, body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input: history }) });
+    assert.equal(third.status, 200);
+    await third.text();
+
+    const metrics = await fetch(`${base}/internal/metrics`, { headers: { "x-local-token": "test_local_token" } }).then((response) => response.json());
+    assert.equal(metrics.context.providerSwitches, 2);
+    assert.equal(metrics.context.providerSwitchCheckpoints, 2);
+    assert.ok(metrics.context.providerSwitchBytesSkipped > 0);
+  });
+
+  assert.equal(captured.length, 3);
+  for (const request of captured.slice(1)) {
+    const wire = JSON.stringify(request.body);
+    assert.match(wire, /MOMO proxy historical checkpoint/);
+    assert.match(wire, /SWITCH_CONSTRAINT/);
+    assert.match(wire, /SWITCH_ACTIVE_TASK/);
+    assert.ok(Buffer.byteLength(wire) < 64 * 1024);
+    assert.ok((wire.match(/historical prose segment/g) || []).length < 1000);
+  }
+  assert.match(captured[1].url, /streamGenerateContent/);
+  assert.match(captured[2].url, /\/v1\/responses$/);
 });
 
 test("explicit checkpoint retains pending calls and refuses oversized required evidence", () => {
