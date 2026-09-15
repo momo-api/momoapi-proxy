@@ -7,6 +7,27 @@ import { randomUUID } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BUNDLED_JSON_PATH = join(__dirname, "bundled-model-template.json");
+const CROSS_PROVIDER_INSTRUCTIONS_PATH = join(__dirname, "instructions", "cross-provider-compact.txt");
+
+let cachedCrossProviderInstructions = null;
+
+function getCrossProviderInstructions() {
+  if (cachedCrossProviderInstructions) return cachedCrossProviderInstructions;
+  cachedCrossProviderInstructions = readFileSync(CROSS_PROVIDER_INSTRUCTIONS_PATH, "utf8").trim();
+  return cachedCrossProviderInstructions;
+}
+
+function withCrossProviderInstructions(template) {
+  const instructions = getCrossProviderInstructions();
+  return {
+    ...structuredClone(template),
+    base_instructions: instructions,
+    model_messages: {
+      ...(structuredClone(template.model_messages) || {}),
+      instructions_template: instructions,
+    },
+  };
+}
 
 export const DESKTOP_COMPATIBILITY_ALIASES = [
   {
@@ -199,7 +220,7 @@ export function sortModels(models) {
 }
 
 export function buildCatalog(models, { includeDesktopAliases = true } = {}) {
-  const template = getBundledTemplate();
+  const template = withCrossProviderInstructions(getBundledTemplate());
   const filtered = (models || [])
     .filter((model) => model?.id && status(model) !== "hidden" && status(model) !== "image" && status(model) !== "video" && !isImageOrNonText(model));
 
