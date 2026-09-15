@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.17 - 2026-09-15
+
 - Make MOMO Image the explicit default for image generation and editing unless the user requests official ImageGen.
 - Repair MOMO Image installation from background updates even when Codex Desktop or npm Codex is not available on the updater's PATH.
 - Bump the bundled MOMO Image plugin to 0.5.2 so Codex refreshes the routing instructions and MCP metadata.
