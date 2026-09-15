@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.18 - 2026-09-15
+
+- Return bounded `upstream_timeout` errors for Cloudflare 524 responses instead of reflecting HTML diagnostic pages through Responses or Chat Completions.
+- Preserve ordinary JSON Chat Completions errors and avoid retrying non-idempotent model requests.
+
 ## 0.13.17 - 2026-09-15
 
 - Make MOMO Image the explicit default for image generation and editing unless the user requests official ImageGen.
