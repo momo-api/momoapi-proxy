@@ -152,3 +152,26 @@ test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other",
     "muse-spark-1.3-contributor-free",
   ]);
 });
+
+test("catalog uses one compact cross-provider instruction source", async () => {
+  const { buildCatalog } = await import("../src/catalog.mjs");
+  const catalog = buildCatalog([
+    { id: "gpt-5.5", agent_status: "stable" },
+    { id: "claude-opus-4-6-thinking", agent_status: "stable" },
+    { id: "gemini-3.7-flash", agent_status: "stable" },
+    { id: "deepseek-v4-pro", agent_status: "stable" },
+  ], { includeDesktopAliases: false });
+
+  for (const model of catalog.models) {
+    const instructions = model.base_instructions;
+    assert.equal(model.model_messages.instructions_template, instructions);
+    assert.ok(instructions.length >= 800);
+    assert.ok(instructions.length <= 3000);
+    assert.doesNotMatch(instructions, /You are Codex, an agent based on GPT-5/);
+    assert.match(instructions, /AGENTS\.md/);
+    assert.match(instructions, /Use available tools/);
+    assert.match(instructions, /pending tool calls/);
+    assert.match(instructions, /call\/result relationships/);
+    assert.match(instructions, /Never expose credentials/);
+  }
+});

@@ -417,3 +417,20 @@ P5 验收共同约束：
 - 只使用本地合成数据和 mock；不读取真实日志、会话、密钥或生产账户。
 - 每个 PR 均执行 Windows 全量、Node 24 Alpine、Windows tray、历史/工作树/staged secret scan。
 - 所有合并只进入 GitHub `main`；未制作新版本、未打新 tag、未上传公开包、未更新本机 18789 的运行实例。
+
+## P7 跨模型固定指令精简（2026-09-15）
+
+目标是减少第三方模型固定上下文和身份冲突，同时保留 Codex 工具执行、安全、工作区规则与 checkpoint 连续性。项目规则继续由 Codex 按官方 `AGENTS.md` 层级动态加载，不复制进全局模型模板。
+
+| 项目 | 重构前 | 重构后 | 状态 |
+| --- | ---: | ---: | --- |
+| 固定指令字符数 | 17,730 | 1,586 | 已完成（减少约 91%） |
+| 指令源码 | bundled JSON 内两份重复长文本 | `src/instructions/cross-provider-compact.txt` 单一来源 | 已完成 |
+| 第三方身份 | `Codex + GPT-5` | 通用 shared-workspace coding agent | 已完成 |
+| 动态项目规则 | `AGENTS.md` | 继续由客户端动态加载 | 保持 |
+| 工具/checkpoint 规则 | 长模板内分散描述 | 精简模板显式保留 tool execution、pending call、call/result continuity | 已完成 |
+| Gemini 身份兜底 | 开头身份改写 | 继续保留，兼容历史会话与旧目录 | 保持 |
+
+实现将 bundled 模型能力元数据与代理维护的跨模型行为指令分离。`catalog.mjs` 生成目录时同时填充 `base_instructions` 和 `model_messages.instructions_template`，兼容不同 Codex 客户端字段，但二者来自同一文件。bundled JSON 不再保存两份 17,730 字符死数据。
+
+本地验收：Windows 全量 372 passed / 3 platform skips；Gemini/Claude/Responses、附件、checkpoint、call/result、namespace/custom tool 回归全部通过；npm dry-run 包含新模板。完整 Git 历史和当前工作树 Secret scan 均为 no leaks found。未修改本机安装目录、未重启 18789、未发布版本。
