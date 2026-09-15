@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.16 - 2026-09-15
+
+- Replace the repeated 17,730-character Codex/GPT-5 model instruction with a 1,586-character cross-provider instruction source. Preserve tool execution, scoped `AGENTS.md`, secret safety, verified file changes, and checkpoint call/result continuity while avoiding third-party identity conflicts.
+- Remove duplicate bundled instruction text and keep Gemini's leading-identity normalization as a compatibility fallback for existing catalogs and remembered tool continuations.
+
 ## 0.13.15 - 2026-09-15
 
 - Keep the complete Codex system/developer instruction set on Gemini routes while replacing only the leading `Codex`/`GPT-5` identity sentence that Antigravity rejects with a misleading `RESOURCE_EXHAUSTED` 429. Apply the same compatibility rewrite to remembered tool-continuation instructions without changing user messages, tool definitions, or non-Gemini routes.
