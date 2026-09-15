@@ -678,6 +678,51 @@ test("Gemini promotes system and developer messages into systemInstruction", () 
   assert.match(JSON.stringify(body.contents), /ACTIVE_USER_SENTINEL/);
 });
 
+test("Gemini neutralizes only the leading Codex GPT-5 system identity", () => {
+  const identity = "You are Codex, an agent based on GPT-5.";
+  const constraints = " You and the user share one workspace. KEEP_TOOL_AND_SAFETY_RULES";
+  const { body } = geminiRequest({
+    instructions: identity + constraints,
+    input: [
+      { role: "developer", content: "DEVELOPER_CONSTRAINT" },
+      { role: "user", content: identity + " USER_TEXT_MUST_NOT_CHANGE" },
+    ],
+  }, "gemini-3.8-flash", new Map());
+
+  const systemText = body.systemInstruction.parts.map((part) => part.text).join("\n");
+  assert.match(systemText, /^You are a coding assistant operating in a shared workspace\./);
+  assert.doesNotMatch(systemText, /^You are Codex, an agent based on GPT-5\./);
+  assert.match(systemText, /KEEP_TOOL_AND_SAFETY_RULES/);
+  assert.match(systemText, /DEVELOPER_CONSTRAINT/);
+  assert.match(JSON.stringify(body.contents), /You are Codex, an agent based on GPT-5\. USER_TEXT_MUST_NOT_CHANGE/);
+});
+
+test("Gemini leaves non-leading and unrelated system identities unchanged", () => {
+  const embedded = "Do not rewrite this quote: You are Codex, an agent based on GPT-5.";
+  const ordinary = "You are a concise coding assistant.";
+  const { body } = geminiRequest({
+    instructions: ordinary,
+    input: [{ role: "developer", content: embedded }],
+  }, "gemini-3.8-flash", new Map());
+
+  assert.deepEqual(body.systemInstruction.parts.map((part) => part.text), [ordinary, embedded]);
+});
+
+test("Gemini normalizes a remembered Codex identity during tool continuation", () => {
+  const calls = new Map([["call_identity", {
+    geminiSystemInstruction: {
+      parts: [{ text: "You are Codex, an agent based on GPT-5.\nREMEMBERED_TOOL_RULE" }],
+    },
+  }]]);
+  const { body } = geminiRequest({
+    input: [{ type: "function_call_output", call_id: "call_identity", output: "done" }],
+  }, "gemini-3.8-flash", calls);
+
+  assert.deepEqual(body.systemInstruction.parts, [{
+    text: "You are a coding assistant operating in a shared workspace.\nREMEMBERED_TOOL_RULE",
+  }]);
+});
+
 test("repairs a Gemini function response whose name disagrees with the matching call id", () => {
   const contents = sanitizeGeminiFunctionHistory([
     { role: "model", parts: [{ functionCall: { id: "call_patch", name: "apply_patch", args: { input: "*** Begin Patch" } } }] },

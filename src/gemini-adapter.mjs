@@ -300,17 +300,29 @@ export function buildGeminiContents(input, calls) {
   return contents.length ? contents : [{ role: "user", parts: [{ text: "Continue." }] }];
 }
 
+const CODEX_GPT5_IDENTITY_PREFIX = "You are Codex, an agent based on GPT-5.";
+const GEMINI_COMPATIBLE_IDENTITY_PREFIX = "You are a coding assistant operating in a shared workspace.";
+
+function normalizeGeminiSystemIdentity(value) {
+  const text = String(value);
+  const leadingWhitespace = text.match(/^\s*/)?.[0] || "";
+  if (!text.startsWith(CODEX_GPT5_IDENTITY_PREFIX, leadingWhitespace.length)) return text;
+  return leadingWhitespace
+    + GEMINI_COMPATIBLE_IDENTITY_PREFIX
+    + text.slice(leadingWhitespace.length + CODEX_GPT5_IDENTITY_PREFIX.length);
+}
+
 function geminiInstructionParts(request) {
   const parts = [];
   if (request?.instructions !== undefined && request.instructions !== null && String(request.instructions).length > 0) {
-    parts.push({ text: safeTextValue(String(request.instructions)) });
+    parts.push({ text: safeTextValue(normalizeGeminiSystemIdentity(String(request.instructions))) });
   }
   for (const item of asArray(request?.input)) {
     if (!item || typeof item !== "object" || (item.role !== "system" && item.role !== "developer")) continue;
     for (const part of (Array.isArray(item.content) ? item.content : [item.content])) {
-      if (typeof part === "string") parts.push({ text: safeTextValue(part) });
+      if (typeof part === "string") parts.push({ text: safeTextValue(normalizeGeminiSystemIdentity(part)) });
       else if (part && typeof part === "object" && ["input_text", "output_text", "text"].includes(part.type) && part.text) {
-        parts.push({ text: safeTextValue(part.text) });
+        parts.push({ text: safeTextValue(normalizeGeminiSystemIdentity(part.text)) });
       }
     }
   }
@@ -335,11 +347,15 @@ function mergedGeminiSystemInstruction(request, calls) {
   const remembered = rememberedGeminiSystemInstruction(request?.input, calls);
   const parts = [...geminiInstructionParts(request), ...asArray(remembered?.parts)];
   const seen = new Set();
-  const unique = parts.filter((part) => {
-    if (!part || typeof part.text !== "string" || seen.has(part.text)) return false;
-    seen.add(part.text);
-    return true;
-  });
+  const unique = parts
+    .map((part) => (part && typeof part.text === "string"
+      ? { ...part, text: normalizeGeminiSystemIdentity(part.text) }
+      : part))
+    .filter((part) => {
+      if (!part || typeof part.text !== "string" || seen.has(part.text)) return false;
+      seen.add(part.text);
+      return true;
+    });
   return unique.length ? { parts: unique } : null;
 }
 
