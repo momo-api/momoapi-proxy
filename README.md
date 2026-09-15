@@ -327,6 +327,16 @@ arguments use ID/index buckets with stable arrival order, without scanning other
 calls. Final parsing, output budgets and existing tolerant partial-input semantics
 are unchanged. See npm run benchmark:incremental-stream -- --baseline-root=...
 for an explicit clean-baseline, sequential A/B comparison.
+When one Codex thread switches protocol families (Responses, Chat, Gemini, or
+Claude), histories above 192 KiB use the same continuity-safe local checkpoint
+before conversion. This avoids replaying a large provider-specific transcript
+that cannot reuse the previous provider's response state or prompt cache. The
+checkpoint retains constraints, the active task, pending calls, complete call/result
+pairs, recent execution evidence, and dynamically loaded tools. Ordinary requests
+still use the 512 KiB historical replay threshold. Optional non-secret overrides
+are `contextPolicy.providerSwitchReplayMb` (0.0625-2) or
+`MOMO_PROVIDER_SWITCH_REPLAY_MB`; restart is required. Local metrics and bounded
+request logs expose only aggregate byte savings and a 16-hex anonymous thread hash.
 Chat/Gemini/Claude
 custom-input normalization recognizes unified-exec host helper calls such as
 text(...), image(...), and store(...) as JavaScript rather than wrapping them as

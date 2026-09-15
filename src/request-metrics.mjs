@@ -54,7 +54,7 @@ export class RequestMetrics {
         firstWrite = true; observe("clientFirstWriteMs", this.now() - start);
       },
       sse: () => { if (!sse && !ended) { sse = true; group.requests.activeSse++; } },
-      wrapFetch: (fetchImpl) => async (...args) => {
+      wrapFetch: (fetchImpl, onHeaders) => async (...args) => {
         const before = this.now();
         if (!fetched) { fetched = true; observe("preUpstreamMs", before - preparationStart); }
         group.upstream.attempts++;
@@ -62,7 +62,9 @@ export class RequestMetrics {
           // Do not read, wrap or pull the response body. Preserve fetch return
           // identity, stream backpressure, cancellation and existing retries.
           const result = await fetchImpl(...args);
-          observe("upstreamHeadersMs", this.now() - before);
+          const elapsed = this.now() - before;
+          observe("upstreamHeadersMs", elapsed);
+          if (typeof onHeaders === "function") onHeaders(elapsed);
           group.upstream.headersReceived++;
           return result;
         } catch (error) { group.upstream.errors++; throw error; }
