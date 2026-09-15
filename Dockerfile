@@ -5,6 +5,7 @@ COPY bin ./bin
 COPY src ./src
 COPY test ./test
 COPY scripts/compact-fixtures.mjs ./scripts/compact-fixtures.mjs
+COPY scripts/build-release-package.mjs ./scripts/build-release-package.mjs
 COPY .agents ./.agents
 COPY plugins ./plugins
 RUN node --test
