@@ -37,6 +37,21 @@ namespace MomoApi.Tray
             // .NET Framework NotifyIcon.Text has a 63-character limit.
             return title.Length <= 63 ? title : title.Substring(0, 60) + "...";
         }
+
+        public static string PluginStatus(string json, bool commandSucceeded)
+        {
+            string version = VersionFromJson(json);
+            bool hasInstalledState = Regex.IsMatch(json ?? "", "\"installed\"\\s*:\\s*(?:true|false)", RegexOptions.IgnoreCase);
+            bool installed = Regex.IsMatch(json ?? "", "\"installed\"\\s*:\\s*true", RegexOptions.IgnoreCase);
+            bool enabled = Regex.IsMatch(json ?? "", "\"enabled\"\\s*:\\s*true", RegexOptions.IgnoreCase);
+            if (hasInstalledState && installed && enabled)
+            {
+                return "MOMO Image：已安装并启用" + (string.IsNullOrEmpty(version) ? "" : " v" + version);
+            }
+            if (hasInstalledState && installed) return "MOMO Image：已安装但未启用";
+            if (hasInstalledState) return "MOMO Image：未安装";
+            return commandSucceeded ? "MOMO Image：状态未知" : "MOMO Image：检测失败";
+        }
     }
 
     static class Program
@@ -98,6 +113,7 @@ namespace MomoApi.Tray
         private readonly Icon inactiveIcon;
         private readonly ToolStripMenuItem titleItem;
         private readonly ToolStripMenuItem updateItem;
+        private readonly ToolStripMenuItem pluginStatusItem;
         private readonly ToolStripMenuItem autostartItem;
         private readonly SynchronizationContext syncContext;
         private readonly CancellationTokenSource cts = new CancellationTokenSource();
@@ -139,6 +155,17 @@ namespace MomoApi.Tray
 
             var runDoctor = menu.Items.Add("运行健康诊断 (Doctor)");
             runDoctor.Click += async (s, e) => await RunCliAsync("doctor", true);
+
+            pluginStatusItem = new ToolStripMenuItem("MOMO Image：正在检测...");
+            pluginStatusItem.Enabled = false;
+            menu.Items.Add(pluginStatusItem);
+
+            var repairPlugin = menu.Items.Add("安装/修复 MOMO Image 插件");
+            repairPlugin.Click += async (s, e) =>
+            {
+                await RunCliAsync("plugin install", true);
+                await RefreshPluginStatusAsync();
+            };
 
             var viewLogs = menu.Items.Add("查看代理日志 (Logs)");
             viewLogs.Click += (s, e) =>
@@ -205,6 +232,7 @@ namespace MomoApi.Tray
 
             // 启动独立异步退避心跳任务
             Task.Run(() => StartHealthLoopAsync(cts.Token));
+            Task.Run(async () => await RefreshPluginStatusAsync());
         }
 
         private async Task StartHealthLoopAsync(CancellationToken token)
@@ -411,12 +439,24 @@ namespace MomoApi.Tray
             {
                 if (File.Exists(mjs))
                 {
-                    string args = EscapeWindowsArgument(mjs) + " " + EscapeWindowsArgument(subCommand);
+                    string args = EscapeWindowsArgument(mjs) + " " + EscapeSubCommand(subCommand);
                     return new ProcessStartInfo(nodeExe, args);
                 }
             }
 
-            return new ProcessStartInfo(nodeExe, EscapeWindowsArgument(subCommand));
+            return new ProcessStartInfo(nodeExe, EscapeSubCommand(subCommand));
+        }
+
+        private static string EscapeSubCommand(string subCommand)
+        {
+            string[] parts = (subCommand ?? "").Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var args = new StringBuilder();
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (i > 0) args.Append(' ');
+                args.Append(EscapeWindowsArgument(parts[i]));
+            }
+            return args.ToString();
         }
 
         private async Task StartBridgeAsync()
@@ -630,6 +670,46 @@ namespace MomoApi.Tray
             {
                 isCliRunning = false;
             }
+        }
+
+        private async Task RefreshPluginStatusAsync()
+        {
+            string output = "";
+            string error = "";
+            int exitCode = -1;
+            try
+            {
+                ProcessStartInfo psi = ResolveCliProcessInfo("plugin status");
+                psi.CreateNoWindow = true;
+                psi.UseShellExecute = false;
+                psi.RedirectStandardOutput = true;
+                psi.RedirectStandardError = true;
+                psi.StandardOutputEncoding = Encoding.UTF8;
+                psi.StandardErrorEncoding = Encoding.UTF8;
+
+                await Task.Run(() =>
+                {
+                    using (Process p = Process.Start(psi))
+                    {
+                        if (p == null) return;
+                        var outTask = Task.Run(() => p.StandardOutput.ReadToEnd());
+                        var errTask = Task.Run(() => p.StandardError.ReadToEnd());
+                        bool exited = p.WaitForExit(15000);
+                        if (!exited) { try { p.Kill(); } catch { } }
+                        Task.WaitAll(new Task[] { outTask, errTask }, 5000);
+                        output = outTask.IsCompleted ? outTask.Result : "";
+                        error = errTask.IsCompleted ? errTask.Result : "";
+                        exitCode = exited ? p.ExitCode : -1;
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+            }
+
+            string label = TrayPresentation.PluginStatus(output + Environment.NewLine + error, exitCode == 0);
+            syncContext.Post(_ => pluginStatusItem.Text = label, null);
         }
 
         private void InitJobObject()
