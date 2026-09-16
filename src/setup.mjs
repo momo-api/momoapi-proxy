@@ -10,6 +10,9 @@ import { installImagePlugin as installBundledImagePlugin } from "./plugin-instal
 
 export const MARKER = "# MOMOAPI_PROXY_MANAGED";
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free"]);
+const CODEX_CONTEXT_WINDOW = 272000;
+const CODEX_AUTO_COMPACT_TOKEN_LIMIT = 180000;
+const CODEX_COMPACT_PROMPT = "You are compacting an active Codex session. Produce a task handoff, not a replay of the previous assistant answer. Always preserve the latest user request as CURRENT ACTIVE TASK, distinguish already resolved historical issues from pending work, record current-turn progress and pending tool calls/results, preserve governing constraints, and state the next action. Never omit the latest user request when compaction occurs during a tool-using turn. Do not treat older user questions as active unless the latest request explicitly reopens them.";
 
 function authPath(env) { return join(codexHome(env), "auth.json"); }
 function configPath(env) { return join(codexHome(env), "config.toml"); }
@@ -64,6 +67,7 @@ export function cleanConfigToml(content) {
       trimmed.startsWith("model_context_window =") ||
       trimmed.startsWith("model_auto_compact_token_limit =") ||
       trimmed.startsWith("model_auto_compact_token_limit_scope =") ||
+      trimmed.startsWith("compact_prompt =") ||
       trimmed.startsWith("disable_response_storage =")
     ) {
       continue;
@@ -80,9 +84,10 @@ function managedConfig(catalog, port, defaultModel) {
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +
     'model_catalog_json = "' + catalog.replace(/\\/g, "/") + '"\n' +
-    'model_context_window = 272000\n' +
-    'model_auto_compact_token_limit = 120000\n' +
+    'model_context_window = ' + CODEX_CONTEXT_WINDOW + '\n' +
+    'model_auto_compact_token_limit = ' + CODEX_AUTO_COMPACT_TOKEN_LIMIT + '\n' +
     'model_auto_compact_token_limit_scope = "body_after_prefix"\n' +
+    'compact_prompt = ' + JSON.stringify(CODEX_COMPACT_PROMPT) + '\n' +
     'disable_response_storage = false\n\n' +
     '[model_providers.momoapi-proxy]\n' +
     'name = "MOMO API Proxy"\n' +
@@ -94,6 +99,32 @@ function managedConfig(catalog, port, defaultModel) {
     'base_url = "http://127.0.0.1:' + port + '/v1"\n' +
     'wire_api = "responses"\n' +
     'requires_openai_auth = false\n';
+}
+
+export function migrateManagedCompactionConfig(env = process.env) {
+  const target = configPath(env);
+  if (!existsSync(target)) return { changed: false, reason: "not_found" };
+  const original = readFileSync(target, "utf8");
+  if (!original.includes(MARKER)) return { changed: false, reason: "unmanaged" };
+
+  let updated = original.replace(
+    /^model_auto_compact_token_limit\s*=\s*120000\s*$/m,
+    "model_auto_compact_token_limit = " + CODEX_AUTO_COMPACT_TOKEN_LIMIT,
+  );
+  if (!/^compact_prompt\s*=/m.test(updated)) {
+    const anchor = /^model_auto_compact_token_limit_scope\s*=.*$/m;
+    const promptLine = 'compact_prompt = ' + JSON.stringify(CODEX_COMPACT_PROMPT);
+    if (anchor.test(updated)) {
+      updated = updated.replace(anchor, (line) => line + "\n" + promptLine);
+    } else if (/^disable_response_storage\s*=/m.test(updated)) {
+      updated = updated.replace(/^disable_response_storage\s*=/m, promptLine + "\n" + "disable_response_storage =");
+    } else {
+      updated = updated.replace(/\s*$/, "\n" + promptLine + "\n");
+    }
+  }
+  if (updated === original) return { changed: false, reason: "current" };
+  writeFileSync(target, updated);
+  return { changed: true, reason: "migrated" };
 }
 
 function isCodexCandidate(model) {

@@ -318,6 +318,32 @@ test("compact endpoint defaults to local checkpoint without an upstream model ca
   assert.equal(fetchCalls, 0);
 });
 
+test("repeated local compaction keeps only the latest user request as the active task", () => {
+  const first = buildLocalCompactResponse("gpt-5.6-sol", [
+    { role: "user", content: "What is the login account?" },
+    { role: "assistant", content: "The login issue is resolved." },
+    { role: "user", content: "Why did project details fail to load?" },
+    { role: "assistant", content: "The project route issue is resolved." },
+    { role: "user", content: "Show the repair report and artifacts in the board." },
+  ]);
+  const firstText = JSON.stringify(first.output);
+  assert.match(firstText, /historical user context; background only/);
+  assert.match(firstText, /What is the login account/);
+  assert.match(firstText, /Why did project details fail to load/);
+  assert.match(firstText, /Show the repair report and artifacts in the board/);
+
+  const second = buildLocalCompactResponse("gpt-5.6-sol", [
+    ...first.output,
+    { role: "assistant", content: "The report is now visible in the board." },
+    { role: "user", content: "Verify the report links only; do not revisit resolved login issues." },
+  ]);
+  const retainedUsers = second.output.filter((item) => item?.role === "user");
+  assert.equal(retainedUsers.at(-1).content[0].text, "Verify the report links only; do not revisit resolved login issues.");
+  for (const item of retainedUsers.slice(0, -1)) {
+    assert.match(item.content[0].text, /^\[historical user context; background only/);
+  }
+});
+
 test("Claude model switch fails explicitly when required user state exceeds the checkpoint budget", async () => {
   let captured;
   const hugeHistory = [];

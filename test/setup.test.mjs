@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rollback, setup, uninstall } from "../src/setup.mjs";
+import { migrateManagedCompactionConfig, rollback, setup, uninstall } from "../src/setup.mjs";
 import { isAutostartInstalled } from "../src/autostart.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 
@@ -25,12 +25,13 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.match(written, /base_url = "http:\/\/127\.0\.0\.1:19999\/v1"/);
     assert.match(written, /requires_openai_auth = false/);
     assert.match(written, /model_context_window = 272000/);
-    assert.match(written, /model_auto_compact_token_limit = 120000/);
+    assert.match(written, /model_auto_compact_token_limit = 180000/);
     assert.match(written, /model_auto_compact_token_limit_scope = "body_after_prefix"/);
+    assert.match(written, /compact_prompt = ".*CURRENT ACTIVE TASK.*latest user request.*"/);
     assert.match(written, /MOMOAPI_PROXY_MANAGED/);
     const catalogText = readFileSync(result.catalog, "utf8");
     assert.match(catalogText, /gemini-3\.7-flash/);
-    assert.match(catalogText, /"auto_compact_token_limit": 120000/);
+    assert.match(catalogText, /"auto_compact_token_limit": 180000/);
     const settings = JSON.parse(readFileSync(result.settingsFile, "utf8"));
     assert.equal(settings.updateCheckEnabled, true);
     assert.equal(settings.updateMode, "automatic");
@@ -41,6 +42,36 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.equal(isAutostartInstalled(process.platform, env), true);
     assert.deepEqual(rollback(env), [result.config]);
     assert.equal(readFileSync(config, "utf8"), "model = \"old-model\"\n");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("managed compaction migration upgrades only the previous MOMO defaults", () => {
+  const root = mkdtempSync(join(tmpdir(), "momo-compact-migration-"));
+  const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex") };
+  const config = join(env.CODEX_HOME, "config.toml");
+  try {
+    mkdirSync(env.CODEX_HOME, { recursive: true });
+    writeFileSync(config, [
+      "# MOMOAPI_PROXY_MANAGED",
+      'model = "gemini-3.8-flash"',
+      "model_auto_compact_token_limit = 120000",
+      'model_auto_compact_token_limit_scope = "body_after_prefix"',
+      "disable_response_storage = false",
+      "",
+    ].join("\n"));
+    assert.deepEqual(migrateManagedCompactionConfig(env), { changed: true, reason: "migrated" });
+    const migrated = readFileSync(config, "utf8");
+    assert.match(migrated, /model_auto_compact_token_limit = 180000/);
+    assert.match(migrated, /compact_prompt = ".*CURRENT ACTIVE TASK.*"/);
+    assert.deepEqual(migrateManagedCompactionConfig(env), { changed: false, reason: "current" });
+
+    writeFileSync(config, "# user config\nmodel_auto_compact_token_limit = 120000\n");
+    assert.deepEqual(migrateManagedCompactionConfig(env), { changed: false, reason: "unmanaged" });
+    assert.doesNotMatch(readFileSync(config, "utf8"), /compact_prompt/);
+
+    writeFileSync(config, "# MOMOAPI_PROXY_MANAGED\nmodel_auto_compact_token_limit = 210000\n");
+    assert.deepEqual(migrateManagedCompactionConfig(env), { changed: true, reason: "migrated" });
+    assert.match(readFileSync(config, "utf8"), /model_auto_compact_token_limit = 210000/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

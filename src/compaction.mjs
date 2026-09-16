@@ -280,8 +280,27 @@ function compactHistoricalAssistant(item) {
   return compacted;
 }
 
+function compactHistoricalUser(item) {
+  const text = itemText(item);
+  return {
+    type: "message",
+    role: "user",
+    content: [{
+      type: "input_text",
+      text: "[historical user context; background only unless the current active task explicitly reopens it]\n" + text,
+    }],
+  };
+}
+
 export function buildLocalCompactResponse(_model, input, { requiredCallIds = new Set() } = {}) {
   const items = Array.isArray(input) ? input : [];
+  let latestUserIndex = -1;
+  for (let index = items.length - 1; index >= 0; index--) {
+    if (isUserItem(items[index]) && itemText(items[index]).trim()) {
+      latestUserIndex = index;
+      break;
+    }
+  }
   const selected = new Map();
   const groups = new Map();
   const isCall = (item) => item?.type === "function_call" || item?.type === "custom_tool_call";
@@ -307,7 +326,12 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
     if (item?.type === "additional_tools") add([[index, item]], true);
     if (isUserItem(item) || item?.role === "developer" || item?.role === "system") {
       const text = item?.type === "input_text" ? item.text : itemText(item);
-      if (text) add([[index, { type: "message", role: item?.role || "user", content: [{ type: "input_text", text }] }]], true);
+      if (text) {
+        const retained = isUserItem(item) && index !== latestUserIndex
+          ? compactHistoricalUser(item)
+          : { type: "message", role: item?.role || "user", content: [{ type: "input_text", text }] };
+        add([[index, retained]], true);
+      }
     }
     if ((isCall(item) || isResult(item)) && typeof item.call_id === "string") {
       const group = groups.get(item.call_id) || [];
