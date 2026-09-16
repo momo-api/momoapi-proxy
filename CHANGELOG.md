@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.22 - 2026-09-16
+
+- Restore the exact managed Windows tray after a healthy self-update or rollback when it was running before activation, while leaving an intentionally closed tray closed.
+- Recognize both the stable `.momoapi-proxy/bin` tray location and the legacy `app/bin` location without starting unrelated same-named programs.
+
 ## 0.13.21 - 2026-09-16
 
 - Organize the Windows tray into clear model, MOMO Image, proxy maintenance, and settings menus instead of mixing every action at the top level.
