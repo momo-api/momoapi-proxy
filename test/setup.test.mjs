@@ -24,14 +24,13 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.match(written, /name = "MOMO API Proxy"/);
     assert.match(written, /base_url = "http:\/\/127\.0\.0\.1:19999\/v1"/);
     assert.match(written, /requires_openai_auth = false/);
-    assert.match(written, /model_context_window = 272000/);
-    assert.match(written, /model_auto_compact_token_limit = 180000/);
-    assert.match(written, /model_auto_compact_token_limit_scope = "body_after_prefix"/);
+    assert.doesNotMatch(written, /model_context_window/);
+    assert.doesNotMatch(written, /model_auto_compact_token_limit/);
     assert.match(written, /compact_prompt = ".*CURRENT ACTIVE TASK.*latest user request.*"/);
     assert.match(written, /MOMOAPI_PROXY_MANAGED/);
     const catalogText = readFileSync(result.catalog, "utf8");
     assert.match(catalogText, /gemini-3\.7-flash/);
-    assert.match(catalogText, /"auto_compact_token_limit": 180000/);
+    assert.doesNotMatch(catalogText, /"auto_compact_token_limit"/);
     const settings = JSON.parse(readFileSync(result.settingsFile, "utf8"));
     assert.equal(settings.updateCheckEnabled, true);
     assert.equal(settings.updateMode, "automatic");
@@ -45,7 +44,7 @@ test("setup writes a local provider configuration and rollback restores it", asy
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("managed compaction migration upgrades only the previous MOMO defaults", () => {
+test("managed compaction migration removes only previous MOMO threshold overrides", () => {
   const root = mkdtempSync(join(tmpdir(), "momo-compact-migration-"));
   const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex") };
   const config = join(env.CODEX_HOME, "config.toml");
@@ -54,6 +53,7 @@ test("managed compaction migration upgrades only the previous MOMO defaults", ()
     writeFileSync(config, [
       "# MOMOAPI_PROXY_MANAGED",
       'model = "gemini-3.8-flash"',
+      "model_context_window = 272000",
       "model_auto_compact_token_limit = 120000",
       'model_auto_compact_token_limit_scope = "body_after_prefix"',
       "disable_response_storage = false",
@@ -61,7 +61,8 @@ test("managed compaction migration upgrades only the previous MOMO defaults", ()
     ].join("\n"));
     assert.deepEqual(migrateManagedCompactionConfig(env), { changed: true, reason: "migrated" });
     const migrated = readFileSync(config, "utf8");
-    assert.match(migrated, /model_auto_compact_token_limit = 180000/);
+    assert.doesNotMatch(migrated, /model_context_window/);
+    assert.doesNotMatch(migrated, /model_auto_compact_token_limit/);
     assert.match(migrated, /compact_prompt = ".*CURRENT ACTIVE TASK.*"/);
     assert.deepEqual(migrateManagedCompactionConfig(env), { changed: false, reason: "current" });
 
@@ -205,4 +206,18 @@ test("catalog uses one compact cross-provider instruction source", async () => {
     assert.match(instructions, /call\/result relationships/);
     assert.match(instructions, /Never expose credentials/);
   }
+});
+
+test("catalog leaves compaction to Codex unless the upstream model declares a limit", async () => {
+  const { buildCatalog } = await import("../src/catalog.mjs");
+  const catalog = buildCatalog([
+    { id: "gpt-default", agent_status: "stable" },
+    { id: "gpt-explicit", agent_status: "stable", auto_compact_token_limit: 234567 },
+    { id: "gpt-explicit-camel", agent_status: "stable", autoCompactTokenLimit: 210000 },
+  ], { includeDesktopAliases: false });
+
+  const bySlug = new Map(catalog.models.map((model) => [model.slug, model]));
+  assert.equal("auto_compact_token_limit" in bySlug.get("gpt-default"), false);
+  assert.equal(bySlug.get("gpt-explicit").auto_compact_token_limit, 234567);
+  assert.equal(bySlug.get("gpt-explicit-camel").auto_compact_token_limit, 210000);
 });
