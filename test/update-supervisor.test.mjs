@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isManagedImageMcpProcess, stopManagedImageMcpProcesses, superviseUpdate } from "../src/update-supervisor.mjs";
+import { isManagedImageMcpProcess, isManagedTrayProcess, startManagedTray, stopManagedImageMcpProcesses, superviseUpdate } from "../src/update-supervisor.mjs";
 
 function createVersion(root, version) {
   mkdirSync(join(root, "bin"), { recursive: true });
@@ -127,6 +127,105 @@ test("managed image MCP matching is exact to the old proxy script and image subc
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "node.exe", CommandLine: `node.exe "${target}" serve` }, root), false);
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "cmd.exe", CommandLine: `cmd /c node "${target}" mcp image` }, root), false);
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "node.exe", CommandLine: `node.exe "${root}-other\\bin\\momoapi-proxy.mjs" mcp image` }, root), false);
+});
+
+test("managed tray matching accepts only the exact application or stable install path", () => {
+  const root = "C:\\Users\\test user\\.momoapi-proxy\\app";
+  assert.equal(isManagedTrayProcess({ Name: "MomoApiProxyTray.exe", ExecutablePath: `${root}\\bin\\MomoApiProxyTray.exe` }, root), true);
+  assert.equal(isManagedTrayProcess({ Name: "MomoApiProxyTray.exe", ExecutablePath: "C:\\Users\\test user\\.momoapi-proxy\\bin\\MomoApiProxyTray.exe" }, root), true);
+  assert.equal(isManagedTrayProcess({ Name: "momoapi-tray.exe", ExecutablePath: `${root}\\bin\\momoapi-tray.exe` }, root), true);
+  assert.equal(isManagedTrayProcess({ Name: "MomoApiProxyTray.exe", ExecutablePath: "C:\\Temp\\MomoApiProxyTray.exe" }, root), false);
+  assert.equal(isManagedTrayProcess({ Name: "other.exe", ExecutablePath: `${root}\\bin\\MomoApiProxyTray.exe` }, root), false);
+});
+
+test("managed tray launch prefers the stable install path and passes the configured port", () => {
+  const root = "C:\\Users\\test\\.momoapi-proxy\\app";
+  const stableTray = "C:\\Users\\test\\.momoapi-proxy\\bin\\MomoApiProxyTray.exe";
+  const calls = [];
+  let unrefCalled = false;
+  const started = startManagedTray(root, 19001, {
+    platform: "win32",
+    runningCheck: () => false,
+    pathExists: (candidate) => candidate.toLowerCase() === stableTray.toLowerCase(),
+    spawnImpl: (executable, args, options) => {
+      calls.push({ executable, args, options });
+      return { pid: 321, unref: () => { unrefCalled = true; } };
+    },
+  });
+  assert.equal(started, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].executable.toLowerCase(), stableTray.toLowerCase());
+  assert.deepEqual(calls[0].args, ["--port", "19001"]);
+  assert.equal(calls[0].options.detached, true);
+  assert.equal(unrefCalled, true);
+});
+
+test("successful update restores a previously running tray only after health succeeds", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-tray-"));
+  const root = join(home, "app");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.22");
+  createVersion(backup, "0.13.21");
+  const events = [];
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, backupDir: backup, targetVersion: "0.13.22", previousVersion: "0.13.21", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
+      trayRunningCheck: () => { events.push("tray-detected"); return true; },
+      runCli: (_script, command) => { events.push(`cli:${Array.isArray(command) ? command.join(" " ) : command}`); return true; },
+      healthCheck: async () => { events.push("healthy"); return true; },
+      startTray: () => { events.push("tray-restored"); return true; },
+    });
+    assert.equal(result.activated, true);
+    assert.equal(events.filter((event) => event === "tray-restored").length, 1);
+    assert.ok(events.indexOf("tray-restored") > events.indexOf("healthy"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("update leaves the tray closed when it was closed before activation", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-no-tray-"));
+  const root = join(home, "app");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.22");
+  createVersion(backup, "0.13.21");
+  let startCalls = 0;
+  try {
+    await superviseUpdate({
+      rootDir: root, backupDir: backup, targetVersion: "0.13.22", previousVersion: "0.13.21", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true, trayRunningCheck: () => false,
+      runCli: () => true, healthCheck: async () => true, startTray: () => { startCalls += 1; return true; },
+    });
+    assert.equal(startCalls, 0);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("rollback restores a tray that was running before the failed update", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-tray-rollback-"));
+  const root = join(home, "app");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.22");
+  createVersion(backup, "0.13.21");
+  const healthVersions = [];
+  let startCalls = 0;
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, backupDir: backup, targetVersion: "0.13.22", previousVersion: "0.13.21", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true, trayRunningCheck: () => true,
+      runCli: () => true,
+      healthCheck: async ({ expectedVersion }) => { healthVersions.push(expectedVersion); return expectedVersion === "0.13.21"; },
+      startTray: () => { startCalls += 1; return true; },
+    });
+    assert.equal(result.rolledBack, true);
+    assert.equal(result.restoredHealthy, true);
+    assert.deepEqual(healthVersions, ["0.13.22", "0.13.21"]);
+    assert.equal(startCalls, 1);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("managed image MCP shutdown terminates only exact matching node processes", async () => {

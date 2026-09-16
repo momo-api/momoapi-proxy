@@ -1,5 +1,5 @@
 import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -171,6 +171,65 @@ function normalizedWindowsPath(value) {
   return String(value || "").replaceAll("/", "\\").toLowerCase();
 }
 
+function managedTrayPaths(rootDir) {
+  const resolvedRoot = win32.resolve(String(rootDir || ""));
+  const names = ["MomoApiProxyTray.exe", "momoapi-tray.exe"];
+  return [
+    ...names.map((name) => win32.join(win32.dirname(resolvedRoot), "bin", name)),
+    ...names.map((name) => win32.join(resolvedRoot, "bin", name)),
+  ];
+}
+
+export function isManagedTrayProcess(processInfo, rootDir) {
+  if (!processInfo) return false;
+  const name = String(processInfo.Name || processInfo.name || "").toLowerCase();
+  if (!new Set(["momoapiproxytray.exe", "momoapi-tray.exe"]).has(name)) return false;
+  const executablePath = normalizedWindowsPath(processInfo.ExecutablePath ?? processInfo.executablePath);
+  return managedTrayPaths(rootDir).some((candidate) => executablePath === normalizedWindowsPath(candidate));
+}
+
+export function isManagedTrayRunning(rootDir, {
+  platform = process.platform,
+  listProcesses = () => {
+    const result = spawnSync("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-Command",
+      "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('MomoApiProxyTray.exe','momoapi-tray.exe') } | Select-Object ProcessId,Name,ExecutablePath | ConvertTo-Json -Compress",
+    ], { encoding: "utf8", windowsHide: true, timeout: 10_000 });
+    if (result.status !== 0 || !result.stdout?.trim()) return [];
+    try {
+      const parsed = JSON.parse(result.stdout);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  },
+} = {}) {
+  if (platform !== "win32") return false;
+  return listProcesses().some((entry) => isManagedTrayProcess(entry, rootDir));
+}
+
+export function startManagedTray(rootDir, port, {
+  platform = process.platform,
+  spawnImpl = spawn,
+  runningCheck = isManagedTrayRunning,
+  pathExists = existsSync,
+} = {}) {
+  if (platform !== "win32") return false;
+  if (runningCheck(rootDir)) return true;
+  const executable = managedTrayPaths(rootDir).find((candidate) => pathExists(candidate));
+  if (!executable) return false;
+  try {
+    const child = spawnImpl(executable, ["--port", String(port || 18789)], {
+      detached: true, stdio: "ignore", windowsHide: true,
+    });
+    if (!child?.pid) return false;
+    child.unref?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function isManagedImageMcpProcess(processInfo, rootDir) {
   if (!processInfo || String(processInfo.Name || processInfo.name || "").toLowerCase() !== "node.exe") return false;
   const pid = Number(processInfo.ProcessId ?? processInfo.processId);
@@ -243,12 +302,23 @@ export async function superviseUpdate({
   copyContents = copyDirectoryContents,
   replaceContents = replaceDirectoryContents,
   installImagePlugin = true,
+  trayRunningCheck = isManagedTrayRunning,
+  startTray = startManagedTray,
 } = {}) {
   const stagedActivation = Boolean(stagingDir);
   let activationMode = stagedActivation ? "swap" : "legacy";
   const newScript = join(rootDir, "bin", "momoapi-proxy.mjs");
   const backupScript = join(backupDir, "bin", "momoapi-proxy.mjs");
   await waitForParent(parentPid);
+  const trayWasRunning = Boolean(trayRunningCheck(rootDir));
+  const restoreTray = (healthy, phase) => {
+    if (!healthy || !trayWasRunning) return false;
+    const started = Boolean(startTray(rootDir, port));
+    appendSupervisorLog(started
+      ? `Restored the Windows tray after ${phase}.`
+      : `The Windows tray was running before the update but could not be restored after ${phase}.`, env);
+    return started;
+  };
 
   if (stagedActivation) {
     validateStagedLayout({ rootDir, stagingDir, backupDir });
@@ -270,6 +340,7 @@ export async function superviseUpdate({
         errorCode: error?.code || "update_mcp_stop_failed",
       }, env);
       appendSupervisorLog(`Stopping managed image MCP processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+      restoreTray(restoredHealthy, "the interrupted activation");
       return { activated: false, rolledBack: false, restoredHealthy, errorCode: error?.code || "update_mcp_stop_failed" };
     }
     if (installImagePlugin) {
@@ -337,6 +408,7 @@ export async function superviseUpdate({
             errorCode: restoredHealthy ? "update_inplace_failed" : "update_inplace_restore_failed",
           }, env);
           appendSupervisorLog(`Transactional in-place activation failed: ${fallbackError?.code || fallbackError?.name || "unknown_error"}.`, env);
+          restoreTray(restoredHealthy, "the in-place rollback");
           return {
             activated: false, rolledBack: restoredTreeContents, restoredHealthy,
             errorCode: restoredHealthy ? "update_inplace_failed" : "update_inplace_restore_failed",
@@ -356,6 +428,7 @@ export async function superviseUpdate({
           errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
         }, env);
         appendSupervisorLog(`Update file swap failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+        restoreTray(restoredHealthy, "the file-swap rollback");
         return {
           activated: false, rolledBack: restoredTree, restoredHealthy,
           errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
@@ -390,6 +463,7 @@ export async function superviseUpdate({
     appendSupervisorLog(imagePluginInstalled
       ? "MOMO Image plugin installation verified after update."
       : (installImagePlugin ? "MOMO Image plugin installation needs a manual retry." : "MOMO Image plugin installation was skipped by configuration."), env);
+    restoreTray(true, `activation of v${targetVersion}`);
     if (activationMode === "inplace" && stagingDir) {
       try { remove(stagingDir); } catch {}
     }
@@ -419,6 +493,7 @@ export async function superviseUpdate({
       hasUpdate: true, checkFailed: !restoredHealthy, rolledBack: restoredTree,
       errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
     }, env);
+    restoreTray(restoredHealthy, "the health-check rollback");
     return {
       activated: false, rolledBack: restoredTree, restoredHealthy,
       errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
@@ -448,6 +523,7 @@ export async function superviseUpdate({
       errorCode: "update_rollback_swap_failed",
     }, env);
     appendSupervisorLog(`Rollback file swap failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+    restoreTray(false, "the failed rollback");
     return { activated: false, rolledBack: false, errorCode: "update_rollback_swap_failed" };
   }
 
@@ -469,6 +545,7 @@ export async function superviseUpdate({
   appendSupervisorLog(restoredHealthy
     ? `Rollback to proxy v${previousVersion} completed.`
     : `Rollback restored proxy v${previousVersion}, but its health check failed.`, env);
+  restoreTray(restoredHealthy, `rollback to v${previousVersion}`);
   return {
     activated: false,
     rolledBack: true,
