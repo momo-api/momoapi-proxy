@@ -203,15 +203,7 @@ namespace MomoApi.Tray
 
             menu.Items.Add(new ToolStripSeparator());
 
-            var exitTrayOnly = menu.Items.Add("仅退出托盘 (服务保持后台)");
-            exitTrayOnly.Click += (s, e) =>
-            {
-                notifyIcon.Visible = false;
-                cts.Cancel();
-                Application.Exit();
-            };
-
-            var exitItem = menu.Items.Add("退出托盘与服务 (Exit)");
+            var exitItem = menu.Items.Add("退出 MOMO API Proxy (Exit)");
             exitItem.Click += async (s, e) =>
             {
                 notifyIcon.Visible = false;
