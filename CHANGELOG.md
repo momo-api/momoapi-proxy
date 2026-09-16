@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.23 - 2026-09-16
+
+- Keep the latest user request authoritative across automatic and repeated local compaction, explicitly marking older user requests as historical background.
+- Raise the managed Codex auto-compaction threshold from 120K to 180K tokens and add an active-task handoff prompt, with a safe migration for existing MOMO-managed configurations.
+
 ## 0.13.22 - 2026-09-16
 
 - Restore the exact managed Windows tray after a healthy self-update or rollback when it was running before activation, while leaving an intentionally closed tray closed.
