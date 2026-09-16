@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.19 - 2026-09-16
+
+- Verify the expected proxy version independently when a Windows start command times out, so a healthy delayed startup is not rolled back.
+- Start staged and restored application trees directly instead of repeating a full restart, and report delayed healthy rollbacks accurately.
+
 ## 0.13.18 - 2026-09-15
 
 - Return bounded `upstream_timeout` errors for Cloudflare 524 responses instead of reflecting HTML diagnostic pages through Responses or Chat Completions.
