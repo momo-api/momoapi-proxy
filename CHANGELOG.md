@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.20 - 2026-09-16
+
+- Show the MOMO Image plugin's installed, enabled, and version state in the Windows tray, with a one-click install/repair action.
+- Verify plugin installation before the installer claims success, while keeping missing or older Codex installations non-fatal and providing an explicit repair command.
+
 ## 0.13.19 - 2026-09-16
 
 - Verify the expected proxy version independently when a Windows start command times out, so a healthy delayed startup is not rolled back.
