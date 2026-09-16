@@ -204,7 +204,13 @@ Write-Host "Taskbar System Tray Icon (Indigo M badge with Green Dot) is active."
 Write-Host "Codex CLI & ChatGPT Desktop have been configured with requires_openai_auth=false" -ForegroundColor Yellow
 Write-Host "Synced models are ready. Restart Codex App to use." -ForegroundColor Yellow
 if (-not $NoImagePlugin) {
-  Write-Host "MOMO Image plugin is installed automatically. Start a new Codex conversation to load it." -ForegroundColor Yellow
+  $pluginStatusOutput = & node "$bridgeBin" plugin status 2>&1
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "MOMO Image plugin is installed and enabled. Start a new Codex conversation to load it." -ForegroundColor Yellow
+  } else {
+    Write-Warning "MOMO Image plugin was not verified. The proxy is installed, but image tools may be unavailable."
+    Write-Host "Run 'momoapi plugin install' after installing or updating Codex, then start a new conversation." -ForegroundColor Yellow
+  }
 }
 Write-Host ""
 Write-Host "Health Status:" -ForegroundColor Cyan
