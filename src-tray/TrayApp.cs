@@ -147,27 +147,44 @@ namespace MomoApi.Tray
             var openPortal = menu.Items.Add("打开 MOMO 控制台 (momoapi.us)");
             openPortal.Click += (s, e) => Process.Start(new ProcessStartInfo("https://momoapi.us") { UseShellExecute = true });
 
-            var viewModels = menu.Items.Add("查看可用模型列表 (Models)");
+            var modelsMenu = new ToolStripMenuItem("模型与目录");
+            menu.Items.Add(modelsMenu);
+
+            var viewModels = modelsMenu.DropDownItems.Add("查看可用模型 (Models)");
             viewModels.Click += async (s, e) => await RunCliAsync("models", true);
 
-            var syncModels = menu.Items.Add("同步模型列表 (Sync)");
+            var syncModels = modelsMenu.DropDownItems.Add("同步模型目录 (Sync)");
             syncModels.Click += async (s, e) => await RunCliAsync("sync", true);
 
-            var runDoctor = menu.Items.Add("运行健康诊断 (Doctor)");
-            runDoctor.Click += async (s, e) => await RunCliAsync("doctor", true);
+            var imageMenu = new ToolStripMenuItem("MOMO Image 插件");
+            menu.Items.Add(imageMenu);
 
             pluginStatusItem = new ToolStripMenuItem("MOMO Image：正在检测...");
             pluginStatusItem.Enabled = false;
-            menu.Items.Add(pluginStatusItem);
+            imageMenu.DropDownItems.Add(pluginStatusItem);
+            imageMenu.DropDownItems.Add(new ToolStripSeparator());
 
-            var repairPlugin = menu.Items.Add("安装/修复 MOMO Image 插件");
+            var repairPlugin = imageMenu.DropDownItems.Add("安装或修复插件");
             repairPlugin.Click += async (s, e) =>
             {
                 await RunCliAsync("plugin install", true);
                 await RefreshPluginStatusAsync();
             };
 
-            var viewLogs = menu.Items.Add("查看代理日志 (Logs)");
+            var maintenanceMenu = new ToolStripMenuItem("代理维护");
+            menu.Items.Add(maintenanceMenu);
+
+            var restartService = maintenanceMenu.DropDownItems.Add("重启代理服务 (Restart)");
+            restartService.Click += async (s, e) =>
+            {
+                notifyIcon.ShowBalloonTip(2000, "MOMO API Proxy", "服务正在重启...", ToolTipIcon.Info);
+                await RestartBridgeAsync();
+            };
+
+            var runDoctor = maintenanceMenu.DropDownItems.Add("运行健康诊断 (Doctor)");
+            runDoctor.Click += async (s, e) => await RunCliAsync("doctor", true);
+
+            var viewLogs = maintenanceMenu.DropDownItems.Add("查看代理日志 (Logs)");
             viewLogs.Click += (s, e) =>
             {
                 string logFile = Path.Combine(proxyHome, "daemon.log");
@@ -183,23 +200,18 @@ namespace MomoApi.Tray
                 }
             };
 
-            menu.Items.Add(new ToolStripSeparator());
-
-            var restartService = menu.Items.Add("重启代理服务 (Restart)");
-            restartService.Click += async (s, e) =>
-            {
-                notifyIcon.ShowBalloonTip(2000, "MOMO API Proxy", "服务正在重启...", ToolTipIcon.Info);
-                await RestartBridgeAsync();
-            };
-
-            updateItem = (ToolStripMenuItem)menu.Items.Add("检查并更新版本 (Update)");
+            maintenanceMenu.DropDownItems.Add(new ToolStripSeparator());
+            updateItem = (ToolStripMenuItem)maintenanceMenu.DropDownItems.Add("检查并更新版本 (Update)");
             updateItem.Click += async (s, e) => await RunCliAsync("update", true);
+
+            var settingsMenu = new ToolStripMenuItem("设置");
+            menu.Items.Add(settingsMenu);
 
             autostartItem = new ToolStripMenuItem("托盘开机自动启动");
             autostartItem.CheckOnClick = true;
             autostartItem.Checked = CheckAutostart();
             autostartItem.Click += (s, e) => ToggleAutostart(autostartItem.Checked);
-            menu.Items.Add(autostartItem);
+            settingsMenu.DropDownItems.Add(autostartItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
