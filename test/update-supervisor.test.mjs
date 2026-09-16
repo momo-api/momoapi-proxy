@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isManagedImageMcpProcess, isManagedTrayProcess, startManagedTray, stopManagedImageMcpProcesses, superviseUpdate } from "../src/update-supervisor.mjs";
+import { isManagedImageMcpProcess, isManagedTrayProcess, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate } from "../src/update-supervisor.mjs";
 
 function createVersion(root, version) {
   mkdirSync(join(root, "bin"), { recursive: true });
@@ -100,6 +100,7 @@ test("staged Windows-style activation stops the old service before swapping dire
       rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.3", previousVersion: "0.13.2", port: 18789,
       env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
       runCli: (script, command) => { operations.push({ type: "cli", script, command }); return true; },
+      stopTrayProcesses: async () => { operations.push({ type: "tray" }); return [2345]; },
       stopMcpProcesses: async () => { operations.push({ type: "mcp" }); return [1234]; },
       move: (source, destination) => { operations.push({ type: "move", source, destination }); return renameSync(source, destination); },
       healthCheck: async ({ expectedVersion }) => expectedVersion === "0.13.3",
@@ -108,11 +109,12 @@ test("staged Windows-style activation stops the old service before swapping dire
     assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.3");
     assert.equal(JSON.parse(readFileSync(join(backup, "package.json"), "utf8")).version, "0.13.2");
     assert.equal(operations[0].command, "stop");
-    assert.equal(operations[1].type, "mcp");
-    assert.deepEqual(operations[2].command, ["plugin", "install"]);
-    assert.equal(operations[3].type, "move");
-    assert.equal(operations[5].command, "start");
-    assert.deepEqual(operations[6].command, ["plugin", "install"]);
+    assert.equal(operations[1].type, "tray");
+    assert.equal(operations[2].type, "mcp");
+    assert.deepEqual(operations[3].command, ["plugin", "install"]);
+    assert.equal(operations[4].type, "move");
+    assert.equal(operations[6].command, "start");
+    assert.deepEqual(operations[7].command, ["plugin", "install"]);
     assert.equal(result.activationMode, "swap");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -158,6 +160,35 @@ test("managed tray launch prefers the stable install path and passes the configu
   assert.deepEqual(calls[0].args, ["--port", "19001"]);
   assert.equal(calls[0].options.detached, true);
   assert.equal(unrefCalled, true);
+});
+
+test("managed tray shutdown terminates only exact installed tray paths", async () => {
+  const root = "C:\\Users\\test\\.momoapi-proxy\\app";
+  const terminated = [];
+  const waited = [];
+  const stopped = await stopManagedTrayProcesses(root, {
+    platform: "win32",
+    listProcesses: () => [
+      { ProcessId: 201, Name: "MomoApiProxyTray.exe", ExecutablePath: `${root}\\bin\\MomoApiProxyTray.exe` },
+      { ProcessId: 202, Name: "MomoApiProxyTray.exe", ExecutablePath: "C:\\Users\\test\\.momoapi-proxy\\bin\\MomoApiProxyTray.exe" },
+      { ProcessId: 203, Name: "MomoApiProxyTray.exe", ExecutablePath: "C:\\Temp\\MomoApiProxyTray.exe" },
+    ],
+    terminate: (pid) => terminated.push(pid),
+    waitForExit: async (pid) => { waited.push(pid); return true; },
+  });
+  assert.deepEqual(stopped, [201, 202]);
+  assert.deepEqual(terminated, [201, 202]);
+  assert.deepEqual(waited, [201, 202]);
+});
+
+test("managed tray shutdown fails closed when an exact installed tray remains alive", async () => {
+  const root = "C:\\Users\\test\\.momoapi-proxy\\app";
+  await assert.rejects(stopManagedTrayProcesses(root, {
+    platform: "win32",
+    listProcesses: () => [{ ProcessId: 201, Name: "MomoApiProxyTray.exe", ExecutablePath: `${root}\\bin\\MomoApiProxyTray.exe` }],
+    terminate: () => {},
+    waitForExit: async () => false,
+  }), (error) => error.code === "update_tray_stop_failed");
 });
 
 test("successful update restores a previously running tray only after health succeeds", async () => {
@@ -296,6 +327,37 @@ test("staged activation keeps the old tree and restores service when managed MCP
     const status = JSON.parse(readFileSync(join(home, "update-status.json"), "utf8"));
     assert.equal(status.status, "activation_failed");
     assert.equal(status.errorCode, "update_mcp_stop_failed");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("staged activation keeps the old tree and restores service when managed tray shutdown fails", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-tray-failure-"));
+  const root = join(home, "app");
+  const staging = join(home, ".momoapi-proxy-update-stage");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.22");
+  createVersion(staging, "0.13.23");
+  const commands = [];
+  let trayRestoreCalls = 0;
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.23", previousVersion: "0.13.22", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true, trayRunningCheck: () => true,
+      runCli: (_script, command) => { commands.push(command); return true; },
+      stopTrayProcesses: async () => { throw Object.assign(new Error("still running"), { code: "update_tray_stop_failed" }); },
+      healthCheck: async ({ expectedVersion }) => expectedVersion === "0.13.22",
+      startTray: () => { trayRestoreCalls += 1; return true; },
+    });
+    assert.deepEqual(result, { activated: false, rolledBack: false, restoredHealthy: true, errorCode: "update_tray_stop_failed" });
+    assert.deepEqual(commands, ["stop", "start"]);
+    assert.equal(trayRestoreCalls, 1);
+    assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.22");
+    assert.equal(JSON.parse(readFileSync(join(staging, "package.json"), "utf8")).version, "0.13.23");
+    const status = JSON.parse(readFileSync(join(home, "update-status.json"), "utf8"));
+    assert.equal(status.status, "activation_failed");
+    assert.equal(status.errorCode, "update_tray_stop_failed");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -208,6 +208,39 @@ export function isManagedTrayRunning(rootDir, {
   return listProcesses().some((entry) => isManagedTrayProcess(entry, rootDir));
 }
 
+export async function stopManagedTrayProcesses(rootDir, {
+  platform = process.platform,
+  listProcesses = () => {
+    const result = spawnSync("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-Command",
+      "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -in @('MomoApiProxyTray.exe','momoapi-tray.exe') } | Select-Object ProcessId,Name,ExecutablePath | ConvertTo-Json -Compress",
+    ], { encoding: "utf8", windowsHide: true, timeout: 10_000 });
+    if (result.status !== 0 || !result.stdout?.trim()) return [];
+    try {
+      const parsed = JSON.parse(result.stdout);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [];
+    }
+  },
+  terminate = (pid) => process.kill(pid, "SIGTERM"),
+  waitForExit = waitForProcessExit,
+} = {}) {
+  if (platform !== "win32") return [];
+  const matches = listProcesses().filter((entry) => isManagedTrayProcess(entry, rootDir));
+  const matchedPids = matches.map((entry) => Number(entry.ProcessId ?? entry.processId));
+  for (const pid of matchedPids) {
+    try { terminate(pid); } catch {}
+  }
+  const exitStates = await Promise.all(matchedPids.map((pid) => waitForExit(pid, 5_000)));
+  for (let index = 0; index < matchedPids.length; index += 1) {
+    if (!exitStates[index]) {
+      throw Object.assign(new Error(`Managed tray process ${matchedPids[index]} did not exit before the update.`), { code: "update_tray_stop_failed" });
+    }
+  }
+  return matchedPids;
+}
+
 export function startManagedTray(rootDir, port, {
   platform = process.platform,
   spawnImpl = spawn,
@@ -298,6 +331,7 @@ export async function superviseUpdate({
   remove = (target) => rmSync(target, { recursive: true, force: true }),
   retry = retryFileOperation,
   stopMcpProcesses = stopManagedImageMcpProcesses,
+  stopTrayProcesses = stopManagedTrayProcesses,
   pathExists = existsSync,
   copyContents = copyDirectoryContents,
   replaceContents = replaceDirectoryContents,
@@ -324,6 +358,25 @@ export async function superviseUpdate({
     validateStagedLayout({ rootDir, stagingDir, backupDir });
     appendSupervisorLog(`Stopping proxy v${previousVersion} before activating v${targetVersion}.`, env);
     if (pathExists(newScript)) runCli(newScript, "stop", 30_000);
+    try {
+      const stoppedTrayPids = await stopTrayProcesses(rootDir);
+      if (stoppedTrayPids.length) appendSupervisorLog(`Stopped ${stoppedTrayPids.length} managed tray process(es) before replacing the application tree.`, env);
+    } catch (error) {
+      const restoredHealthy = pathExists(newScript)
+        ? (await runCliThenCheckHealth({
+            runCli, scriptPath: newScript, command: "start", healthCheck, port, expectedVersion: previousVersion,
+            phase: `Restoring proxy v${previousVersion}`, env,
+          })).healthy
+        : false;
+      writeSupervisorStatus({
+        status: "activation_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
+        hasUpdate: true, checkFailed: true, rolledBack: false,
+        errorCode: error?.code || "update_tray_stop_failed",
+      }, env);
+      appendSupervisorLog(`Stopping managed tray processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+      restoreTray(restoredHealthy, "the interrupted activation");
+      return { activated: false, rolledBack: false, restoredHealthy, errorCode: error?.code || "update_tray_stop_failed" };
+    }
     try {
       const stoppedMcpPids = await stopMcpProcesses(rootDir);
       if (stoppedMcpPids.length) appendSupervisorLog(`Stopped ${stoppedMcpPids.length} managed image MCP process(es) that referenced the old application tree.`, env);
