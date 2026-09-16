@@ -128,7 +128,43 @@ function runProxyCli(scriptPath, commandArgs, timeoutMs = 30_000) {
     windowsHide: true,
     timeout: timeoutMs,
   });
-  return result.status === 0 && !result.error;
+  const ok = result.status === 0 && !result.error;
+  return {
+    ok,
+    errorCode: ok
+      ? null
+      : (result.error?.code || (result.signal ? `signal_${result.signal}` : `exit_${result.status ?? "unknown"}`)),
+  };
+}
+
+function cliRunSucceeded(result) {
+  return result === true || Boolean(result && typeof result === "object" && result.ok === true);
+}
+
+function cliRunErrorCode(result) {
+  const raw = result && typeof result === "object" ? result.errorCode : null;
+  const normalized = String(raw || "command_failed").replace(/[^a-zA-Z0-9_.-]/g, "_");
+  return normalized.slice(0, 80) || "command_failed";
+}
+
+async function runCliThenCheckHealth({
+  runCli, scriptPath, command, timeoutMs, healthCheck, port, expectedVersion, phase, env,
+}) {
+  let commandResult;
+  try {
+    commandResult = runCli(scriptPath, command, timeoutMs);
+  } catch (error) {
+    commandResult = { ok: false, errorCode: error?.code || error?.name || "command_threw" };
+  }
+  const commandSucceeded = cliRunSucceeded(commandResult);
+  if (!commandSucceeded) {
+    appendSupervisorLog(`${phase} command did not complete successfully (${cliRunErrorCode(commandResult)}); checking the service health independently.`, env);
+  }
+  const healthy = await healthCheck({ port, expectedVersion });
+  if (healthy && !commandSucceeded) {
+    appendSupervisorLog(`${phase} reached the expected healthy version despite the command failure or timeout.`, env);
+  }
+  return { commandSucceeded, healthy };
 }
 
 function normalizedWindowsPath(value) {
@@ -222,8 +258,12 @@ export async function superviseUpdate({
       const stoppedMcpPids = await stopMcpProcesses(rootDir);
       if (stoppedMcpPids.length) appendSupervisorLog(`Stopped ${stoppedMcpPids.length} managed image MCP process(es) that referenced the old application tree.`, env);
     } catch (error) {
-      const restarted = pathExists(newScript) && runCli(newScript, "start");
-      const restoredHealthy = restarted && await healthCheck({ port, expectedVersion: previousVersion });
+      const restoredHealthy = pathExists(newScript)
+        ? (await runCliThenCheckHealth({
+            runCli, scriptPath: newScript, command: "start", healthCheck, port, expectedVersion: previousVersion,
+            phase: `Restoring proxy v${previousVersion}`, env,
+          })).healthy
+        : false;
       writeSupervisorStatus({
         status: "activation_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
         hasUpdate: true, checkFailed: true, rolledBack: false,
@@ -234,7 +274,8 @@ export async function superviseUpdate({
     }
     if (installImagePlugin) {
       const stagedScript = join(stagingDir, "bin", "momoapi-proxy.mjs");
-      const marketplaceMigrated = pathExists(stagedScript) && runCli(stagedScript, ["plugin", "install"], 120_000);
+      const marketplaceMigrated = pathExists(stagedScript)
+        && cliRunSucceeded(runCli(stagedScript, ["plugin", "install"], 120_000));
       appendSupervisorLog(marketplaceMigrated
         ? "Moved the MOMO Image marketplace outside the application tree before activation."
         : "The MOMO Image marketplace pre-activation migration was unavailable; activation will continue with rollback protection.", env);
@@ -284,8 +325,12 @@ export async function superviseUpdate({
             appendSupervisorLog(`Restoring the in-place update backup failed: ${restoreError?.code || restoreError?.name || "unknown_error"}.`, env);
           }
           const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
-          const restarted = restoredTreeContents && pathExists(restoredScript) && runCli(restoredScript, "start");
-          const restoredHealthy = restarted && await healthCheck({ port, expectedVersion: previousVersion });
+          const restoredHealthy = restoredTreeContents && pathExists(restoredScript)
+            ? (await runCliThenCheckHealth({
+                runCli, scriptPath: restoredScript, command: "start", healthCheck, port, expectedVersion: previousVersion,
+                phase: `Restoring proxy v${previousVersion}`, env,
+              })).healthy
+            : false;
           writeSupervisorStatus({
             status: restoredHealthy ? "rolled_back" : "rollback_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
             hasUpdate: true, checkFailed: true, rolledBack: restoredTreeContents,
@@ -299,8 +344,12 @@ export async function superviseUpdate({
         }
       } else {
         const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
-        const restarted = restoredTree && pathExists(restoredScript) && runCli(restoredScript, "start");
-        const restoredHealthy = restarted && await healthCheck({ port, expectedVersion: previousVersion });
+        const restoredHealthy = restoredTree && pathExists(restoredScript)
+          ? (await runCliThenCheckHealth({
+              runCli, scriptPath: restoredScript, command: "start", healthCheck, port, expectedVersion: previousVersion,
+              phase: `Restoring proxy v${previousVersion}`, env,
+            })).healthy
+          : false;
         writeSupervisorStatus({
           status: restoredHealthy ? "rolled_back" : "rollback_failed", current: previousVersion, latest: targetVersion, previous: previousVersion,
           hasUpdate: true, checkFailed: true, rolledBack: restoredTree,
@@ -316,10 +365,15 @@ export async function superviseUpdate({
   }
 
   appendSupervisorLog(`Activating proxy v${targetVersion}.`, env);
-  const restarted = runCli(newScript, "restart");
-  const healthy = restarted && await healthCheck({ port, expectedVersion: targetVersion });
+  const activationCommand = stagedActivation ? "start" : "restart";
+  const { commandSucceeded: activationCommandSucceeded, healthy } = await runCliThenCheckHealth({
+    runCli, scriptPath: newScript, command: activationCommand, healthCheck, port, expectedVersion: targetVersion,
+    phase: `Activating proxy v${targetVersion}`, env,
+  });
   if (healthy) {
-    const imagePluginInstalled = installImagePlugin ? runCli(newScript, ["plugin", "install"], 120_000) : false;
+    const imagePluginInstalled = installImagePlugin
+      ? cliRunSucceeded(runCli(newScript, ["plugin", "install"], 120_000))
+      : false;
     writeSupervisorStatus({
       status: "active",
       current: targetVersion,
@@ -330,6 +384,7 @@ export async function superviseUpdate({
       rolledBack: false,
       imagePluginInstalled,
       activationMode,
+      activationCommandSucceeded,
     }, env);
     appendSupervisorLog(`Proxy v${targetVersion} passed health verification.`, env);
     appendSupervisorLog(imagePluginInstalled
@@ -352,8 +407,12 @@ export async function superviseUpdate({
       appendSupervisorLog(`In-place health rollback failed: ${error?.code || error?.name || "unknown_error"}.`, env);
     }
     const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
-    const restored = restoredTree && runCli(restoredScript, "restart");
-    const restoredHealthy = restored && await healthCheck({ port, expectedVersion: previousVersion });
+    const restoredHealthy = restoredTree
+      ? (await runCliThenCheckHealth({
+          runCli, scriptPath: restoredScript, command: "start", healthCheck, port, expectedVersion: previousVersion,
+          phase: `Rolling back to proxy v${previousVersion}`, env,
+        })).healthy
+      : false;
     writeSupervisorStatus({
       status: restoredHealthy ? "rolled_back" : "rollback_failed",
       current: previousVersion, latest: targetVersion, previous: previousVersion,
@@ -393,8 +452,10 @@ export async function superviseUpdate({
   }
 
   const restoredScript = join(rootDir, "bin", "momoapi-proxy.mjs");
-  const restored = runCli(restoredScript, "restart");
-  const restoredHealthy = restored && await healthCheck({ port, expectedVersion: previousVersion });
+  const { healthy: restoredHealthy } = await runCliThenCheckHealth({
+    runCli, scriptPath: restoredScript, command: "start", healthCheck, port, expectedVersion: previousVersion,
+    phase: `Rolling back to proxy v${previousVersion}`, env,
+  });
   writeSupervisorStatus({
     status: restoredHealthy ? "rolled_back" : "rollback_failed",
     current: previousVersion,
