@@ -318,7 +318,7 @@ async function main() {
   } else if (command === "serve") {
     try {
       const migration = migrateManagedCompactionConfig();
-      if (migration.changed) console.log("Updated managed Codex compaction continuity settings. Start a new conversation to use them.");
+      if (migration.changed) console.log("Removed legacy MOMO Codex compaction overrides. Start a new conversation to use the Codex defaults.");
     } catch (error) {
       console.warn("Managed Codex compaction settings could not be updated:", error.message);
     }
