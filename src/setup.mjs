@@ -10,7 +10,8 @@ import { installImagePlugin as installBundledImagePlugin } from "./plugin-instal
 
 export const MARKER = "# MOMOAPI_PROXY_MANAGED";
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free"]);
-const CODEX_COMPACT_PROMPT = "You are compacting an active Codex session. Produce a task handoff, not a replay of the previous assistant answer. Always preserve the latest user request as CURRENT ACTIVE TASK, distinguish already resolved historical issues from pending work, record current-turn progress and pending tool calls/results, preserve governing constraints, and state the next action. Never omit the latest user request when compaction occurs during a tool-using turn. Do not treat older user questions as active unless the latest request explicitly reopens them.";
+const LEGACY_MOMO_COMPACT_PROMPT = "You are compacting an active Codex session. Produce a task handoff, not a replay of the previous assistant answer. Always preserve the latest user request as CURRENT ACTIVE TASK, distinguish already resolved historical issues from pending work, record current-turn progress and pending tool calls/results, preserve governing constraints, and state the next action. Never omit the latest user request when compaction occurs during a tool-using turn. Do not treat older user questions as active unless the latest request explicitly reopens them.";
+const LEGACY_MOMO_COMPACT_PROMPT_LINE = "compact_prompt = " + JSON.stringify(LEGACY_MOMO_COMPACT_PROMPT);
 
 function authPath(env) { return join(codexHome(env), "auth.json"); }
 function configPath(env) { return join(codexHome(env), "config.toml"); }
@@ -57,6 +58,9 @@ export function cleanConfigToml(content) {
     if (inMomoSection) {
       continue;
     }
+    if (trimmed === LEGACY_MOMO_COMPACT_PROMPT_LINE) {
+      continue;
+    }
     if (
       trimmed.startsWith("model_provider =") ||
       trimmed.startsWith("model =") ||
@@ -65,7 +69,6 @@ export function cleanConfigToml(content) {
       trimmed.startsWith("model_context_window =") ||
       trimmed.startsWith("model_auto_compact_token_limit =") ||
       trimmed.startsWith("model_auto_compact_token_limit_scope =") ||
-      trimmed.startsWith("compact_prompt =") ||
       trimmed.startsWith("disable_response_storage =")
     ) {
       continue;
@@ -82,7 +85,6 @@ function managedConfig(catalog, port, defaultModel) {
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +
     'model_catalog_json = "' + catalog.replace(/\\/g, "/") + '"\n' +
-    'compact_prompt = ' + JSON.stringify(CODEX_COMPACT_PROMPT) + '\n' +
     'disable_response_storage = false\n\n' +
     '[model_providers.momoapi-proxy]\n' +
     'name = "MOMO API Proxy"\n' +
@@ -111,15 +113,10 @@ export function migrateManagedCompactionConfig(env = process.env) {
   ).replace(
     /^model_auto_compact_token_limit_scope\s*=\s*"body_after_prefix"\s*\r?\n?/m,
     "",
+  ).replace(
+    new RegExp("^" + LEGACY_MOMO_COMPACT_PROMPT_LINE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\r?\\n?", "m"),
+    "",
   );
-  if (!/^compact_prompt\s*=/m.test(updated)) {
-    const promptLine = 'compact_prompt = ' + JSON.stringify(CODEX_COMPACT_PROMPT);
-    if (/^disable_response_storage\s*=/m.test(updated)) {
-      updated = updated.replace(/^disable_response_storage\s*=/m, promptLine + "\n" + "disable_response_storage =");
-    } else {
-      updated = updated.replace(/\s*$/, "\n" + promptLine + "\n");
-    }
-  }
   if (updated === original) return { changed: false, reason: "current" };
   writeFileSync(target, updated);
   return { changed: true, reason: "migrated" };

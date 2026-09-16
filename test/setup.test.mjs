@@ -12,7 +12,7 @@ test("setup writes a local provider configuration and rollback restores it", asy
   const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex"), MOMO_SWITCH_HOME: join(root, ".switch"), MOMO_BRIDGE_HOME: join(root, ".bridge") };
   const config = join(env.CODEX_HOME, "config.toml");
   await import("node:fs/promises").then(({ mkdir }) => mkdir(env.CODEX_HOME, { recursive: true }));
-  writeFileSync(config, "model = \"old-model\"\n");
+  writeFileSync(config, 'model = "old-model"\ncompact_prompt = "my own compact rules"\n');
   const fakeFetch = async () => new Response(JSON.stringify({ data: [{ id: "gemini-3.7-flash", agent_status: "stable" }] }), { status: 200, headers: { "content-type": "application/json" } });
   try {
     const result = await setup({ apiKey: "momo-secret", endpoint: "https://gateway.example", port: 19999, imagePlugin: false, fetchImpl: fakeFetch, env });
@@ -26,7 +26,8 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.match(written, /requires_openai_auth = false/);
     assert.doesNotMatch(written, /model_context_window/);
     assert.doesNotMatch(written, /model_auto_compact_token_limit/);
-    assert.match(written, /compact_prompt = ".*CURRENT ACTIVE TASK.*latest user request.*"/);
+    assert.doesNotMatch(written, /CURRENT ACTIVE TASK/);
+    assert.match(written, /compact_prompt = "my own compact rules"/);
     assert.match(written, /MOMOAPI_PROXY_MANAGED/);
     const catalogText = readFileSync(result.catalog, "utf8");
     assert.match(catalogText, /gemini-3\.7-flash/);
@@ -40,7 +41,7 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.equal("installationId" in settings, false);
     assert.equal(isAutostartInstalled(process.platform, env), true);
     assert.deepEqual(rollback(env), [result.config]);
-    assert.equal(readFileSync(config, "utf8"), "model = \"old-model\"\n");
+    assert.equal(readFileSync(config, "utf8"), 'model = "old-model"\ncompact_prompt = "my own compact rules"\n');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -56,6 +57,7 @@ test("managed compaction migration removes only previous MOMO threshold override
       "model_context_window = 272000",
       "model_auto_compact_token_limit = 120000",
       'model_auto_compact_token_limit_scope = "body_after_prefix"',
+      'compact_prompt = "You are compacting an active Codex session. Produce a task handoff, not a replay of the previous assistant answer. Always preserve the latest user request as CURRENT ACTIVE TASK, distinguish already resolved historical issues from pending work, record current-turn progress and pending tool calls/results, preserve governing constraints, and state the next action. Never omit the latest user request when compaction occurs during a tool-using turn. Do not treat older user questions as active unless the latest request explicitly reopens them."',
       "disable_response_storage = false",
       "",
     ].join("\n"));
@@ -63,16 +65,17 @@ test("managed compaction migration removes only previous MOMO threshold override
     const migrated = readFileSync(config, "utf8");
     assert.doesNotMatch(migrated, /model_context_window/);
     assert.doesNotMatch(migrated, /model_auto_compact_token_limit/);
-    assert.match(migrated, /compact_prompt = ".*CURRENT ACTIVE TASK.*"/);
+    assert.doesNotMatch(migrated, /compact_prompt/);
     assert.deepEqual(migrateManagedCompactionConfig(env), { changed: false, reason: "current" });
 
     writeFileSync(config, "# user config\nmodel_auto_compact_token_limit = 120000\n");
     assert.deepEqual(migrateManagedCompactionConfig(env), { changed: false, reason: "unmanaged" });
     assert.doesNotMatch(readFileSync(config, "utf8"), /compact_prompt/);
 
-    writeFileSync(config, "# MOMOAPI_PROXY_MANAGED\nmodel_auto_compact_token_limit = 210000\n");
-    assert.deepEqual(migrateManagedCompactionConfig(env), { changed: true, reason: "migrated" });
+    writeFileSync(config, '# MOMOAPI_PROXY_MANAGED\nmodel_auto_compact_token_limit = 210000\ncompact_prompt = "user-owned prompt"\n');
+    assert.deepEqual(migrateManagedCompactionConfig(env), { changed: false, reason: "current" });
     assert.match(readFileSync(config, "utf8"), /model_auto_compact_token_limit = 210000/);
+    assert.match(readFileSync(config, "utf8"), /compact_prompt = "user-owned prompt"/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
