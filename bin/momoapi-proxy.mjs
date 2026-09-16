@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
 import { readSettings, resolveSettings, appHome } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
-import { rollback, setup, uninstall } from "../src/setup.mjs";
+import { migrateManagedCompactionConfig, rollback, setup, uninstall } from "../src/setup.mjs";
 import { readCatalog } from "../src/catalog.mjs";
 import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
@@ -316,6 +316,12 @@ async function main() {
     await startDaemon(binFile, scriptDir, port);
     console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
   } else if (command === "serve") {
+    try {
+      const migration = migrateManagedCompactionConfig();
+      if (migration.changed) console.log("Updated managed Codex compaction continuity settings. Start a new conversation to use them.");
+    } catch (error) {
+      console.warn("Managed Codex compaction settings could not be updated:", error.message);
+    }
     const settings = resolveSettings();
     const loggingRuntime = createLoggingRuntime({ settings, diagnosticsEnabled: settings.diagnosticsEnabled });
     configureLoggingRuntime(loggingRuntime);
