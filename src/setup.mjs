@@ -10,8 +10,6 @@ import { installImagePlugin as installBundledImagePlugin } from "./plugin-instal
 
 export const MARKER = "# MOMOAPI_PROXY_MANAGED";
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free"]);
-const CODEX_CONTEXT_WINDOW = 272000;
-const CODEX_AUTO_COMPACT_TOKEN_LIMIT = 180000;
 const CODEX_COMPACT_PROMPT = "You are compacting an active Codex session. Produce a task handoff, not a replay of the previous assistant answer. Always preserve the latest user request as CURRENT ACTIVE TASK, distinguish already resolved historical issues from pending work, record current-turn progress and pending tool calls/results, preserve governing constraints, and state the next action. Never omit the latest user request when compaction occurs during a tool-using turn. Do not treat older user questions as active unless the latest request explicitly reopens them.";
 
 function authPath(env) { return join(codexHome(env), "auth.json"); }
@@ -84,9 +82,6 @@ function managedConfig(catalog, port, defaultModel) {
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +
     'model_catalog_json = "' + catalog.replace(/\\/g, "/") + '"\n' +
-    'model_context_window = ' + CODEX_CONTEXT_WINDOW + '\n' +
-    'model_auto_compact_token_limit = ' + CODEX_AUTO_COMPACT_TOKEN_LIMIT + '\n' +
-    'model_auto_compact_token_limit_scope = "body_after_prefix"\n' +
     'compact_prompt = ' + JSON.stringify(CODEX_COMPACT_PROMPT) + '\n' +
     'disable_response_storage = false\n\n' +
     '[model_providers.momoapi-proxy]\n' +
@@ -108,15 +103,18 @@ export function migrateManagedCompactionConfig(env = process.env) {
   if (!original.includes(MARKER)) return { changed: false, reason: "unmanaged" };
 
   let updated = original.replace(
-    /^model_auto_compact_token_limit\s*=\s*120000\s*$/m,
-    "model_auto_compact_token_limit = " + CODEX_AUTO_COMPACT_TOKEN_LIMIT,
+    /^model_context_window\s*=\s*272000\s*\r?\n?/m,
+    "",
+  ).replace(
+    /^model_auto_compact_token_limit\s*=\s*(?:120000|180000)\s*\r?\n?/m,
+    "",
+  ).replace(
+    /^model_auto_compact_token_limit_scope\s*=\s*"body_after_prefix"\s*\r?\n?/m,
+    "",
   );
   if (!/^compact_prompt\s*=/m.test(updated)) {
-    const anchor = /^model_auto_compact_token_limit_scope\s*=.*$/m;
     const promptLine = 'compact_prompt = ' + JSON.stringify(CODEX_COMPACT_PROMPT);
-    if (anchor.test(updated)) {
-      updated = updated.replace(anchor, (line) => line + "\n" + promptLine);
-    } else if (/^disable_response_storage\s*=/m.test(updated)) {
+    if (/^disable_response_storage\s*=/m.test(updated)) {
       updated = updated.replace(/^disable_response_storage\s*=/m, promptLine + "\n" + "disable_response_storage =");
     } else {
       updated = updated.replace(/\s*$/, "\n" + promptLine + "\n");

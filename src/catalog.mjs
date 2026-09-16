@@ -113,7 +113,6 @@ function getBundledTemplate() {
     priority: 100,
     context_window: 272000,
     max_context_window: 872000,
-    auto_compact_token_limit: 180000,
     effective_context_window_percent: 95,
     tool_mode: "code_mode_only",
     support_verbosity: true,
@@ -236,6 +235,9 @@ export function buildCatalog(models, { includeDesktopAliases = true } = {}) {
       priority: 100 + index * 10,
       context_window: model.context_window || template.context_window || 272000,
       max_context_window: model.max_context_window || template.max_context_window || 872000,
+      ...(Number.isFinite(Number(model.auto_compact_token_limit ?? model.autoCompactTokenLimit))
+        ? { auto_compact_token_limit: Number(model.auto_compact_token_limit ?? model.autoCompactTokenLimit) }
+        : {}),
       tool_mode: "code_mode_only",
       supported_in_api: true,
       availability_nux: null,
