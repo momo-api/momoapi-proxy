@@ -111,7 +111,7 @@ test("staged Windows-style activation stops the old service before swapping dire
     assert.equal(operations[1].type, "mcp");
     assert.deepEqual(operations[2].command, ["plugin", "install"]);
     assert.equal(operations[3].type, "move");
-    assert.equal(operations[5].command, "restart");
+    assert.equal(operations[5].command, "start");
     assert.deepEqual(operations[6].command, ["plugin", "install"]);
     assert.equal(result.activationMode, "swap");
   } finally {
@@ -222,7 +222,7 @@ test("staged activation falls back to transactional in-place replacement when di
         return renameSync(source, destination);
       },
     });
-    assert.deepEqual(commands.map(({ command }) => command), ["stop", ["plugin", "install"], "restart", ["plugin", "install"]]);
+    assert.deepEqual(commands.map(({ command }) => command), ["stop", ["plugin", "install"], "start", ["plugin", "install"]]);
     assert.equal(result.activated, true);
     assert.equal(result.rolledBack, false);
     assert.equal(result.activationMode, "inplace");
@@ -303,9 +303,74 @@ test("transactional in-place activation restores the backup when target health f
     assert.equal(result.restoredHealthy, true);
     assert.equal(result.errorCode, "update_activation_failed");
     assert.deepEqual(healthVersions, ["0.13.5", "0.13.4"]);
-    assert.deepEqual(commands, ["stop", ["plugin", "install"], "restart", "stop", "restart"]);
+    assert.deepEqual(commands, ["stop", ["plugin", "install"], "start", "stop", "start"]);
     assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.4");
     assert.equal(JSON.parse(readFileSync(join(home, "update-status.json"), "utf8")).status, "rolled_back");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("staged activation accepts matching health after the start command times out", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-start-timeout-"));
+  const root = join(home, "app");
+  const staging = join(home, ".momoapi-proxy-update-stage");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.10.2");
+  createVersion(staging, "0.13.18");
+  const healthVersions = [];
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.18", previousVersion: "0.10.2", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
+      runCli: (_script, command) => command === "start"
+        ? { ok: false, errorCode: "ETIMEDOUT" }
+        : { ok: true, errorCode: null },
+      healthCheck: async ({ expectedVersion }) => { healthVersions.push(expectedVersion); return expectedVersion === "0.13.18"; },
+    });
+    assert.equal(result.activated, true);
+    assert.equal(result.activationMode, "swap");
+    assert.deepEqual(healthVersions, ["0.13.18"]);
+    const status = JSON.parse(readFileSync(join(home, "update-status.json"), "utf8"));
+    assert.equal(status.status, "active");
+    assert.equal(status.current, "0.13.18");
+    assert.equal(status.activationCommandSucceeded, false);
+    const log = readFileSync(join(home, "update-supervisor.log"), "utf8");
+    assert.match(log, /ETIMEDOUT/);
+    assert.match(log, /expected healthy version despite the command failure or timeout/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("rollback accepts delayed previous-version health after its start command times out", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-rollback-timeout-"));
+  const root = join(home, "app");
+  const staging = join(home, ".momoapi-proxy-update-stage");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.10.2");
+  createVersion(staging, "0.13.18");
+  const healthVersions = [];
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.18", previousVersion: "0.10.2", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
+      runCli: (_script, command) => command === "start"
+        ? { ok: false, errorCode: "ETIMEDOUT" }
+        : { ok: true, errorCode: null },
+      healthCheck: async ({ expectedVersion }) => {
+        healthVersions.push(expectedVersion);
+        return expectedVersion === "0.10.2";
+      },
+    });
+    assert.equal(result.activated, false);
+    assert.equal(result.rolledBack, true);
+    assert.equal(result.restoredHealthy, true);
+    assert.equal(result.errorCode, "update_activation_failed");
+    assert.deepEqual(healthVersions, ["0.13.18", "0.10.2"]);
+    const status = JSON.parse(readFileSync(join(home, "update-status.json"), "utf8"));
+    assert.equal(status.status, "rolled_back");
+    assert.equal(status.checkFailed, false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
