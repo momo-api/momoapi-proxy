@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.25 - 2026-09-16
+
 - Stop overriding Codex's built-in history compaction prompt. New installations use the native Codex prompt, startup migration removes only the exact legacy MOMO prompt, and user-defined `compact_prompt` values remain untouched.
 
 ## 0.13.24 - 2026-09-16
