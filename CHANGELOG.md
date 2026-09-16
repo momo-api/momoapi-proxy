@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.13.21 - 2026-09-16
+
+- Remove the ambiguous tray-only exit command and keep one explicit exit action that shuts down both the tray and the local proxy service.
+
 ## 0.13.20 - 2026-09-16
 
 - Show the MOMO Image plugin's installed, enabled, and version state in the Windows tray, with a one-click install/repair action.
