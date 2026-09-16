@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.24 - 2026-09-16
+
 - Stop overriding Codex's model context window and automatic compaction threshold. New and migrated MOMO-managed configurations now use each model's native Codex defaults, while retaining the active-task handoff prompt and any explicit per-model limit supplied by the upstream catalog.
 
 ## 0.13.23 - 2026-09-16
