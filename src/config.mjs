@@ -42,6 +42,30 @@ export function newLocalToken() {
   return randomBytes(32).toString("base64url");
 }
 
+export function daemonEnvironment(env = process.env) {
+  const sanitized = { ...env };
+  // Command-scoped overrides are useful for setup and diagnostics, but a
+  // detached daemon must use the persisted installation settings. Otherwise
+  // a terminal (or Codex) with a temporary endpoint/port override can poison
+  // every request until the service is manually reinstalled or restarted.
+  let saved = {};
+  try { saved = readSettings(env); } catch {}
+  const persistedOverrides = [
+    [Boolean(saved.endpoint), ["MOMO_API_ENDPOINT", "MOMO_ENDPOINT"]],
+    [saved.port !== undefined && saved.port !== null, ["MOMO_BRIDGE_PORT", "MOMO_SWITCH_PORT"]],
+    [Boolean(saved.localToken), ["MOMO_BRIDGE_TOKEN", "MOMO_SWITCH_TOKEN"]],
+  ];
+  for (const [persisted, names] of persistedOverrides) {
+    if (!persisted) continue;
+    for (const name of names) delete sanitized[name];
+  }
+  return sanitized;
+}
+
+export function resolveDaemonSettings(env = process.env) {
+  return resolveSettings(daemonEnvironment(env));
+}
+
 export function resolveSettings(env = process.env) {
   const saved = readSettings(env);
   const updateMode = saved.updateMode === "notify" ? "notify" : "automatic";

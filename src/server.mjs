@@ -48,7 +48,7 @@ import { asArray, authorized, json, openCodeUpstreamHeaders, upstreamHeaders, wr
 import { isChatCompletionsRoute, isCompactRoute, isModelsRoute, isResponsesRoute } from "./route-dispatch.mjs";
 import { resolveTargetModel as resolveModelRoute } from "./model-routing.mjs";
 import { contextLogFields, recordContextTrace as applyContextTrace } from "./context-trace.mjs";
-import { isAuthorizedLoopbackRequest, localRequestToken } from "./internal-auth.mjs";
+import { isAuthorizedLoopbackRequest, isLoopbackAddress, localRequestToken } from "./internal-auth.mjs";
 import { commitProviderRoute, observeProviderRoute } from "./provider-switch-state.mjs";
 
 export const metricsState = {
@@ -816,6 +816,35 @@ export function createMomoSwitch(settings, options = {}) {
         }
         logRequest({ method: "GET", url: pathname, status: 200, elapsedMs: Date.now() - t0, ip: remoteIp });
         return json(response, 200, { ok: true, service: "momo-codex-bridge", version: getCurrentVersion(), host: settings.host, port: settings.port });
+      }
+
+      // Update activation readiness: unlike /healthz, this proves that the
+      // newly started daemon can reach the configured authenticated upstream.
+      // Keep the response generic and loopback-only; never expose credentials
+      // or upstream response bodies.
+      if (request.method === "GET" && pathname === "/readyz") {
+        if (!isLoopbackAddress(remoteIp)) {
+          return json(response, 403, { ok: false, status: "forbidden" });
+        }
+        if (metricsState.isDraining) {
+          return json(response, 503, { ok: false, status: "draining", service: "momo-codex-bridge", version: getCurrentVersion() });
+        }
+        try {
+          const upstream = await fetchImpl(settings.endpoint + "/v1/models", {
+            headers: upstreamHeaders(settings),
+            signal: typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+              ? AbortSignal.timeout(3_000)
+              : undefined,
+          });
+          try { await upstream.body?.cancel(); } catch {}
+          // Any HTTP response proves that DNS/TLS/network routing works. A
+          // transient upstream 4xx/5xx is not caused by the installed tree and
+          // rolling back cannot repair it. The regression guarded here is a
+          // transport-level fetch failure inherited during daemon activation.
+          return json(response, 200, { ok: true, status: "ready", service: "momo-codex-bridge", version: getCurrentVersion() });
+        } catch {
+          return json(response, 503, { ok: false, status: "upstream_unreachable", service: "momo-codex-bridge", version: getCurrentVersion() });
+        }
       }
 
       // 2. internal shutdown

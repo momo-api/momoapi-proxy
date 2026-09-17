@@ -7,7 +7,7 @@ const WINDOW = 500;
 // Fixed labels only: never retain a URL/query, model, token, body or tool ID.
 export function requestMetricGroup(method, pathname) {
   if (method === "OPTIONS") return "other";
-  if (method === "GET" && ["/health", "/healthz"].includes(pathname)) return "health";
+  if (method === "GET" && ["/health", "/healthz", "/readyz"].includes(pathname)) return "health";
   if (pathname === "/internal/images" || pathname.startsWith("/internal/images/")) return "image";
   if (pathname.startsWith("/internal/")) return "control";
   if ((method === "GET" && ["/models", "/v1/models"].includes(pathname))

@@ -102,13 +102,14 @@ export async function waitForProcessExit(pid, timeoutMs = 30_000) {
   return false;
 }
 
-export async function waitForExpectedHealth({ port, expectedVersion, timeoutMs = 15_000, fetchImpl = fetch } = {}) {
+export async function waitForExpectedHealth({ port, expectedVersion, requireUpstream = false, timeoutMs = 30_000, fetchImpl = fetch } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const response = await fetchImpl(`http://127.0.0.1:${port}/healthz`, {
+      const route = requireUpstream ? "/readyz" : "/healthz";
+      const response = await fetchImpl(`http://127.0.0.1:${port}${route}`, {
         signal: typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-          ? AbortSignal.timeout(1_000)
+          ? AbortSignal.timeout(requireUpstream ? 5_000 : 1_000)
           : undefined,
       });
       if (response.ok) {
@@ -148,7 +149,7 @@ function cliRunErrorCode(result) {
 }
 
 async function runCliThenCheckHealth({
-  runCli, scriptPath, command, timeoutMs, healthCheck, port, expectedVersion, phase, env,
+  runCli, scriptPath, command, timeoutMs, healthCheck, port, expectedVersion, requireUpstream = false, phase, env,
 }) {
   let commandResult;
   try {
@@ -160,7 +161,7 @@ async function runCliThenCheckHealth({
   if (!commandSucceeded) {
     appendSupervisorLog(`${phase} command did not complete successfully (${cliRunErrorCode(commandResult)}); checking the service health independently.`, env);
   }
-  const healthy = await healthCheck({ port, expectedVersion });
+  const healthy = await healthCheck({ port, expectedVersion, requireUpstream });
   if (healthy && !commandSucceeded) {
     appendSupervisorLog(`${phase} reached the expected healthy version despite the command failure or timeout.`, env);
   }
@@ -494,6 +495,7 @@ export async function superviseUpdate({
   const activationCommand = stagedActivation ? "start" : "restart";
   const { commandSucceeded: activationCommandSucceeded, healthy } = await runCliThenCheckHealth({
     runCli, scriptPath: newScript, command: activationCommand, healthCheck, port, expectedVersion: targetVersion,
+    requireUpstream: true,
     phase: `Activating proxy v${targetVersion}`, env,
   });
   if (healthy) {
