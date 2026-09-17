@@ -60,7 +60,7 @@ test("local checkpoint retains exact required groups with two full-body measurem
   const dynamic = { type: "additional_tools", tools: [{ type: "custom", name: "dynamic" }] };
   const history = [{ role: "system", content: "constraint" }, { role: "developer", content: "more constraints" }, dynamic, { role: "user", content: "original task" }, ...Array.from({ length: 128 }, () => ({ role: "assistant", content: "x".repeat(65536) })), { ...call, call_id: "done" }, result, call];
   const body = { model: "synthetic", input: [...history, { role: "user", content: "latest task" }] };
-  const run = counted(body, () => prepareOversizedHistoryReplay(body));
+  const run = counted(body, () => prepareOversizedHistoryReplay(body, { maxHistoricalReplayBytes: 512 * 1024 }));
   assert.equal(run.fullSerializations, 2);
   assert.equal(run.result.rewritten, true);
   for (const item of [call, result, dynamic]) assert.ok(body.input.includes(item));

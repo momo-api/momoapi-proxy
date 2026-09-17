@@ -51,7 +51,9 @@ export function compactFixture(name) {
 
 export function compactOutcome(api, body, operation) {
   try {
-    const result = operation === "replay" ? api.prepareOversizedHistoryReplay(body) : api.prepareCompactPayload(body, compactSettings);
+    const result = operation === "replay"
+      ? api.prepareOversizedHistoryReplay(body, { maxHistoricalReplayBytes: 512 * 1024 })
+      : api.prepareCompactPayload(body, compactSettings);
     return { result };
   } catch (error) {
     return { error: { code: error.code, statusCode: error.statusCode, message: error.message, ...(error.details ? { details: error.details } : {}), ...(error.localCheckpointInput ? { localCheckpointInput: error.localCheckpointInput } : {}) }, payload: body };

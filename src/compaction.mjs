@@ -9,8 +9,6 @@ const MAX_COMPACT_LIMIT_BYTES = 64 * MIB;
 const LOCAL_COMPACTION_PREFIX = "momo1:";
 const MAX_LOCAL_COMPACTION_ENVELOPE_CHARS = 2 * MIB;
 const MAX_LOCAL_COMPACTION_JSON_BYTES = 1024 * 1024;
-const DEFAULT_HISTORY_REPLAY_LIMIT_BYTES = 512 * 1024;
-const DEFAULT_PROVIDER_SWITCH_REPLAY_LIMIT_BYTES = 192 * 1024;
 const GEMINI_RECENT_HISTORICAL_USERS = 6;
 const GEMINI_HISTORICAL_USER_CHARS = 2_000;
 const GEMINI_HISTORICAL_ASSISTANT_CHARS = 1_500;
@@ -54,7 +52,7 @@ function configuredHistoryReplayLimit(settings = {}) {
     ?? policy.maxHistoricalReplayMb;
   const mb = Number(rawMb);
   if (Number.isFinite(mb) && mb >= 0.0625 && mb <= 8) return Math.floor(mb * MIB);
-  return DEFAULT_HISTORY_REPLAY_LIMIT_BYTES;
+  return null;
 }
 
 function configuredProviderSwitchReplayLimit(settings = {}) {
@@ -66,7 +64,7 @@ function configuredProviderSwitchReplayLimit(settings = {}) {
     ?? policy.providerSwitchReplayMb;
   const mb = Number(rawMb);
   if (Number.isFinite(mb) && mb >= 0.0625 && mb <= 2) return Math.floor(mb * MIB);
-  return DEFAULT_PROVIDER_SWITCH_REPLAY_LIMIT_BYTES;
+  return configuredHistoryReplayLimit(settings);
 }
 
 export function prefersLocalCompaction(settings = {}) {
@@ -428,9 +426,17 @@ export function prepareOversizedHistoryReplay(payload, settings = {}, options = 
   // Some clients send only the tool-result delta after a tool call. It is the
   // current turn, not historical replay, and must never be checkpointed away.
   const configuredOverride = Number(options.limitBytes);
-  const limitBytes = Number.isFinite(configuredOverride) && configuredOverride >= 64 * 1024
+  const configuredLimit = Number.isFinite(configuredOverride) && configuredOverride >= 64 * 1024
     ? Math.floor(configuredOverride)
     : configuredHistoryReplayLimit(settings);
+  // Codex owns normal conversation compaction and calls /responses/compact (or
+  // sends compaction_trigger) when the target model reaches its token budget.
+  // A byte-based replay ceiling is an opt-in emergency guard only; enabling one
+  // by default would silently compete with Codex's token-aware state machine.
+  if (!Number.isFinite(configuredLimit)) {
+    return { payload: body, rewritten: false, originalBytes: 0, outboundBytes: 0, limitBytes: null };
+  }
+  const limitBytes = configuredLimit;
   if (!hasUserTurn) return { payload: body, rewritten: false, originalBytes: 0, outboundBytes: 0, limitBytes };
   const boundary = currentTurnStart(input);
   if (boundary <= 0) return { payload: body, rewritten: false, originalBytes: 0, outboundBytes: 0, limitBytes };
