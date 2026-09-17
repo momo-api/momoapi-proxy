@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.26 - 2026-09-17
+
+- Make macOS LaunchAgents use the installed Node.js executable by absolute path and activate them immediately through the current GUI launchd domain.
+- Restore the previous LaunchAgent when activation fails, unload it during uninstall, and require a healthy service before the Unix installer reports success.
+
 ## 0.13.25 - 2026-09-16
 
 - Stop overriding Codex's built-in history compaction prompt. New installations use the native Codex prompt, startup migration removes only the exact legacy MOMO prompt, and user-defined `compact_prompt` values remain untouched.
