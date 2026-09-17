@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.28 - 2026-09-17
+
+- Keep installed background daemons pinned to their persisted MOMO endpoint, port, and local token instead of inheriting stale command-scoped overrides from the terminal, Codex, tray, or updater that launched them. First-run bootstrap overrides remain supported.
+- Require self-update activation to pass a loopback-only upstream transport readiness probe in addition to the local version health check, so a daemon that is listening but cannot reach MOMO rolls back instead of serving repeated `fetch failed` responses.
+
 ## 0.13.27 - 2026-09-17
 
 - Let Codex remain the owner of routine token-aware conversation compaction, including across model/protocol switches, instead of silently replacing valid history at fixed proxy byte ceilings. Optional byte guards remain available for emergency deployments.
