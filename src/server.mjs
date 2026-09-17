@@ -21,7 +21,7 @@ import { logRequest as writeRequestLog } from "./logger.mjs";
 import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
-import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "./compaction.mjs";
+import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "./compaction.mjs";
 import { encodeRecoverableCompaction, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
@@ -140,11 +140,13 @@ function recordAttachmentTrace(response, trace) {
   metricsState.attachmentUploadedBytes += trace.uploadedBytes || 0;
 }
 
-function prepareRoutedHistoryReplay(payload, settings, response) {
+function prepareRoutedHistoryReplay(payload, settings, response, { gemini = false } = {}) {
   const route = response.momoProviderSwitchTrace;
-  const replay = route?.switched
-    ? prepareProviderSwitchHistoryReplay(payload, settings)
-    : prepareOversizedHistoryReplay(payload, settings);
+  const replay = gemini
+    ? prepareGeminiHistoryReplay(payload, settings, { providerSwitch: route?.switched === true })
+    : route?.switched
+      ? prepareProviderSwitchHistoryReplay(payload, settings)
+      : prepareOversizedHistoryReplay(payload, settings);
   if (route?.switched) {
     route.originalBytes = replay.originalBytes;
     route.outboundBytes = replay.outboundBytes;
@@ -549,7 +551,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
 }
 
 async function bridgeGemini(response, settings, payload, calls, fetchImpl, signal) {
-  const historyReplay = prepareRoutedHistoryReplay(payload, settings, response);
+  const historyReplay = prepareRoutedHistoryReplay(payload, settings, response, { gemini: true });
   const prepared = prepareMediaPayload(historyReplay.payload, settings, { kind: "responses" });
   recordHistoryReplayPolicy(response, prepared, historyReplay);
   const { body: rawBody, functions } = geminiRequest(prepared.payload, prepared.payload.model, calls);

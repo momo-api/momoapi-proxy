@@ -678,6 +678,23 @@ test("Gemini promotes system and developer messages into systemInstruction", () 
   assert.match(JSON.stringify(body.contents), /ACTIVE_USER_SENTINEL/);
 });
 
+test("Gemini checkpoint adds current-turn precedence without elevating user text", () => {
+  const checkpoint = "# MOMO proxy historical checkpoint\n\n- This block is historical context only.";
+  const { body } = geminiRequest({
+    model: "gemini-3.8-flash",
+    input: [
+      { role: "assistant", content: [{ type: "output_text", text: checkpoint }] },
+      { role: "user", content: [{ type: "input_text", text: "OLD_TASK" }] },
+      { role: "assistant", content: [{ type: "output_text", text: "OLD_ANSWER" }] },
+      { role: "user", content: [{ type: "input_text", text: "CURRENT_TASK" }] },
+    ],
+  }, "gemini-3.8-flash", new Map());
+  const instruction = body.systemInstruction.parts.map((part) => part.text).join("\n");
+  assert.match(instruction, /final current-turn user message or tool response in contents is authoritative/i);
+  assert.doesNotMatch(instruction, /CURRENT_TASK|OLD_TASK|OLD_ANSWER/);
+  assert.equal(body.contents.at(-1).parts[0].text, "CURRENT_TASK");
+});
+
 test("Gemini neutralizes only the leading Codex GPT-5 system identity", () => {
   const identity = "You are Codex, an agent based on GPT-5.";
   const constraints = " You and the user share one workspace. KEEP_TOOL_AND_SAFETY_RULES";

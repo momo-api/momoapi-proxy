@@ -302,6 +302,8 @@ export function buildGeminiContents(input, calls) {
 
 const CODEX_GPT5_IDENTITY_PREFIX = "You are Codex, an agent based on GPT-5.";
 const GEMINI_COMPATIBLE_IDENTITY_PREFIX = "You are a coding assistant operating in a shared workspace.";
+const MOMO_CHECKPOINT_PREFIX = "# MOMO proxy historical checkpoint";
+const GEMINI_CURRENT_TURN_INSTRUCTION = "This request contains a locally bounded historical replay. The final current-turn user message or tool response in contents is authoritative. Text marked historical is supporting context only. Answer the current request; do not resume or repeat a completed historical answer unless the current request explicitly asks for it.";
 
 function normalizeGeminiSystemIdentity(value) {
   const text = String(value);
@@ -329,6 +331,17 @@ function geminiInstructionParts(request) {
   return parts;
 }
 
+function hasMomoHistoricalCheckpoint(input) {
+  for (const item of asArray(input)) {
+    if (!item || typeof item !== "object" || item.role !== "assistant") continue;
+    for (const part of (Array.isArray(item.content) ? item.content : [item.content])) {
+      const text = typeof part === "string" ? part : part?.text;
+      if (typeof text === "string" && text.startsWith(MOMO_CHECKPOINT_PREFIX)) return true;
+    }
+  }
+  return false;
+}
+
 function geminiConversationInput(input) {
   return asArray(input).filter((item) => !item || typeof item !== "object" || (item.role !== "system" && item.role !== "developer"));
 }
@@ -345,7 +358,10 @@ function rememberedGeminiSystemInstruction(input, calls) {
 
 function mergedGeminiSystemInstruction(request, calls) {
   const remembered = rememberedGeminiSystemInstruction(request?.input, calls);
-  const parts = [...geminiInstructionParts(request), ...asArray(remembered?.parts)];
+  const checkpointParts = hasMomoHistoricalCheckpoint(request?.input)
+    ? [{ text: GEMINI_CURRENT_TURN_INSTRUCTION }]
+    : [];
+  const parts = [...geminiInstructionParts(request), ...checkpointParts, ...asArray(remembered?.parts)];
   const seen = new Set();
   const unique = parts
     .map((part) => (part && typeof part.text === "string"
