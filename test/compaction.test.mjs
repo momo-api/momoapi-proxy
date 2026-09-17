@@ -65,16 +65,38 @@ test("checkpoint on/off retains constraints, execution evidence and cross-bounda
   }
 });
 
-test("provider switch replay uses a smaller safe history budget", () => {
+test("provider switching leaves history to Codex unless a replay guard is explicitly configured", () => {
   const fixture = continuityFixture();
   fixture.input[2].content = "x".repeat(240000);
   const ordinary = prepareOversizedHistoryReplay(structuredClone(fixture), {});
   const switched = prepareProviderSwitchHistoryReplay(structuredClone(fixture), {});
   assert.equal(ordinary.rewritten, false);
-  assert.equal(switched.rewritten, true);
-  assert.equal(switched.limitBytes, 192 * 1024);
-  const wire = JSON.stringify(switched.payload.input);
+  assert.equal(switched.rewritten, false);
+  assert.equal(switched.limitBytes, null);
+
+  const guarded = prepareProviderSwitchHistoryReplay(structuredClone(fixture), {
+    contextPolicy: { providerSwitchReplayBytes: 192 * 1024 },
+  });
+  assert.equal(guarded.rewritten, true);
+  assert.equal(guarded.limitBytes, 192 * 1024);
+  const wire = JSON.stringify(guarded.payload.input);
   for (const marker of ["CONSTRAINT_SENTINEL", "ORIGINAL_TASK_SENTINEL", "LATEST_TASK_SENTINEL", "VERIFIED_STATE_SENTINEL", "PENDING_RESULT_SENTINEL"]) assert.match(wire, new RegExp(marker));
+});
+
+test("ordinary history replay is zero-work by default and remains available as an explicit safety guard", () => {
+  const fixture = continuityFixture();
+  fixture.input[2].content = "x".repeat(600000);
+  const native = prepareOversizedHistoryReplay(fixture, {});
+  assert.equal(native.rewritten, false);
+  assert.equal(native.payload, fixture);
+  assert.equal(native.originalBytes, 0);
+  assert.equal(native.limitBytes, null);
+
+  const guarded = prepareOversizedHistoryReplay(structuredClone(fixture), {
+    contextPolicy: { maxHistoricalReplayBytes: 512 * 1024 },
+  });
+  assert.equal(guarded.rewritten, true);
+  assert.equal(guarded.limitBytes, 512 * 1024);
 });
 
 test("Gemini replay makes the current turn authoritative and bounds completed history", () => {
@@ -141,7 +163,7 @@ test("server checkpoints both directions after an anonymous thread switches prot
     assert.equal(metrics.context.providerSwitches, 2);
     assert.equal(metrics.context.providerSwitchCheckpoints, 2);
     assert.ok(metrics.context.providerSwitchBytesSkipped > 0);
-  });
+  }, { contextPolicy: { providerSwitchReplayBytes: 192 * 1024 } });
 
   assert.equal(captured.length, 3);
   for (const request of captured.slice(1)) {
@@ -598,7 +620,7 @@ test("context_management compaction strips old inline media before ordinary admi
     assert.equal(response.status, 200);
     await response.text();
   });
-  assert.match(JSON.stringify(captured.input), /Historical binary attachments and oversized tool outputs were intentionally omitted/);
+  assert.match(JSON.stringify(captured.input), /historical image omitted during compaction/);
   assert.match(JSON.stringify(captured.input), /continue/);
   assert.doesNotMatch(JSON.stringify(captured.input), /data:image/);
   assert.deepEqual(captured.context_management, [{ type: "compaction", compact_threshold: 200000 }]);
