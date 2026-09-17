@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.27 - 2026-09-17
+
+- Let Codex remain the owner of routine token-aware conversation compaction, including across model/protocol switches, instead of silently replacing valid history at fixed proxy byte ceilings. Optional byte guards remain available for emergency deployments.
+- When a Gemini request still requires a bounded checkpoint, keep the latest turn authoritative, sharply limit completed historical dialogue, preserve pending tool continuity, and tell Gemini not to resume already completed tasks.
+
 ## 0.13.26 - 2026-09-17
 
 - Make macOS LaunchAgents use the installed Node.js executable by absolute path and activate them immediately through the current GUI launchd domain.
