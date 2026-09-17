@@ -4,7 +4,7 @@ import { openSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline/promises";
-import { readSettings, resolveSettings, appHome } from "../src/config.mjs";
+import { readSettings, resolveSettings, resolveDaemonSettings, appHome, daemonEnvironment } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
 import { migrateManagedCompactionConfig, rollback, setup, uninstall } from "../src/setup.mjs";
 import { readCatalog } from "../src/catalog.mjs";
@@ -102,7 +102,7 @@ async function startDaemon(binFile, scriptDir, port) {
   const daemon = spawn(process.execPath, [binFile, "serve"], {
     detached: true,
     stdio: ["ignore", outStream, outStream],
-    env: { ...process.env, MOMO_PROXY_CONSOLE_MIRROR: "0" },
+    env: { ...daemonEnvironment(process.env), MOMO_PROXY_CONSOLE_MIRROR: "0" },
     windowsHide: true,
   });
   daemon.unref();
@@ -153,7 +153,7 @@ async function main() {
   if (command === "auto") {
     let settings = null;
     let imagePluginResult = null;
-    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    try { settings = resolveDaemonSettings(); } catch { settings = readSettings(); }
     const port = settings?.port || 18789;
 
     const binFile = fileURLToPath(import.meta.url);
@@ -246,7 +246,7 @@ async function main() {
     console.log("\n运行 'momoapi start' 启动后台服务，或直接双击桌面 'MOMO API Proxy' 图标。");
   } else if (command === "start" || command === "up" || command === "daemon") {
     let settings = null;
-    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    try { settings = resolveDaemonSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     let isRunning = false;
     try {
@@ -266,7 +266,7 @@ async function main() {
     console.log("  - Status: Running in background (Taskbar Tray active)");
   } else if (command === "stop" || command === "down") {
     let settings = null;
-    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    try { settings = resolveDaemonSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     console.log("Stopping MOMO Codex Bridge on port " + port + "...");
     stopWindowsService();
@@ -290,7 +290,7 @@ async function main() {
     console.log("MOMO Codex Bridge stopped.");
   } else if (command === "restart") {
     let settings = null;
-    try { settings = resolveSettings(); } catch { settings = readSettings(); }
+    try { settings = resolveDaemonSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     console.log("Restarting MOMO Codex Bridge...");
     stopWindowsService();
@@ -322,7 +322,7 @@ async function main() {
     } catch (error) {
       console.warn("Managed Codex compaction settings could not be updated:", error.message);
     }
-    const settings = resolveSettings();
+    const settings = resolveDaemonSettings();
     const loggingRuntime = createLoggingRuntime({ settings, diagnosticsEnabled: settings.diagnosticsEnabled });
     configureLoggingRuntime(loggingRuntime);
     configureDiagnostics({ settings, runtime: loggingRuntime });
@@ -378,6 +378,7 @@ async function main() {
               detached: true,
               stdio: "ignore",
               windowsHide: true,
+              env: daemonEnvironment(process.env),
             });
             if (!child.pid) throw new Error("Automatic update process did not start.");
             child.unref();
@@ -636,6 +637,7 @@ async function main() {
           stdio: "ignore",
           windowsHide: true,
           cwd: dirname(res.rootDir),
+          env: daemonEnvironment(process.env),
         });
         if (!child.pid) throw new Error("Update supervisor did not start.");
         child.unref();

@@ -57,6 +57,7 @@ test("route classes are fixed and exact, including image and preflight isolation
   for (const path of ["/v1/responses", "/responses/compact", "/chat/completions"]) assert.equal(requestMetricGroup("POST", path), "business");
   assert.equal(requestMetricGroup("GET", "/v1/models"), "business");
   assert.equal(requestMetricGroup("GET", "/healthz"), "health");
+  assert.equal(requestMetricGroup("GET", "/readyz"), "health");
   assert.equal(requestMetricGroup("GET", "/internal/images/tasks/opaque"), "image");
   assert.equal(requestMetricGroup("GET", "/internal/metrics"), "control");
   for (const [method, path] of [["OPTIONS", "/v1/responses"], ["POST", "/health"], ["GET", "/v1/responses-extra"], ["POST", "/v1/models/foo"]]) assert.equal(requestMetricGroup(method, path), "other");

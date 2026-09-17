@@ -254,6 +254,36 @@ test("rejects access with an invalid local admission token", async () => {
   });
 });
 
+test("readyz fails closed when the daemon cannot reach its configured upstream", async () => {
+  await withServer(async () => { throw new Error("synthetic network failure"); }, async (base) => {
+    const response = await fetch(base + "/readyz");
+    assert.equal(response.status, 503);
+    const payload = await response.json();
+    assert.equal(payload.status, "upstream_unreachable");
+  });
+});
+
+test("readyz succeeds only after an authenticated upstream probe succeeds", async () => {
+  let captured;
+  await withServer(async (url, init) => {
+    captured = { url, authorization: init.headers.authorization };
+    return Response.json({ data: [] });
+  }, async (base) => {
+    const response = await fetch(base + "/readyz");
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).status, "ready");
+  });
+  assert.deepEqual(captured, { url: "https://gateway.example/v1/models", authorization: "Bearer momo-secret" });
+});
+
+test("readyz treats an upstream HTTP error as reachable instead of rolling back a healthy install", async () => {
+  await withServer(async () => Response.json({ error: "temporarily overloaded" }, { status: 503 }), async (base) => {
+    const response = await fetch(base + "/readyz");
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).status, "ready");
+  });
+});
+
 test("Qwen chat bridge merges instructions and developer messages into one leading system message", async () => {
   let capturedBody = null;
   const fakeFetch = async (url, init) => {

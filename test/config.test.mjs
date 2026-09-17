@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveSettings } from "../src/config.mjs";
+import { daemonEnvironment, resolveDaemonSettings, resolveSettings } from "../src/config.mjs";
 
 test("saved API key wins over a stale process environment key", () => {
   const home = mkdtempSync(join(tmpdir(), "momo-config-"));
@@ -18,6 +18,55 @@ test("saved API key wins over a stale process environment key", () => {
       MOMO_API_KEY: "stale-process-key",
     });
     assert.equal(settings.apiKey, "saved-current-key");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("daemon settings ignore a stale process endpoint while ordinary commands retain explicit overrides", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-"));
+  try {
+    writeFileSync(join(home, "settings.json"), JSON.stringify({
+      apiKey: "saved-current-key", localToken: "local-token", endpoint: "https://momoapi.us",
+    }));
+    const env = {
+      MOMO_PROXY_HOME: home, MOMO_API_ENDPOINT: "https://gateway.example",
+    };
+    assert.equal(resolveSettings(env).endpoint, "https://gateway.example");
+    assert.equal(resolveDaemonSettings(env).endpoint, "https://momoapi.us");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("detached daemon environment removes command-scoped routing overrides", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-"));
+  try {
+    writeFileSync(join(home, "settings.json"), JSON.stringify({
+      endpoint: "https://momoapi.us", port: 18789, localToken: "saved-local-token",
+    }));
+    const env = daemonEnvironment({
+      MOMO_PROXY_HOME: home, MOMO_API_KEY: "bootstrap-key",
+      MOMO_API_ENDPOINT: "https://gateway.example", MOMO_ENDPOINT: "https://other.example",
+      MOMO_BRIDGE_PORT: "19999", MOMO_SWITCH_PORT: "18888",
+      MOMO_BRIDGE_TOKEN: "temporary", MOMO_SWITCH_TOKEN: "temporary-legacy",
+    });
+    assert.equal(env.MOMO_PROXY_HOME, home);
+    assert.equal(env.MOMO_API_KEY, "bootstrap-key");
+    for (const name of ["MOMO_API_ENDPOINT", "MOMO_ENDPOINT", "MOMO_BRIDGE_PORT", "MOMO_SWITCH_PORT", "MOMO_BRIDGE_TOKEN", "MOMO_SWITCH_TOKEN"]) {
+      assert.equal(name in env, false);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("daemon environment preserves bootstrap overrides before settings exist", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-"));
+  try {
+    const env = daemonEnvironment({ MOMO_PROXY_HOME: home, MOMO_API_ENDPOINT: "https://bootstrap.example", MOMO_BRIDGE_PORT: "19999" });
+    assert.equal(env.MOMO_API_ENDPOINT, "https://bootstrap.example");
+    assert.equal(env.MOMO_BRIDGE_PORT, "19999");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

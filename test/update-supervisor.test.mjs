@@ -3,13 +3,26 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isManagedImageMcpProcess, isManagedTrayProcess, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate } from "../src/update-supervisor.mjs";
+import { isManagedImageMcpProcess, isManagedTrayProcess, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
 
 function createVersion(root, version) {
   mkdirSync(join(root, "bin"), { recursive: true });
   writeFileSync(join(root, "bin", "momoapi-proxy.mjs"), `// ${version}\n`);
   writeFileSync(join(root, "package.json"), JSON.stringify({ version }));
 }
+
+test("update readiness checks authenticated upstream reachability while rollback health stays local", async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    return Response.json({ ok: true, version: "0.13.28" });
+  };
+  assert.equal(await waitForExpectedHealth({ port: 18789, expectedVersion: "0.13.28", requireUpstream: true, timeoutMs: 50, fetchImpl }), true);
+  assert.match(calls[0], /\/readyz$/);
+  calls.length = 0;
+  assert.equal(await waitForExpectedHealth({ port: 18789, expectedVersion: "0.13.28", timeoutMs: 50, fetchImpl }), true);
+  assert.match(calls[0], /\/healthz$/);
+});
 
 test("update supervisor records activation after matching health check", async () => {
   const home = mkdtempSync(join(tmpdir(), "momo-supervisor-"));
@@ -24,7 +37,7 @@ test("update supervisor records activation after matching health check", async (
       env: { MOMO_PROXY_HOME: home },
       waitForParent: async () => true,
       runCli: (_script, command) => { commands.push(command); return true; },
-      healthCheck: async ({ expectedVersion }) => expectedVersion === "0.12.0",
+      healthCheck: async ({ expectedVersion, requireUpstream }) => expectedVersion === "0.12.0" && requireUpstream,
     });
     assert.equal(result.activated, true);
     assert.equal(result.imagePluginInstalled, true);
