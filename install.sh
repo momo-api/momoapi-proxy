@@ -61,15 +61,38 @@ BRIDGE_BIN="$INSTALL_DIR/bin/momoapi-proxy.mjs"
 chmod +x "$BRIDGE_BIN"
 
 echo "==> [momo-codex-bridge] Configuring Codex provider and syncing models..."
-node "$BRIDGE_BIN" install --api-key "$API_KEY" --endpoint "$ENDPOINT" --port "$PORT"
-
-echo "==> [momo-codex-bridge] Starting background daemon..."
-if command -v lsof >/dev/null 2>&1; then
-  lsof -ti :"$PORT" | xargs kill -9 2>/dev/null || true
-elif command -v fuser >/dev/null 2>&1; then
-  fuser -k "$PORT/tcp" 2>/dev/null || true
+if ! node "$BRIDGE_BIN" install --api-key "$API_KEY" --endpoint "$ENDPOINT" --port "$PORT"; then
+  node "$BRIDGE_BIN" rollback >/dev/null 2>&1 || true
+  exit 1
 fi
-nohup node "$BRIDGE_BIN" serve > /dev/null 2>&1 &
+
+if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ]; then
+  echo "==> [momo-codex-bridge] Waiting for the macOS LaunchAgent..."
+else
+  echo "==> [momo-codex-bridge] Starting background daemon..."
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti :"$PORT" | xargs kill -9 2>/dev/null || true
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser -k "$PORT/tcp" 2>/dev/null || true
+  fi
+  nohup node "$BRIDGE_BIN" serve > /dev/null 2>&1 &
+fi
+
+healthy=0
+attempt=0
+while [ "$attempt" -lt 20 ]; do
+  if curl -fsS --max-time 2 "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
+    healthy=1
+    break
+  fi
+  attempt=$((attempt + 1))
+  sleep 0.25
+done
+if [ "$healthy" -ne 1 ]; then
+  node "$BRIDGE_BIN" rollback >/dev/null 2>&1 || true
+  echo "==> ERROR: MOMO API Proxy did not become healthy." >&2
+  exit 1
+fi
 
 echo ""
 echo "=========================================================="

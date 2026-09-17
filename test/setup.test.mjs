@@ -45,6 +45,19 @@ test("setup writes a local provider configuration and rollback restores it", asy
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("macOS setup fails when its LaunchAgent cannot be activated", async () => {
+  const root = mkdtempSync(join(tmpdir(), "momo-setup-mac-failure-"));
+  const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex") };
+  const fakeFetch = async () => new Response(JSON.stringify({ data: [{ id: "gpt-5.5", agent_status: "stable" }] }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    await assert.rejects(() => setup({
+      apiKey: "momo-secret", endpoint: "https://gateway.example", imagePlugin: false,
+      fetchImpl: fakeFetch, env, osPlatform: "darwin",
+      autostartInstaller() { throw new Error("launchctl bootstrap failed"); },
+    }), /launchctl bootstrap failed/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("managed compaction migration removes only previous MOMO threshold overrides", () => {
   const root = mkdtempSync(join(tmpdir(), "momo-compact-migration-"));
   const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex") };
