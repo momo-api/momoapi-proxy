@@ -135,6 +135,9 @@ export async function setup({
   desktopAliases = true,
   imagePlugin = true,
   imagePluginInstaller = installBundledImagePlugin,
+  autostartInstaller = installAutostart,
+  windowsServiceInstaller = installWindowsService,
+  osPlatform = process.platform,
   fetchImpl = fetch,
   env = process.env,
 } = {}) {
@@ -197,15 +200,16 @@ export async function setup({
   let autostartResult = null;
   if (autostart) {
     try {
-      if (process.platform === "win32") {
+      if (osPlatform === "win32") {
         const binFile = fileURLToPath(import.meta.url);
         const bridgeBin = join(dirname(binFile), "..", "bin", "momo-codex-bridge.mjs");
-        const serviceResult = installWindowsService(bridgeBin);
-        autostartResult = serviceResult.installed ? serviceResult : installAutostart(settings, { env });
+        const serviceResult = windowsServiceInstaller(bridgeBin);
+        autostartResult = serviceResult.installed ? serviceResult : autostartInstaller(settings, { env, osPlatform });
       } else {
-        autostartResult = installAutostart(settings, { env });
+        autostartResult = autostartInstaller(settings, { env, osPlatform });
       }
     } catch (err) {
+      if (osPlatform === "darwin") throw err;
       autostartResult = { installed: false, error: err.message };
     }
   }

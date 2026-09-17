@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -10,6 +10,31 @@ export const WINDOWS_SERVICE_STARTUP = "MOMO API Proxy Service.cmd";
 export const WINDOWS_TRAY_STARTUP = "MOMO API Proxy Tray.lnk";
 export const LEGACY_WINDOWS_SERVICE_STARTUP = "momo-codex-bridge.cmd";
 export const LEGACY_WINDOWS_TRAY_STARTUP = "momoapi-proxy-tray.lnk";
+const MACOS_LAUNCHD_LABEL = "us.momoapi.codex-bridge";
+
+function escapeXml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('\"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function launchctlOptions() {
+  return { encoding: "utf8", timeout: 10000 };
+}
+
+function activateMacAutostart(target, { spawnSyncImpl, userId }) {
+  if (!Number.isInteger(userId) || userId < 0) throw new Error("Could not determine the macOS user id for launchd.");
+  const domain = `gui/${userId}`;
+  spawnSyncImpl("launchctl", ["bootout", domain, target], launchctlOptions());
+  const result = spawnSyncImpl("launchctl", ["bootstrap", domain, target], launchctlOptions());
+  if (result.error || result.status !== 0) {
+    const detail = String(result.stderr || result.error?.message || "unknown launchctl error").trim();
+    throw new Error(`Could not activate the macOS LaunchAgent: ${detail}`);
+  }
+}
 
 export function autostartTarget(osPlatform = platform(), env = process.env) {
   if (osPlatform === "win32") {
@@ -59,7 +84,14 @@ function copyStartupApproval(legacy, current, env) {
   if (result.error || result.status !== 0) throw new Error("Could not preserve the Windows startup approval state.");
 }
 
-export function installAutostart(settings, { osPlatform = platform(), env = process.env } = {}) {
+export function installAutostart(settings, {
+  osPlatform = platform(),
+  env = process.env,
+  nodePath = process.execPath,
+  spawnSyncImpl = spawnSync,
+  userId = typeof process.getuid === "function" ? process.getuid() : null,
+  activate = osPlatform === platform(),
+} = {}) {
   const target = autostartTarget(osPlatform, env);
   mkdirSync(dirname(target), { recursive: true });
 
@@ -74,9 +106,24 @@ export function installAutostart(settings, { osPlatform = platform(), env = proc
   }
 
   if (osPlatform === "darwin") {
-    const plist = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>Label</key>\n  <string>us.momoapi.codex-bridge</string>\n  <key>EnvironmentVariables</key>\n  <dict><key>MOMO_PROXY_CONSOLE_MIRROR</key><string>0</string></dict>\n  <key>ProgramArguments</key>\n  <array>\n    <string>node</string>\n    <string>' + BIN_PATH + '</string>\n    <string>serve</string>\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n</dict>\n</plist>\n';
+    if (!isAbsolute(nodePath)) throw new Error("macOS autostart requires an absolute Node.js executable path.");
+    const previousPlist = existsSync(target) ? readFileSync(target) : null;
+    const plist = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>Label</key>\n  <string>' + MACOS_LAUNCHD_LABEL + '</string>\n  <key>EnvironmentVariables</key>\n  <dict><key>MOMO_PROXY_CONSOLE_MIRROR</key><string>0</string></dict>\n  <key>ProgramArguments</key>\n  <array>\n    <string>' + escapeXml(nodePath) + '</string>\n    <string>' + escapeXml(BIN_PATH) + '</string>\n    <string>serve</string>\n  </array>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>KeepAlive</key>\n  <true/>\n</dict>\n</plist>\n';
     writeFileSync(target, plist);
-    return { installed: true, target, type: "launchd_plist" };
+    if (activate) {
+      try {
+        activateMacAutostart(target, { spawnSyncImpl, userId });
+      } catch (error) {
+        if (previousPlist) {
+          writeFileSync(target, previousPlist);
+          try { activateMacAutostart(target, { spawnSyncImpl, userId }); } catch {}
+        } else if (existsSync(target)) {
+          unlinkSync(target);
+        }
+        throw error;
+      }
+    }
+    return { installed: true, activated: Boolean(activate), target, type: "launchd_plist" };
   }
 
   const service = "[Unit]\nDescription=MOMO Codex Bridge\nAfter=network.target\n\n[Service]\nType=simple\nEnvironment=MOMO_PROXY_CONSOLE_MIRROR=0\nExecStart=node " + BIN_PATH + " serve\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
@@ -84,8 +131,17 @@ export function installAutostart(settings, { osPlatform = platform(), env = proc
   return { installed: true, target, type: "systemd_service" };
 }
 
-export function uninstallAutostart({ osPlatform = platform(), env = process.env } = {}) {
+export function uninstallAutostart({
+  osPlatform = platform(),
+  env = process.env,
+  spawnSyncImpl = spawnSync,
+  userId = typeof process.getuid === "function" ? process.getuid() : null,
+  deactivate = osPlatform === platform(),
+} = {}) {
   const target = autostartTarget(osPlatform, env);
+  if (osPlatform === "darwin" && deactivate && Number.isInteger(userId) && userId >= 0) {
+    spawnSyncImpl("launchctl", ["bootout", `gui/${userId}`, target], launchctlOptions());
+  }
   const targets = osPlatform === "win32"
     ? [target, join(dirname(target), LEGACY_WINDOWS_SERVICE_STARTUP)] : [target];
   let uninstalled = false;
