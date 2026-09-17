@@ -11,6 +11,9 @@ const MAX_LOCAL_COMPACTION_ENVELOPE_CHARS = 2 * MIB;
 const MAX_LOCAL_COMPACTION_JSON_BYTES = 1024 * 1024;
 const DEFAULT_HISTORY_REPLAY_LIMIT_BYTES = 512 * 1024;
 const DEFAULT_PROVIDER_SWITCH_REPLAY_LIMIT_BYTES = 192 * 1024;
+const GEMINI_RECENT_HISTORICAL_USERS = 6;
+const GEMINI_HISTORICAL_USER_CHARS = 2_000;
+const GEMINI_HISTORICAL_ASSISTANT_CHARS = 1_500;
 
 export const SUMMARY_PREFIX = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
 
@@ -84,6 +87,14 @@ function inlineMarker(value) {
 function trimText(value, maxChars, suffix) {
   if (typeof value !== "string" || value.length <= maxChars) return value;
   return value.slice(0, maxChars) + suffix;
+}
+
+function trimMiddleText(value, maxChars, marker = "\n[historical text truncated during compaction]\n") {
+  if (typeof value !== "string" || value.length <= maxChars) return value;
+  const available = Math.max(0, maxChars - marker.length);
+  const head = Math.ceil(available / 2);
+  const tail = Math.floor(available / 2);
+  return value.slice(0, head) + marker + value.slice(value.length - tail);
 }
 
 function compactValue(value, { aggressive = false, depth = 0 } = {}) {
@@ -246,7 +257,7 @@ export function extractCompactUserMessages(input) {
   return input.filter(isUserItem).map(itemText).filter((text) => text.trim().length > 0);
 }
 
-function fixedCheckpoint(input) {
+function fixedCheckpoint(input, { currentTurnAuthoritative = false } = {}) {
   const items = Array.isArray(input) ? input : [];
   const completed = items.filter((item) => item?.role === "assistant" || item?.type === "function_call" || item?.type === "custom_tool_call").length;
   const toolOutputs = items.filter((item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output").length;
@@ -261,27 +272,43 @@ function fixedCheckpoint(input) {
     "- Historical binary attachments and oversized tool outputs were intentionally omitted.",
     "- This lossy history index is not a user request or evidence that a tool executed.",
     "- Follow retained system/developer constraints and the active task. Retained tool results are execution evidence.",
+    ...(currentTurnAuthoritative
+      ? ["- Historical messages are supporting context. Do not repeat a prior answer unless the active task explicitly asks for it."]
+      : []),
     "- Older omitted state is unknown; do not claim it completed.",
   ].join("\n");
 }
 
-function compactHistoricalAssistant(item) {
+function compactHistoricalAssistant(item, { currentTurnAuthoritative = false } = {}) {
   const compacted = compactValue(item, { aggressive: true });
-  const prefix = "[historical assistant context; not the active task]\n";
+  const prefix = currentTurnAuthoritative
+    ? "[historical completed assistant answer; supporting context only; do not repeat unless the active task asks]\n"
+    : "[historical assistant context; not the active task]\n";
   if (typeof compacted?.content === "string") {
-    compacted.content = prefix + compacted.content;
+    const text = currentTurnAuthoritative
+      ? trimMiddleText(compacted.content, GEMINI_HISTORICAL_ASSISTANT_CHARS)
+      : compacted.content;
+    compacted.content = prefix + text;
     return compacted;
   }
   if (Array.isArray(compacted?.content)) {
     const textPart = compacted.content.find((part) => part && typeof part === "object" && typeof part.text === "string");
-    if (textPart) textPart.text = prefix + textPart.text;
+    if (textPart) {
+      const text = currentTurnAuthoritative
+        ? trimMiddleText(textPart.text, GEMINI_HISTORICAL_ASSISTANT_CHARS)
+        : textPart.text;
+      textPart.text = prefix + text;
+    }
     else compacted.content.unshift({ type: "output_text", text: prefix.trimEnd() });
   }
   return compacted;
 }
 
-function compactHistoricalUser(item) {
-  const text = itemText(item);
+function compactHistoricalUser(item, { currentTurnAuthoritative = false } = {}) {
+  const original = itemText(item);
+  const text = currentTurnAuthoritative
+    ? trimMiddleText(original, GEMINI_HISTORICAL_USER_CHARS)
+    : original;
   return {
     type: "message",
     role: "user",
@@ -292,8 +319,9 @@ function compactHistoricalUser(item) {
   };
 }
 
-export function buildLocalCompactResponse(_model, input, { requiredCallIds = new Set() } = {}) {
+export function buildLocalCompactResponse(_model, input, { requiredCallIds = new Set(), profile = "continuity" } = {}) {
   const items = Array.isArray(input) ? input : [];
+  const currentTurnAuthoritative = profile === "gemini-current-turn";
   let latestUserIndex = -1;
   for (let index = items.length - 1; index >= 0; index--) {
     if (isUserItem(items[index]) && itemText(items[index]).trim()) {
@@ -301,8 +329,18 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
       break;
     }
   }
+  // In the Gemini replay profile the real current turn is appended outside this
+  // historical slice, so every user message here is supporting history.
+  const activeUserIndex = currentTurnAuthoritative ? -1 : latestUserIndex;
   const selected = new Map();
   const groups = new Map();
+  const historicalUserIndices = items
+    .map((item, index) => [item, index])
+    .filter(([item, index]) => index !== activeUserIndex && isUserItem(item) && itemText(item).trim())
+    .map(([, index]) => index);
+  const retainedHistoricalUsers = new Set(currentTurnAuthoritative
+    ? historicalUserIndices.slice(-GEMINI_RECENT_HISTORICAL_USERS)
+    : historicalUserIndices);
   const isCall = (item) => item?.type === "function_call" || item?.type === "custom_tool_call";
   const isResult = (item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output";
   let bytes = 0;
@@ -326,9 +364,9 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
     if (item?.type === "additional_tools") add([[index, item]], true);
     if (isUserItem(item) || item?.role === "developer" || item?.role === "system") {
       const text = item?.type === "input_text" ? item.text : itemText(item);
-      if (text) {
-        const retained = isUserItem(item) && index !== latestUserIndex
-          ? compactHistoricalUser(item)
+      if (text && (!isUserItem(item) || index === activeUserIndex || retainedHistoricalUsers.has(index))) {
+        const retained = isUserItem(item) && index !== activeUserIndex
+          ? compactHistoricalUser(item, { currentTurnAuthoritative })
           : { type: "message", role: item?.role || "user", content: [{ type: "input_text", text }] };
         add([[index, retained]], true);
       }
@@ -345,24 +383,28 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
   for (const [id, entries] of orderedGroups) {
     const hasCall = entries.some(([, item]) => isCall(item));
     const hasResult = entries.some(([, item]) => isResult(item));
-    if (hasCall && (!hasResult || requiredCallIds.has(id) || !latestEvidence)) {
+    const requiredForContinuity = !hasResult || requiredCallIds.has(id);
+    const retainLatestCompletedEvidence = !currentTurnAuthoritative && !latestEvidence;
+    if (hasCall && (requiredForContinuity || retainLatestCompletedEvidence)) {
       add(entries, true);
       mandatory.add(id);
       if (hasResult) latestEvidence = true;
     }
   }
   // Keep complete recent groups atomically, with exact names, arguments and IDs.
-  for (const [id, entries] of orderedGroups) {
-    if (!mandatory.has(id) && entries.some(([, item]) => isCall(item))) add(entries, false);
+  if (!currentTurnAuthoritative) {
+    for (const [id, entries] of orderedGroups) {
+      if (!mandatory.has(id) && entries.some(([, item]) => isCall(item))) add(entries, false);
+    }
   }
   let retainedAssistant = 0;
   for (let index = items.length - 1; index >= 0 && retainedAssistant < 1; index--) {
     if (items[index]?.role !== "assistant") continue;
-    add([[index, compactHistoricalAssistant(items[index])]], false);
+    add([[index, compactHistoricalAssistant(items[index], { currentTurnAuthoritative })]], false);
     retainedAssistant++;
   }
   const output = [
-    { type: "message", role: "assistant", content: [{ type: "output_text", text: fixedCheckpoint(items) }] },
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: fixedCheckpoint(items, { currentTurnAuthoritative }) }] },
     ...[...selected].sort((a, b) => a[0] - b[0]).map(([, item]) => item),
   ];
   return {
@@ -403,12 +445,22 @@ export function prepareOversizedHistoryReplay(payload, settings = {}, options = 
   const requiredCallIds = new Set(currentTurn
     .filter((item) => item?.type === "function_call_output" || item?.type === "custom_tool_call_output")
     .map((item) => item.call_id));
-  body.input = [...buildLocalCompactResponse(body.model, history, { requiredCallIds }).output, ...currentTurn];
+  body.input = [...buildLocalCompactResponse(body.model, history, {
+    requiredCallIds,
+    profile: options.profile,
+  }).output, ...currentTurn];
   return { payload: body, rewritten: true, originalBytes, outboundBytes: serializedBodyBytes(body), limitBytes };
 }
 
 export function prepareProviderSwitchHistoryReplay(payload, settings = {}) {
   return prepareOversizedHistoryReplay(payload, settings, { limitBytes: configuredProviderSwitchReplayLimit(settings) });
+}
+
+export function prepareGeminiHistoryReplay(payload, settings = {}, { providerSwitch = false } = {}) {
+  return prepareOversizedHistoryReplay(payload, settings, {
+    limitBytes: providerSwitch ? configuredProviderSwitchReplayLimit(settings) : configuredHistoryReplayLimit(settings),
+    profile: "gemini-current-turn",
+  });
 }
 
 export function compactLockKey(request, payload) {

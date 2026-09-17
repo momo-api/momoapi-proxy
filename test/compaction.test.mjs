@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLocalCompactResponse, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
+import { buildLocalCompactResponse, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { commitProviderRoute, observeProviderRoute, resetProviderRouteStateForTests } from "../src/provider-switch-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
@@ -75,6 +75,36 @@ test("provider switch replay uses a smaller safe history budget", () => {
   assert.equal(switched.limitBytes, 192 * 1024);
   const wire = JSON.stringify(switched.payload.input);
   for (const marker of ["CONSTRAINT_SENTINEL", "ORIGINAL_TASK_SENTINEL", "LATEST_TASK_SENTINEL", "VERIFIED_STATE_SENTINEL", "PENDING_RESULT_SENTINEL"]) assert.match(wire, new RegExp(marker));
+});
+
+test("Gemini replay makes the current turn authoritative and bounds completed history", () => {
+  const input = [];
+  for (let index = 0; index < 12; index++) {
+    input.push(
+      { role: "user", content: [{ type: "input_text", text: "OLD_TASK_" + index + " " + "x".repeat(20_000) }] },
+      { role: "assistant", content: [{ type: "output_text", text: "OLD_ANSWER_" + index + " " + "y".repeat(20_000) }] },
+      { type: "custom_tool_call", name: "exec", call_id: "old_" + index, input: "old command " + index },
+      { type: "custom_tool_call_output", call_id: "old_" + index, output: "old result " + index },
+    );
+  }
+  const current = { role: "user", content: [{ type: "input_text", text: "CURRENT_PLUGIN_QUESTION" }] };
+  const replay = prepareGeminiHistoryReplay(
+    { model: "gemini-3.8-flash", input: [...input, current] },
+    { maxHistoricalReplayBytes: 128 * 1024 },
+  );
+  assert.equal(replay.rewritten, true);
+  assert.equal(replay.payload.input.at(-1), current);
+  const wire = JSON.stringify(replay.payload.input);
+  assert.match(wire, /CURRENT_PLUGIN_QUESTION/);
+  assert.match(wire, /OLD_TASK_11/);
+  assert.match(wire, /historical text truncated during compaction/);
+  assert.doesNotMatch(wire, /OLD_TASK_0/);
+  assert.match(wire, /historical completed assistant answer; supporting context only/);
+  assert.doesNotMatch(wire, /OLD_ANSWER_10/);
+  assert.match(wire, /OLD_ANSWER_11/);
+  assert.doesNotMatch(wire, /old command 0/);
+  assert.doesNotMatch(wire, /old command 11/);
+  assert.ok(replay.outboundBytes < 40 * 1024);
 });
 
 test("server checkpoints both directions after an anonymous thread switches protocol families", async () => {
