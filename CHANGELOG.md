@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.13.31 - 2026-09-18
+
+- Verify that a previously running Windows tray remains alive after update activation or rollback, and retry its launch once when the first restored process exits during startup contention.
+
 ## 0.13.30 - 2026-09-18
 
 - Add one-click Windows tray and CLI route switching between direct MOMO access and the local Proxy, using Codex's credential command support so neither the upstream key nor local token is copied into `config.toml`.
