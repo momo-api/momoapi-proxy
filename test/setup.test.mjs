@@ -32,6 +32,10 @@ test("setup writes a local provider configuration and rollback restores it", asy
   const config = join(env.CODEX_HOME, "config.toml");
   await import("node:fs/promises").then(({ mkdir }) => mkdir(env.CODEX_HOME, { recursive: true }));
   writeFileSync(config, 'model = "old-model"\ncompact_prompt = "my own compact rules"\n');
+  const { DatabaseSync } = await import("node:sqlite");
+  const state = new DatabaseSync(join(env.CODEX_HOME, "state_5.sqlite"));
+  state.exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT); INSERT INTO threads VALUES ('existing-openai', 'openai'), ('existing-codex', 'Codex');");
+  state.close();
   const fakeFetch = async () => new Response(JSON.stringify({ data: [{ id: "gemini-3.7-flash", agent_status: "stable" }] }), { status: 200, headers: { "content-type": "application/json" } });
   try {
     const result = await setup({ apiKey: "momo-secret", endpoint: "https://gateway.internal", port: 19999, imagePlugin: false, fetchImpl: fakeFetch, env });
@@ -40,14 +44,22 @@ test("setup writes a local provider configuration and rollback restores it", asy
     assert.match(written, /model = "gemini-3\.7-flash"/);
     assert.match(written, /model_provider = "momoapi-proxy"/);
     assert.match(written, /\[model_providers\.momoapi-proxy\]/);
-    assert.match(written, /name = "MOMO API Proxy"/);
+    assert.match(written, /name = "MOMO Route"/);
     assert.match(written, /base_url = "http:\/\/127\.0\.0\.1:19999\/v1"/);
-    assert.match(written, /requires_openai_auth = false/);
+    assert.match(written, /"credential", "local"/);
+    assert.doesNotMatch(written, /^openai_base_url\s*=/m);
     assert.doesNotMatch(written, /model_context_window/);
     assert.doesNotMatch(written, /model_auto_compact_token_limit/);
     assert.doesNotMatch(written, /CURRENT ACTIVE TASK/);
     assert.match(written, /compact_prompt = "my own compact rules"/);
-    assert.match(written, /MOMOAPI_PROXY_MANAGED/);
+    assert.match(written, /MOMOAPI_ROUTE_MANAGED_BEGIN/);
+    const stateAfter = new DatabaseSync(join(env.CODEX_HOME, "state_5.sqlite"));
+    const historyRows = stateAfter.prepare("SELECT id, model_provider FROM threads ORDER BY id").all().map((row) => ({ ...row }));
+    stateAfter.close();
+    assert.deepEqual(historyRows, [
+      { id: "existing-codex", model_provider: "Codex" },
+      { id: "existing-openai", model_provider: "openai" },
+    ]);
     const catalogText = readFileSync(result.catalog, "utf8");
     assert.match(catalogText, /gemini-3\.7-flash/);
     assert.doesNotMatch(catalogText, /"auto_compact_token_limit"/);

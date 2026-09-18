@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.13.32 - 2026-09-18
+
+- Make direct/Proxy switching update every managed MOMO provider alias so existing Codex conversations no longer stay pinned to a stale direct provider while the tray reports Proxy.
+- Detect the route from the active top-level provider instead of any matching URL or a stale marker, and label the tray state as a restart-required Codex configuration target.
+- Repair older managed route blocks automatically on daemon startup, remove legacy top-level routing overrides, and stop fresh installs from rewriting unrelated Codex history rows.
+
 ## 0.13.31 - 2026-09-18
 
 - Verify that a previously running Windows tray remains alive after update activation or rollback, and retry its launch once when the first restored process exits during startup contention.

@@ -5,8 +5,8 @@ import { codexHome, catalogPath, writeCatalog } from "./catalog.mjs";
 import { newLocalToken, normalizeEndpoint, writeSettings, settingsPath } from "./config.mjs";
 import { installAutostart, uninstallAutostart } from "./autostart.mjs";
 import { installWindowsService, uninstallWindowsService } from "./service.mjs";
-import { migrateHistory } from "./history.mjs";
 import { installImagePlugin as installBundledImagePlugin } from "./plugin-install.mjs";
+import { resolveInstalledCliPath, switchCodexRoute } from "./codex-route.mjs";
 
 export const MARKER = "# MOMOAPI_PROXY_MANAGED";
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free"]);
@@ -78,14 +78,16 @@ export function cleanConfigToml(content) {
   return kept.join("\n").trim();
 }
 
-function managedConfig(catalog, port, defaultModel) {
+function managedConfig(catalog, port, defaultModel, cleanedOther = "") {
   return MARKER + "\n" +
     'openai_base_url = "http://127.0.0.1:' + port + '/v1"\n' +
     'model_provider = "momoapi-proxy"\n' +
     'model = "' + defaultModel + '"\n' +
     'model_reasoning_effort = "high"\n' +
     'model_catalog_json = "' + catalog.replace(/\\/g, "/") + '"\n' +
-    'disable_response_storage = false\n\n' +
+    'disable_response_storage = false\n' +
+    (cleanedOther ? "\n" + cleanedOther + "\n" : "") +
+    '\n' +
     '[model_providers.momoapi-proxy]\n' +
     'name = "MOMO API Proxy"\n' +
     'base_url = "http://127.0.0.1:' + port + '/v1"\n' +
@@ -186,7 +188,7 @@ export async function setup({
     candidates[0]?.id;
   if (!defaultModel) throw new Error("MOMO returned no Codex-compatible models.");
   writeCatalog(models, env, { includeDesktopAliases: desktopAliases });
-  const finalConfig = managedConfig(catalog, port, defaultModel) + (cleanedOther ? "\n\n" + cleanedOther + "\n" : "\n");
+  const finalConfig = managedConfig(catalog, port, defaultModel, cleanedOther) + "\n";
   writeFileSync(config, finalConfig);
   writeFileSync(auth, JSON.stringify({
     OPENAI_API_KEY: localToken,
@@ -196,6 +198,13 @@ export async function setup({
     "momo-switch": localToken
   }, null, 2) + "\n");
   const settingsFile = writeSettings(settings, env);
+  const currentCliPath = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "momoapi-proxy.mjs");
+  switchCodexRoute("proxy", {
+    env,
+    settings,
+    nodePath: process.execPath,
+    cliPath: resolveInstalledCliPath(currentCliPath, env),
+  });
 
   let autostartResult = null;
   if (autostart) {
@@ -214,12 +223,10 @@ export async function setup({
     }
   }
 
-  let historyResult = null;
-  try {
-    historyResult = await migrateHistory({ dbPath: join(codexHome(env), "state_5.sqlite"), targetProvider: "momo-codex-bridge" });
-  } catch (err) {
-    historyResult = { migrated: 0, error: err.message };
-  }
+  // Existing Codex tasks retain their provider name. The managed route block
+  // now keeps every MOMO provider alias on the same endpoint, so setup no
+  // longer rewrites unrelated rows in state_5.sqlite.
+  const historyResult = { migrated: 0, strategy: "provider-aliases" };
 
   let imagePluginResult = {
     attempted: false,
