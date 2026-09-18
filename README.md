@@ -26,6 +26,7 @@ It implements a focused subset of OpenCodex-inspired protocol compatibility; it 
 - **Local-Only Diagnostics**: Keeps bounded metadata for 413/429/5xx and lifecycle failures in the user's profile; the proxy has no remote telemetry sender.
 - **Safe Automatic Updates**: Checks official MOMO/GitHub release metadata, accepts packages only from approved HTTPS hosts, verifies SHA-256 and archive structure, stages Windows updates outside the running app, and automatically rolls back failed activation. Set `updateMode` to `notify` for notification-only operation.
 - **Automatic MOMO Image Plugin**: One-click setup installs and enables the bundled Codex image plugin by default; no second API key or manual marketplace command is required.
+- **One-Click Codex Route Switching**: The Windows tray and CLI can switch Codex between direct MOMO access and the local protocol proxy while preserving unrelated Codex settings and keeping credentials out of `config.toml`.
 
 ## Local security model
 
@@ -78,6 +79,14 @@ momo-codex-bridge test gpt-5.5
 # Restore prior configuration
 momo-codex-bridge rollback
 
+# Switch Codex between direct MOMO and the local proxy
+momoapi route direct
+momoapi route proxy
+momoapi route status
+
+# Restore the Codex config captured before the first route switch
+momoapi route restore
+
 # Uninstall
 momo-codex-bridge uninstall [--remove-key]
 ```
@@ -96,6 +105,8 @@ codex
 ```
 
 The setup command backs up `~/.codex/config.toml` and `~/.codex/auth.json`, writes the local provider, and generates `~/.codex/model-catalogs/momo-codex-switch.json` from the models returned by MOMO.
+
+On Windows, right-click the MOMO tray icon and open **Codex 路由** to switch between **MOMO 直连** and **本地 Proxy**. The switch keeps one Codex provider name (`momo-route`), preserves unrelated configuration, stores a rollback copy before the first switch, and obtains the appropriate credential dynamically from the local protected proxy settings. Restart open Codex conversations after switching so they reload the provider configuration.
 
 ### MOMO Image plugin
 
