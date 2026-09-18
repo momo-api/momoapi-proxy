@@ -291,6 +291,21 @@ export function startManagedTray(rootDir, port, {
   }
 }
 
+export async function restoreManagedTray(rootDir, port, {
+  startTray = startManagedTray,
+  runningCheck = isManagedTrayRunning,
+  wait = sleep,
+  attempts = 2,
+  settleMs = 750,
+} = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    startTray(rootDir, port);
+    await wait(settleMs);
+    if (runningCheck(rootDir)) return true;
+  }
+  return false;
+}
+
 export function isManagedImageMcpProcess(processInfo, rootDir) {
   if (!processInfo || String(processInfo.Name || processInfo.name || "").toLowerCase() !== "node.exe") return false;
   const pid = Number(processInfo.ProcessId ?? processInfo.processId);
@@ -366,6 +381,8 @@ export async function superviseUpdate({
   installImagePlugin = true,
   trayRunningCheck = isManagedTrayRunning,
   startTray = startManagedTray,
+  restoreTrayProcess = restoreManagedTray,
+  trayRestoreWait = sleep,
 } = {}) {
   const stagedActivation = Boolean(stagingDir);
   let activationMode = stagedActivation ? "swap" : "legacy";
@@ -373,9 +390,13 @@ export async function superviseUpdate({
   const backupScript = join(backupDir, "bin", "momoapi-proxy.mjs");
   await waitForParent(parentPid);
   const trayWasRunning = Boolean(trayRunningCheck(rootDir));
-  const restoreTray = (healthy, phase) => {
+  const restoreTray = async (healthy, phase) => {
     if (!healthy || !trayWasRunning) return false;
-    const started = Boolean(startTray(rootDir, port));
+    const started = await restoreTrayProcess(rootDir, port, {
+      startTray,
+      runningCheck: trayRunningCheck,
+      wait: trayRestoreWait,
+    });
     appendSupervisorLog(started
       ? `Restored the Windows tray after ${phase}.`
       : `The Windows tray was running before the update but could not be restored after ${phase}.`, env);
@@ -402,7 +423,7 @@ export async function superviseUpdate({
         errorCode: error?.code || "update_tray_stop_failed",
       }, env);
       appendSupervisorLog(`Stopping managed tray processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
-      restoreTray(restoredHealthy, "the interrupted activation");
+      await restoreTray(restoredHealthy, "the interrupted activation");
       return { activated: false, rolledBack: false, restoredHealthy, errorCode: error?.code || "update_tray_stop_failed" };
     }
     try {
@@ -421,7 +442,7 @@ export async function superviseUpdate({
         errorCode: error?.code || "update_mcp_stop_failed",
       }, env);
       appendSupervisorLog(`Stopping managed image MCP processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
-      restoreTray(restoredHealthy, "the interrupted activation");
+      await restoreTray(restoredHealthy, "the interrupted activation");
       return { activated: false, rolledBack: false, restoredHealthy, errorCode: error?.code || "update_mcp_stop_failed" };
     }
     if (installImagePlugin) {
@@ -489,7 +510,7 @@ export async function superviseUpdate({
             errorCode: restoredHealthy ? "update_inplace_failed" : "update_inplace_restore_failed",
           }, env);
           appendSupervisorLog(`Transactional in-place activation failed: ${fallbackError?.code || fallbackError?.name || "unknown_error"}.`, env);
-          restoreTray(restoredHealthy, "the in-place rollback");
+          await restoreTray(restoredHealthy, "the in-place rollback");
           if (restoredHealthy) {
             try { pruneFailedUpdateDirectories(rootDir); } catch {}
           }
@@ -512,7 +533,7 @@ export async function superviseUpdate({
           errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
         }, env);
         appendSupervisorLog(`Update file swap failed: ${error?.code || error?.name || "unknown_error"}.`, env);
-        restoreTray(restoredHealthy, "the file-swap rollback");
+        await restoreTray(restoredHealthy, "the file-swap rollback");
         if (restoredHealthy) {
           try { pruneFailedUpdateDirectories(rootDir); } catch {}
         }
@@ -551,7 +572,7 @@ export async function superviseUpdate({
     appendSupervisorLog(imagePluginInstalled
       ? "MOMO Image plugin installation verified after update."
       : (installImagePlugin ? "MOMO Image plugin installation needs a manual retry." : "MOMO Image plugin installation was skipped by configuration."), env);
-    restoreTray(true, `activation of v${targetVersion}`);
+    await restoreTray(true, `activation of v${targetVersion}`);
     if (activationMode === "inplace" && stagingDir) {
       try { remove(stagingDir); } catch {}
     }
@@ -581,7 +602,7 @@ export async function superviseUpdate({
       hasUpdate: true, checkFailed: !restoredHealthy, rolledBack: restoredTree,
       errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
     }, env);
-    restoreTray(restoredHealthy, "the health-check rollback");
+    await restoreTray(restoredHealthy, "the health-check rollback");
     if (restoredHealthy) {
       try { pruneFailedUpdateDirectories(rootDir); } catch {}
     }
@@ -614,7 +635,7 @@ export async function superviseUpdate({
       errorCode: "update_rollback_swap_failed",
     }, env);
     appendSupervisorLog(`Rollback file swap failed: ${error?.code || error?.name || "unknown_error"}.`, env);
-    restoreTray(false, "the failed rollback");
+    await restoreTray(false, "the failed rollback");
     return { activated: false, rolledBack: false, errorCode: "update_rollback_swap_failed" };
   }
 
@@ -636,7 +657,7 @@ export async function superviseUpdate({
   appendSupervisorLog(restoredHealthy
     ? `Rollback to proxy v${previousVersion} completed.`
     : `Rollback restored proxy v${previousVersion}, but its health check failed.`, env);
-  restoreTray(restoredHealthy, `rollback to v${previousVersion}`);
+  await restoreTray(restoredHealthy, `rollback to v${previousVersion}`);
   if (restoredHealthy) {
     try { pruneFailedUpdateDirectories(rootDir); } catch {}
   }

@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isManagedImageMcpProcess, isManagedTrayProcess, pruneFailedUpdateDirectories, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
+import { isManagedImageMcpProcess, isManagedTrayProcess, pruneFailedUpdateDirectories, restoreManagedTray, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
 
 function createVersion(root, version) {
   mkdirSync(join(root, "bin"), { recursive: true });
@@ -188,6 +188,19 @@ test("managed tray launch prefers the stable install path and passes the configu
   assert.deepEqual(calls[0].args, ["--port", "19001"]);
   assert.equal(calls[0].options.detached, true);
   assert.equal(unrefCalled, true);
+});
+
+test("managed tray restore retries when the first launch does not stay alive", async () => {
+  let launches = 0;
+  let checks = 0;
+  const restored = await restoreManagedTray("C:\\Users\\test\\.momoapi-proxy\\app", 18789, {
+    startTray: () => { launches += 1; return true; },
+    runningCheck: () => { checks += 1; return checks >= 2; },
+    wait: async () => {},
+  });
+  assert.equal(restored, true);
+  assert.equal(launches, 2);
+  assert.equal(checks, 2);
 });
 
 test("managed tray shutdown terminates only exact installed tray paths", async () => {
