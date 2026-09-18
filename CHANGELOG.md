@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.13.29 - 2026-09-18
+
+- Stop automatic update loops by latching a failed target version until a newer release appears, retaining only the newest three failed application directories, and reporting the actual rollback outcome to installers.
+- Honor manual, notification-only, and disabled automatic-update preferences consistently, keep Windows service wrappers pinned to the stable installed application path, and reject reserved placeholder endpoints before setup writes configuration.
+- Isolate the complete test suite from real MOMO, Codex, HOME, AppData, logs, model catalogs, marketplaces, runtime state, and legacy profiles so development tests cannot alter an installed proxy.
+
 ## 0.13.28 - 2026-09-17
 
 - Keep installed background daemons pinned to their persisted MOMO endpoint, port, and local token instead of inheriting stale command-scoped overrides from the terminal, Codex, tray, or updater that launched them. First-run bootstrap overrides remain supported.
