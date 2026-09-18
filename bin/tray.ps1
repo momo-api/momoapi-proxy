@@ -102,6 +102,37 @@ function Start-DaemonProcess {
   }
 }
 
+function Get-CodexRouteMode {
+  try {
+    $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::UserProfile) }
+    $configPath = [System.IO.Path]::Combine($homeDir, ".codex", "config.toml")
+    if (-not (Test-Path -LiteralPath $configPath)) { return 'unconfigured' }
+    $content = Get-Content -LiteralPath $configPath -Raw
+    if ($content -match '(?m)^# MOMOAPI_ROUTE_MODE=(direct|proxy)$') { return $Matches[1] }
+    if ($content -match 'base_url\s*=\s*["'']https://momoapi\.us(?:/v1)?/?["'']') { return 'direct' }
+    if ($content -match 'base_url\s*=\s*["'']http://(?:127\.0\.0\.1|localhost):\d+/v1/?["'']') { return 'proxy' }
+  } catch {}
+  return 'custom'
+}
+
+function Invoke-CodexRoute([string]$mode) {
+  $bin = Get-MomoBinPath
+  if (-not (Test-Path -LiteralPath $bin)) { return $false }
+  if ($mode -eq 'proxy') {
+    Start-DaemonProcess
+    if (-not (Check-BridgeRunning)) {
+      [void][System.Windows.Forms.MessageBox]::Show("本地代理未能启动，Codex 路由保持不变。", "MOMO API Proxy", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+      return $false
+    }
+  }
+  $output = & node "$bin" route $mode 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) {
+    [void][System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Codex Route", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    return $false
+  }
+  return $true
+}
+
 # Ensure daemon running on tray startup
 Start-DaemonProcess
 
@@ -142,6 +173,53 @@ $syncItem.add_Click({
   if (Test-Path $bin) {
     $output = & node "$bin" sync 2>&1 | Out-String
     [System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Sync", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+  }
+})
+
+$routeItem = New-Object System.Windows.Forms.ToolStripMenuItem("Codex 路由：正在检测...")
+[void]$contextMenu.Items.Add($routeItem)
+$routeDirectItem = New-Object System.Windows.Forms.ToolStripMenuItem("使用 MOMO 直连")
+$routeProxyItem = New-Object System.Windows.Forms.ToolStripMenuItem("使用本地 Proxy")
+$restoreRouteItem = New-Object System.Windows.Forms.ToolStripMenuItem("恢复切换前配置")
+[void]$routeItem.DropDownItems.Add($routeDirectItem)
+[void]$routeItem.DropDownItems.Add($routeProxyItem)
+[void]$routeItem.DropDownItems.Add("-")
+[void]$routeItem.DropDownItems.Add($restoreRouteItem)
+
+$refreshRouteMenu = {
+  $mode = Get-CodexRouteMode
+  $routeDirectItem.Checked = $mode -eq 'direct'
+  $routeProxyItem.Checked = $mode -eq 'proxy'
+  $routeItem.Text = switch ($mode) {
+    'direct' { 'Codex 路由：MOMO 直连' }
+    'proxy' { 'Codex 路由：本地 Proxy' }
+    'unconfigured' { 'Codex 路由：尚未配置' }
+    default { 'Codex 路由：自定义' }
+  }
+}
+$routeItem.add_DropDownOpening($refreshRouteMenu)
+& $refreshRouteMenu
+
+$routeDirectItem.add_Click({
+  if (Invoke-CodexRoute 'direct') {
+    & $refreshRouteMenu
+    $notifyIcon.ShowBalloonTip(3500, "Codex 路由已切换", "当前模式：MOMO 直连。请重启已打开的 Codex 会话。", [System.Windows.Forms.ToolTipIcon]::Info)
+  }
+})
+$routeProxyItem.add_Click({
+  if (Invoke-CodexRoute 'proxy') {
+    & $refreshRouteMenu
+    $notifyIcon.ShowBalloonTip(3500, "Codex 路由已切换", "当前模式：本地 Proxy。请重启已打开的 Codex 会话。", [System.Windows.Forms.ToolTipIcon]::Info)
+  }
+})
+$restoreRouteItem.add_Click({
+  $bin = Get-MomoBinPath
+  $output = if (Test-Path -LiteralPath $bin) { & node "$bin" route restore 2>&1 | Out-String } else { "找不到 MOMO API Proxy CLI。" }
+  if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $bin)) {
+    & $refreshRouteMenu
+    [void][System.Windows.Forms.MessageBox]::Show("已恢复切换前的 Codex 配置。请重启已打开的 Codex 会话。", "MOMO API Proxy", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+  } else {
+    [void][System.Windows.Forms.MessageBox]::Show($output.Trim(), "MOMO API Proxy - Codex Route", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
   }
 })
 

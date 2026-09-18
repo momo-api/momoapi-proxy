@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.30 - 2026-09-18
+
+- Add one-click Windows tray and CLI route switching between direct MOMO access and the local Proxy, using Codex's credential command support so neither the upstream key nor local token is copied into `config.toml`.
+- Preserve unrelated Codex settings, create timestamped switch backups, and provide a one-click restore to the configuration captured before the first switch.
+
 ## 0.13.29 - 2026-09-18
 
 - Stop automatic update loops by latching a failed target version until a newer release appears, retaining only the newest three failed application directories, and reporting the actual rollback outcome to installers.

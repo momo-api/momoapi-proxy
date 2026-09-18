@@ -21,6 +21,7 @@ import { configureDiagnostics, readRecentDiagnosticReport, recordDiagnosticEvent
 import { closeLogging, configureLoggingRuntime, createLoggingRuntime } from "../src/logging-runtime.mjs";
 import { createSignalStopper } from "../src/process-shutdown.mjs";
 import { getImagePluginStatus, installImagePlugin } from "../src/plugin-install.mjs";
+import { codexRouteStatus, readCodexCredential, resolveInstalledCliPath, restoreCodexRoute, switchCodexRoute } from "../src/codex-route.mjs";
 
 process.on("uncaughtException", (err) => {
   logError("Uncaught Exception", err);
@@ -150,6 +151,15 @@ async function promptApiKey() {
 }
 
 async function main() {
+  if (command === "credential") {
+    try {
+      process.stdout.write(readCodexCredential(args[0]));
+    } catch (error) {
+      console.error(error.message);
+      process.exitCode = 1;
+    }
+    return;
+  }
   if (command === "auto") {
     let settings = null;
     let imagePluginResult = null;
@@ -601,6 +611,21 @@ async function main() {
       console.log("Successfully migrated " + res.migrated + " session(s) to 'momoapi-proxy' (method: " + res.method + ")!");
       console.log("Your previous conversation histories are now unified and preserved under MOMO API Proxy.");
     }
+  } else if (command === "route" || command === "codex-route") {
+    const action = String(args[0] || "status").toLowerCase();
+    if (action === "status") {
+      console.log(JSON.stringify(codexRouteStatus(), null, 2));
+    } else if (action === "restore" || action === "rollback") {
+      const result = restoreCodexRoute();
+      console.log("Codex route configuration restored:", result.restored);
+    } else if (action === "direct" || action === "proxy") {
+      const currentCliPath = fileURLToPath(import.meta.url);
+      const result = switchCodexRoute(action, { cliPath: resolveInstalledCliPath(currentCliPath) });
+      console.log("Codex route switched to " + action + ": " + result.baseUrl);
+      console.log("Restart open Codex sessions to load the new route.");
+    } else {
+      throw new Error("Usage: momoapi-proxy route [status|direct|proxy|restore]");
+    }
   } else if (command === "rollback") {
     const restored = rollback();
     console.log("Restored backup files:", restored);
@@ -668,7 +693,7 @@ async function main() {
     const result = uninstall({ removeKey: hasFlag("--remove-key") });
     console.log("Uninstall complete:", result);
   } else {
-    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy plugin [status|install]   - Check or repair the MOMO Image plugin\n  momoapi-proxy images [list|info|clean]  - Manage images saved on this computer\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy diagnostics [-n 100]       - Print local-only error metadata for support\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
+    console.log("MOMO API Proxy - Lightweight local Responses & Desktop Proxy\n\nUsage:\n  momoapi-proxy start                     - Start daemon & taskbar tray in background\n  momoapi-proxy stop                      - Stop running proxy service\n  momoapi-proxy restart                   - Restart proxy daemon & taskbar tray\n  momoapi-proxy serve                     - Run in foreground (live debug logs)\n  momoapi-proxy status                    - Check running status\n  momoapi-proxy route [status|direct|proxy|restore] - Switch the Codex route\n  momoapi-proxy models                    - List available synced models\n  momoapi-proxy plugin [status|install]   - Check or repair the MOMO Image plugin\n  momoapi-proxy images [list|info|clean]  - Manage images saved on this computer\n  momoapi-proxy sync                      - Sync model catalog from MOMO API\n  momoapi-proxy check-update              - Check and persist update availability\n  momoapi-proxy update [--force]          - Update to latest version\n  momoapi-proxy doctor                    - Run health diagnostics\n  momoapi-proxy diagnostics [-n 100]       - Print local-only error metadata for support\n  momoapi-proxy migrate-history           - Unify previous conversation histories\n  momoapi-proxy logs [-n 50]              - View recent request logs\n  momoapi-proxy tray                      - Launch taskbar tray companion\n  momoapi-proxy test <model>              - Run quick response test\n  momoapi-proxy rollback                  - Restore previous Codex config\n  momoapi-proxy uninstall [--remove-key]  - Uninstall proxy\n");
   }
 }
 

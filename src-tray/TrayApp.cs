@@ -52,6 +52,23 @@ namespace MomoApi.Tray
             if (hasInstalledState) return "MOMO Image：未安装";
             return commandSucceeded ? "MOMO Image：状态未知" : "MOMO Image：检测失败";
         }
+
+        public static string RouteModeFromConfig(string content)
+        {
+            var marker = Regex.Match(content ?? "", "^# MOMOAPI_ROUTE_MODE=(direct|proxy)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+            if (marker.Success) return marker.Groups[1].Value.ToLowerInvariant();
+            if (Regex.IsMatch(content ?? "", "base_url\\s*=\\s*\"http://(?:127\\.0\\.0\\.1|localhost):[0-9]+/v1/?\"", RegexOptions.IgnoreCase)) return "proxy";
+            if (Regex.IsMatch(content ?? "", "base_url\\s*=\\s*\"https://momoapi\\.us(?:/v1)?/?\"", RegexOptions.IgnoreCase)) return "direct";
+            return "custom";
+        }
+
+        public static string RouteTitle(string mode)
+        {
+            if (mode == "proxy") return "Codex 路由：本地 Proxy";
+            if (mode == "direct") return "Codex 路由：MOMO 直连";
+            if (mode == "unconfigured") return "Codex 路由：尚未配置";
+            return "Codex 路由：自定义";
+        }
     }
 
     static class Program
@@ -115,6 +132,9 @@ namespace MomoApi.Tray
         private readonly ToolStripMenuItem updateItem;
         private readonly ToolStripMenuItem pluginStatusItem;
         private readonly ToolStripMenuItem autostartItem;
+        private readonly ToolStripMenuItem routeMenuItem;
+        private readonly ToolStripMenuItem routeDirectItem;
+        private readonly ToolStripMenuItem routeProxyItem;
         private readonly SynchronizationContext syncContext;
         private readonly CancellationTokenSource cts = new CancellationTokenSource();
         private IntPtr jobHandle = IntPtr.Zero;
@@ -170,6 +190,20 @@ namespace MomoApi.Tray
                 await RunCliAsync("plugin install", true);
                 await RefreshPluginStatusAsync();
             };
+
+            routeMenuItem = new ToolStripMenuItem("Codex 路由：正在检测...");
+            menu.Items.Add(routeMenuItem);
+            routeDirectItem = new ToolStripMenuItem("使用 MOMO 直连") { CheckOnClick = false };
+            routeProxyItem = new ToolStripMenuItem("使用本地 Proxy") { CheckOnClick = false };
+            routeDirectItem.Click += async (s, e) => await SwitchCodexRouteAsync("direct");
+            routeProxyItem.Click += async (s, e) => await SwitchCodexRouteAsync("proxy");
+            routeMenuItem.DropDownItems.Add(routeDirectItem);
+            routeMenuItem.DropDownItems.Add(routeProxyItem);
+            routeMenuItem.DropDownItems.Add(new ToolStripSeparator());
+            var restoreRoute = routeMenuItem.DropDownItems.Add("恢复切换前配置");
+            restoreRoute.Click += async (s, e) => await RestoreCodexRouteAsync();
+            routeMenuItem.DropDownOpening += (s, e) => RefreshRouteMenu();
+            RefreshRouteMenu();
 
             var maintenanceMenu = new ToolStripMenuItem("代理维护");
             menu.Items.Add(maintenanceMenu);
@@ -330,6 +364,58 @@ namespace MomoApi.Tray
             // between heartbeats while this tray process remains alive.
             titleItem.Text = TrayPresentation.Title(healthy, runningVersion, ReadInstalledVersion(), port);
             notifyIcon.Text = TrayPresentation.Tooltip(titleItem.Text);
+        }
+
+        private string CurrentRouteMode()
+        {
+            try
+            {
+                string path = Path.Combine(userHome, ".codex", "config.toml");
+                if (!File.Exists(path)) return "unconfigured";
+                return TrayPresentation.RouteModeFromConfig(File.ReadAllText(path));
+            }
+            catch { return "custom"; }
+        }
+
+        private void RefreshRouteMenu()
+        {
+            string mode = CurrentRouteMode();
+            routeMenuItem.Text = TrayPresentation.RouteTitle(mode);
+            routeDirectItem.Checked = mode == "direct";
+            routeProxyItem.Checked = mode == "proxy";
+        }
+
+        private async Task SwitchCodexRouteAsync(string mode)
+        {
+            if (mode == "proxy" && !await CheckHealthOnceAsync(500))
+            {
+                notifyIcon.ShowBalloonTip(2000, "MOMO API Proxy", "正在启动本地代理服务...", ToolTipIcon.Info);
+                await StartBridgeAsync();
+                if (!await CheckHealthOnceAsync(1200))
+                {
+                    MessageBox.Show("本地代理未能启动，Codex 路由保持不变。", "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+            }
+
+            bool switched = await RunCliAsync("route " + mode, false);
+            RefreshRouteMenu();
+            if (switched)
+            {
+                string label = mode == "proxy" ? "本地 Proxy" : "MOMO 直连";
+                notifyIcon.ShowBalloonTip(3500, "Codex 路由已切换", "当前模式：" + label + "。请重启已打开的 Codex 会话。", ToolTipIcon.Info);
+            }
+            else
+            {
+                MessageBox.Show("Codex 路由切换失败，原配置未改变。", "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async Task RestoreCodexRouteAsync()
+        {
+            bool restored = await RunCliAsync("route restore", false);
+            RefreshRouteMenu();
+            MessageBox.Show(restored ? "已恢复切换前的 Codex 配置。请重启已打开的 Codex 会话。" : "没有可恢复的配置，或恢复失败。", "MOMO API Proxy", MessageBoxButtons.OK, restored ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
 
         private string ReadInstalledVersion()
@@ -604,15 +690,16 @@ namespace MomoApi.Tray
             UpdateHealthUI(await CheckHealthOnceAsync(300));
         }
 
-        private async Task RunCliAsync(string subCommand, bool showResult)
+        private async Task<bool> RunCliAsync(string subCommand, bool showResult)
         {
             if (isCliRunning)
             {
                 if (showResult) MessageBox.Show("已有任务正在执行中，请稍候...", "MOMO API Proxy", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
+                return false;
             }
 
             isCliRunning = true;
+            bool succeeded = false;
             try
             {
                 ProcessStartInfo psi = ResolveCliProcessInfo(subCommand);
@@ -662,6 +749,7 @@ namespace MomoApi.Tray
                     if (string.IsNullOrWhiteSpace(msg)) msg = exitCode == 0 ? "操作已完成。" : "操作失败，未返回详细信息。";
                     MessageBox.Show(msg, "MOMO API Proxy - " + subCommand, MessageBoxButtons.OK, exitCode == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Error);
                 }
+                succeeded = exitCode == 0;
             }
             catch (Exception ex)
             {
@@ -674,6 +762,7 @@ namespace MomoApi.Tray
             {
                 isCliRunning = false;
             }
+            return succeeded;
         }
 
         private async Task RefreshPluginStatusAsync()

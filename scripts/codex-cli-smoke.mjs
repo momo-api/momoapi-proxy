@@ -9,6 +9,8 @@ const codexHome = join(root, ".codex");
 const workdir = join(root, "work");
 const localToken = "codex-smoke-local-token";
 const provider = process.argv.includes("--claude") ? "claude" : "gemini";
+const credentialCommand = process.argv.includes("--credential-command");
+const port = Number(process.env.MOMO_CODEX_SMOKE_PORT || 18789);
 const model = provider === "claude" ? "claude-sonnet-4-6" : "gemini-3.7-flash";
 const successText = provider === "claude" ? "MOMO_CLAUDE_CODEX_TOOL_OK" : "MOMO_GEMINI_CODEX_TOOL_OK";
 
@@ -19,8 +21,15 @@ template.display_name = `MOMO ${provider}`;
 template.visibility = "list";
 writeFileSync(join(root, "catalog.json"), `${JSON.stringify({ models: [template] })}\n`);
 await import("node:fs/promises").then(({ mkdir }) => Promise.all([mkdir(codexHome, { recursive: true }), mkdir(workdir, { recursive: true })]));
-writeFileSync(join(codexHome, "config.toml"), `model_provider = "momo"\nmodel = "${model}"\nmodel_catalog_json = "${join(root, "catalog.json").replace(/\\/g, "/")}"\n\n[model_providers.momo]\nname = "MOMO smoke"\nbase_url = "http://127.0.0.1:18789/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n`);
-writeFileSync(join(codexHome, "auth.json"), `${JSON.stringify({ OPENAI_API_KEY: localToken })}\n`);
+let authConfig = "";
+if (credentialCommand) {
+  const helperPath = join(root, "credential.mjs");
+  writeFileSync(helperPath, `process.stdout.write(${JSON.stringify(localToken)});\n`);
+  authConfig = `\n[model_providers.momo.auth]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(helperPath.replace(/\\/g, "/"))}]\ntimeout_ms = 5000\nrefresh_interval_ms = 0\n`;
+} else {
+  writeFileSync(join(codexHome, "auth.json"), `${JSON.stringify({ OPENAI_API_KEY: localToken })}\n`);
+}
+writeFileSync(join(codexHome, "config.toml"), `model_provider = "momo"\nmodel = "${model}"\nmodel_catalog_json = "${join(root, "catalog.json").replace(/\\/g, "/")}"\n\n[model_providers.momo]\nname = "MOMO smoke"\nbase_url = "http://127.0.0.1:${port}/v1"\nwire_api = "responses"\nrequires_openai_auth = false\n${authConfig}`);
 
 let sawFunctionResponse = false;
 const fakeFetch = async (_url, init) => {
@@ -40,8 +49,8 @@ const fakeFetch = async (_url, init) => {
   const part = sawFunctionResponse ? { text: successText } : { functionCall: { name: "shell_command", args: { command: "Get-Location" } } };
   return new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [part] } }] })}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
 };
-const server = createMomoSwitch({ endpoint: "https://mock.momo", apiKey: "momo-upstream-token", localToken, host: "127.0.0.1", port: 18789 }, { fetchImpl: fakeFetch });
-await new Promise((resolve) => server.listen(18789, "127.0.0.1", resolve));
+const server = createMomoSwitch({ endpoint: "https://mock.momo", apiKey: "momo-upstream-token", localToken, host: "127.0.0.1", port }, { fetchImpl: fakeFetch });
+await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
 
 try {
   const output = await new Promise((resolve, reject) => {
