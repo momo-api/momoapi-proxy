@@ -104,9 +104,9 @@ In another terminal:
 codex
 ```
 
-The setup command backs up `~/.codex/config.toml` and `~/.codex/auth.json`, writes the local provider, and generates `~/.codex/model-catalogs/momo-codex-switch.json` from the models returned by MOMO.
+The setup command backs up `~/.codex/config.toml` and `~/.codex/auth.json`, writes the local provider, and generates `~/.codex/model-catalogs/momoapi-proxy.json` from the models returned by MOMO.
 
-On Windows, right-click the MOMO tray icon and open **Codex 路由** to switch between **MOMO 直连** and **本地 Proxy**. The switch keeps one Codex provider name (`momo-route`), preserves unrelated configuration, stores a rollback copy before the first switch, and obtains the appropriate credential dynamically from the local protected proxy settings. Restart open Codex conversations after switching so they reload the provider configuration.
+On Windows, right-click the MOMO tray icon and open **Codex 路由** to switch between **MOMO 直连** and **本地 Proxy**. The switch keeps one Codex provider name (`momo-route`), preserves unrelated configuration, stores a rollback copy before the first switch, and obtains the appropriate credential dynamically from the local protected proxy settings. Direct mode selects the official-only `~/.codex/model-catalogs/momo-models.json` catalog when it exists (otherwise Codex's built-in official catalog); Proxy mode selects the automatically synced `~/.codex/model-catalogs/momoapi-proxy.json` catalog so routed Claude, Gemini, and other third-party models are available only through the local Proxy. Restart open Codex conversations after switching so they reload both the provider and model catalog.
 
 ### MOMO Image plugin
 

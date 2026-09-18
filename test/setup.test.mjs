@@ -179,7 +179,17 @@ test("doctor and uninstall lifecycle verification", async () => {
     const report = await runDoctor({ env, fetchImpl: fakeFetch });
     assert.equal(report.checks.codexConfig.hasResponsesWire, true);
     assert.equal(report.checks.catalog.ok, true);
+    assert.equal(report.checks.routeCatalog.ok, true);
     assert.equal(report.checks.autostart.installed, true);
+
+    const configPath = join(env.CODEX_HOME, "config.toml");
+    const staleCatalog = join(env.CODEX_HOME, "model-catalogs", "momo-models.json");
+    writeFileSync(staleCatalog, JSON.stringify({ models: [{ slug: "gpt-5.5" }] }));
+    writeFileSync(configPath, readFileSync(configPath, "utf8").replace(/momoapi-proxy\.json/g, "momo-models.json"));
+    const staleReport = await runDoctor({ env, fetchImpl: fakeFetch });
+    assert.equal(staleReport.ok, false);
+    assert.equal(staleReport.checks.routeCatalog.ok, false);
+    assert.equal(staleReport.checks.routeCatalog.mode, "proxy");
 
     const uninstallResult = uninstall({ env, removeKey: true });
     assert.equal(uninstallResult.uninstalled, true);
