@@ -53,6 +53,7 @@ test("update supervisor records activation after matching health check", async (
       waitForParent: async () => true,
       runCli: (_script, command) => { commands.push(command); return true; },
       healthCheck: async ({ expectedVersion, requireUpstream }) => expectedVersion === "0.12.0" && requireUpstream,
+      platform: "linux",
     });
     assert.equal(result.activated, true);
     assert.equal(result.imagePluginInstalled, true);
@@ -78,6 +79,7 @@ test("update supervisor honors an explicit image plugin opt-out", async () => {
       runCli: (_script, command) => { commands.push(command); return true; },
       healthCheck: async () => true,
       installImagePlugin: false,
+      platform: "linux",
     });
     assert.equal(result.activated, true);
     assert.equal(result.imagePluginInstalled, false);
@@ -132,6 +134,7 @@ test("staged Windows-style activation stops the old service before swapping dire
       stopMcpProcesses: async () => { operations.push({ type: "mcp" }); return [1234]; },
       move: (source, destination) => { operations.push({ type: "move", source, destination }); return renameSync(source, destination); },
       healthCheck: async ({ expectedVersion }) => expectedVersion === "0.13.3",
+      platform: "win32",
     });
     assert.equal(result.activated, true);
     assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.3");
@@ -142,8 +145,45 @@ test("staged Windows-style activation stops the old service before swapping dire
     assert.deepEqual(operations[3].command, ["plugin", "install"]);
     assert.equal(operations[4].type, "move");
     assert.equal(operations[6].command, "start");
-    assert.deepEqual(operations[7].command, ["plugin", "install"]);
+    assert.deepEqual(operations[7].command, ["desktop", "refresh"]);
+    assert.deepEqual(operations[8].command, ["plugin", "install"]);
     assert.equal(result.activationMode, "swap");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Windows activation rolls back when the stable tray cannot be refreshed", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-tray-refresh-failure-"));
+  const root = join(home, "app");
+  const staging = join(home, ".momoapi-proxy-update-stage");
+  const backup = join(home, "app.update-backup");
+  createVersion(root, "0.13.32");
+  createVersion(staging, "0.13.33");
+  const commands = [];
+  try {
+    const result = await superviseUpdate({
+      rootDir: root, stagingDir: staging, backupDir: backup, targetVersion: "0.13.33", previousVersion: "0.13.32", port: 18789,
+      env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
+      runCli: (script, command) => {
+        commands.push({ script, command });
+        return Array.isArray(command) && command[0] === "desktop" ? false : true;
+      },
+      healthCheck: async ({ expectedVersion }) => true,
+      move: renameSync,
+      platform: "win32",
+    });
+    assert.equal(result.activated, false);
+    assert.equal(result.rolledBack, true);
+    assert.equal(result.restoredHealthy, true);
+    assert.equal(result.errorCode, "update_desktop_refresh_failed");
+    assert.equal(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version, "0.13.32");
+    assert.deepEqual(commands.map(({ command }) => command), [
+      "stop", ["plugin", "install"], "start", ["desktop", "refresh"], "stop", "start",
+    ]);
+    const status = JSON.parse(readFileSync(join(home, "update-status.json"), "utf8"));
+    assert.equal(status.status, "rolled_back");
+    assert.equal(status.errorCode, "update_desktop_refresh_failed");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -423,6 +463,7 @@ test("staged activation falls back to transactional in-place replacement when di
         if (source === staging) throw Object.assign(new Error("locked"), { code: "EPERM" });
         return renameSync(source, destination);
       },
+      platform: "linux",
     });
     assert.deepEqual(commands.map(({ command }) => command), ["stop", ["plugin", "install"], "start", ["plugin", "install"]]);
     assert.equal(result.activated, true);

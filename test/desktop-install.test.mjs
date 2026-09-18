@@ -3,7 +3,7 @@ import test from "node:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { installWindowsDesktop } from "../src/desktop-install.mjs";
+import { installWindowsDesktop, refreshWindowsTray } from "../src/desktop-install.mjs";
 import { TRAY_EXE_BASE64 } from "../src/tray-binary.mjs";
 
 function fixture(t) {
@@ -76,4 +76,13 @@ test("desktop setup respects no-autostart", (t) => {
   });
   assert.match(shortcutScript, /if \(\$false -and/);
   assert.equal(existsSync(result.startupShortcut), false);
+});
+
+test("tray refresh replaces only the stable tray without changing shortcuts", (t) => {
+  const { env, target } = fixture(t);
+  writeFileSync(target, "old tray");
+  const result = refreshWindowsTray({ env, osPlatform: "win32", spawnSyncImpl: () => ({ status: 0, stdout: "" }) });
+  assert.equal(result.replaced, true);
+  assert.deepEqual(readFileSync(target), Buffer.from(TRAY_EXE_BASE64, "base64"));
+  assert.equal(existsSync(join(env.USERPROFILE, "Desktop", "MOMO API Proxy.lnk")), false);
 });

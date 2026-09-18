@@ -19,6 +19,37 @@ function isWindowsProcessRunning(executable, spawnSyncImpl) {
   }
 }
 
+export function refreshWindowsTray({ env = process.env, osPlatform = process.platform, spawnSyncImpl = spawnSync } = {}) {
+  if (osPlatform !== "win32") return { installed: false, replaced: false, reason: "not_windows" };
+  const userHome = env.USERPROFILE || homedir();
+  const targetTray = join(userHome, ".momoapi-proxy", "bin", "MomoApiProxyTray.exe");
+  const trayBytes = Buffer.from(TRAY_EXE_BASE64 || "", "base64");
+  if (!trayBytes.length) throw new Error("The embedded MOMO API Proxy tray is unavailable.");
+  mkdirSync(join(userHome, ".momoapi-proxy", "bin"), { recursive: true });
+  if (existsSync(targetTray) && readFileSync(targetTray).equals(trayBytes)) {
+    return { installed: true, replaced: false, trayPath: targetTray };
+  }
+
+  const stopped = spawnSyncImpl("powershell.exe", [
+    "-NoProfile", "-Command",
+    "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process -Filter \"Name = 'MomoApiProxyTray.exe'\" | Where-Object { $_.ExecutablePath -eq '" + targetTray.replace(/'/g, "''") + "' } | ForEach-Object { $p=Get-Process -Id $_.ProcessId; $p.Kill(); $p.WaitForExit() }",
+  ], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+  if (stopped.error || stopped.status !== 0) throw new Error("Could not stop the installed MOMO API Proxy tray for replacement.");
+
+  const previousBytes = existsSync(targetTray) ? readFileSync(targetTray) : null;
+  try {
+    writeFileSync(targetTray, trayBytes);
+    if (!readFileSync(targetTray).equals(trayBytes)) throw new Error("The installed MOMO API Proxy tray did not match the embedded release binary.");
+  } catch (error) {
+    try {
+      if (previousBytes) writeFileSync(targetTray, previousBytes);
+      else if (existsSync(targetTray)) unlinkSync(targetTray);
+    } catch {}
+    throw error;
+  }
+  return { installed: true, replaced: true, trayPath: targetTray };
+}
+
 export function installWindowsDesktop({ port = 18789, autostart = true, env = process.env, osPlatform = process.platform, spawnSyncImpl = spawnSync, spawnImpl = spawn } = {}) {
   if (osPlatform !== "win32") return { installed: false, reason: "not_windows" };
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid tray port.");
@@ -28,7 +59,8 @@ export function installWindowsDesktop({ port = 18789, autostart = true, env = pr
   mkdirSync(proxyBinDir, { recursive: true });
 
   const targetExe = join(proxyBinDir, "momoapi-proxy.exe");
-  const targetTray = join(proxyBinDir, "MomoApiProxyTray.exe");
+  const trayRefresh = refreshWindowsTray({ env, osPlatform, spawnSyncImpl });
+  const targetTray = trayRefresh.trayPath || join(proxyBinDir, "MomoApiProxyTray.exe");
   const targetIco = join(proxyHome, "app.ico");
 
   // 1. Clean up legacy node.exe copy and only copy real compiled standalone binaries
@@ -47,21 +79,7 @@ export function installWindowsDesktop({ port = 18789, autostart = true, env = pr
     } catch {}
   }
 
-  // 2. Extract embedded tray and true-alpha ICO binaries
-  if (TRAY_EXE_BASE64) {
-    const trayBytes = Buffer.from(TRAY_EXE_BASE64, "base64");
-    if (!existsSync(targetTray) || !readFileSync(targetTray).equals(trayBytes)) {
-      // Windows locks running executables. Stop only our installed tray before
-      // replacement, never a similarly named process or the proxy daemon.
-      const stopped = spawnSyncImpl("powershell.exe", [
-        "-NoProfile", "-Command",
-        "$ErrorActionPreference='Stop'; Get-CimInstance Win32_Process -Filter \"Name = 'MomoApiProxyTray.exe'\" | Where-Object { $_.ExecutablePath -eq '" + targetTray.replace(/'/g, "''") + "' } | ForEach-Object { $p=Get-Process -Id $_.ProcessId; $p.Kill(); $p.WaitForExit() }",
-      ], { encoding: "utf8", windowsHide: true, timeout: 15000 });
-      if (stopped.error || stopped.status !== 0) throw new Error("Could not stop the installed MOMO API Proxy tray for replacement.");
-      writeFileSync(targetTray, trayBytes);
-    }
-  }
-
+  // 2. Install the true-alpha ICO binary after refreshing the tray executable.
   if (APP_ICO_BASE64) {
     try {
       writeFileSync(targetIco, Buffer.from(APP_ICO_BASE64, "base64"));
@@ -138,6 +156,7 @@ if ($${autostart ? "true" : "false"} -and (Test-Path '${startupDir.replace(/'/g,
     startMenuShortcut: startMenuLnk,
     startupShortcut: startupLnk,
     trayPath: targetTray,
+    trayReplaced: trayRefresh.replaced,
     trayLaunched,
     startupMigration,
   };

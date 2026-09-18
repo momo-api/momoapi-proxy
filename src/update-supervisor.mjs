@@ -383,6 +383,7 @@ export async function superviseUpdate({
   startTray = startManagedTray,
   restoreTrayProcess = restoreManagedTray,
   trayRestoreWait = sleep,
+  platform = process.platform,
 } = {}) {
   const stagedActivation = Boolean(stagingDir);
   let activationMode = stagedActivation ? "swap" : "legacy";
@@ -552,7 +553,16 @@ export async function superviseUpdate({
     requireUpstream: true,
     phase: `Activating proxy v${targetVersion}`, env,
   });
-  if (healthy) {
+  let desktopRefreshSucceeded = true;
+  if (healthy && platform === "win32") {
+    desktopRefreshSucceeded = cliRunSucceeded(runCli(newScript, ["desktop", "refresh"], 30_000));
+    appendSupervisorLog(desktopRefreshSucceeded
+      ? `Refreshed the stable Windows tray binary for v${targetVersion}.`
+      : `Refreshing the stable Windows tray binary for v${targetVersion} failed; starting rollback.`, env);
+  }
+  const activationReady = healthy && desktopRefreshSucceeded;
+  const activationErrorCode = healthy && !desktopRefreshSucceeded ? "update_desktop_refresh_failed" : "update_activation_failed";
+  if (activationReady) {
     const imagePluginInstalled = installImagePlugin
       ? cliRunSucceeded(runCli(newScript, ["plugin", "install"], 120_000))
       : false;
@@ -579,7 +589,7 @@ export async function superviseUpdate({
     return { activated: true, rolledBack: false, imagePluginInstalled, activationMode };
   }
 
-  appendSupervisorLog(`Proxy v${targetVersion} failed health verification; starting rollback.`, env);
+  if (!healthy) appendSupervisorLog(`Proxy v${targetVersion} failed health verification; starting rollback.`, env);
   if (activationMode === "inplace") {
     if (pathExists(newScript)) runCli(newScript, "stop", 15_000);
     let restoredTree = false;
@@ -600,7 +610,7 @@ export async function superviseUpdate({
       status: restoredHealthy ? "rolled_back" : "rollback_failed",
       current: previousVersion, latest: targetVersion, previous: previousVersion,
       hasUpdate: true, checkFailed: !restoredHealthy, rolledBack: restoredTree,
-      errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
+      errorCode: restoredHealthy ? activationErrorCode : "update_inplace_restore_failed",
     }, env);
     await restoreTray(restoredHealthy, "the health-check rollback");
     if (restoredHealthy) {
@@ -608,7 +618,7 @@ export async function superviseUpdate({
     }
     return {
       activated: false, rolledBack: restoredTree, restoredHealthy,
-      errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
+      errorCode: restoredHealthy ? activationErrorCode : "update_inplace_restore_failed",
     };
   }
 
@@ -652,7 +662,7 @@ export async function superviseUpdate({
     hasUpdate: true,
     checkFailed: !restoredHealthy,
     rolledBack: true,
-    errorCode: restoredHealthy ? "update_activation_failed" : "update_rollback_restart_failed",
+    errorCode: restoredHealthy ? activationErrorCode : "update_rollback_restart_failed",
   }, env);
   appendSupervisorLog(restoredHealthy
     ? `Rollback to proxy v${previousVersion} completed.`
@@ -666,7 +676,7 @@ export async function superviseUpdate({
     rolledBack: true,
     restoredHealthy,
     failedDir,
-    errorCode: restoredHealthy ? "update_activation_failed" : "update_rollback_restart_failed",
+    errorCode: restoredHealthy ? activationErrorCode : "update_rollback_restart_failed",
   };
 }
 
