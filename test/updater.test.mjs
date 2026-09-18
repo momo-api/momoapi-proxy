@@ -335,12 +335,18 @@ test("automatic updates latch a failed target until a newer release appears", as
 });
 
 test("self-update fails closed when GitHub release attestation is missing", async () => {
-  await assert.rejects(updateSelf({
-    endpoint: "https://mock.momo",
-    fetchImpl: async (url) => url.includes("bridge-latest.json")
-      ? new Response(JSON.stringify({ version: "0.12.1", url: "https://mock.momo/momoapi-proxy-0.12.1.tgz" }), { status: 200 })
-      : new Response("missing", { status: 404 }),
-  }), (error) => error.code === "update_check_failed");
+  const home = mkdtempSync(join(tmpdir(), "momo-updater-attestation-"));
+  try {
+    await assert.rejects(updateSelf({
+      endpoint: "https://mock.momo",
+      env: { MOMO_PROXY_HOME: home },
+      fetchImpl: async (url) => url.includes("bridge-latest.json")
+        ? new Response(JSON.stringify({ version: "0.12.1", url: "https://mock.momo/momoapi-proxy-0.12.1.tgz" }), { status: 200 })
+        : new Response("missing", { status: 404 }),
+    }), (error) => error.code === "update_check_failed");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("self-update verifies and stages a newer package without renaming the running tree", async () => {

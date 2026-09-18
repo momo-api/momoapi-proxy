@@ -1,6 +1,5 @@
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { appHome, resolveSettings } from "./config.mjs";
 import { getCurrentVersion } from "./updater.mjs";
@@ -21,8 +20,8 @@ export function getRuntimePaths(env = process.env) {
   };
 }
 
-export function writeRuntimePort(port, pid, extra = {}) {
-  const { runtimePortPath } = getRuntimePaths();
+export function writeRuntimePort(port, pid, extra = {}, env = process.env) {
+  const { runtimePortPath } = getRuntimePaths(env);
   const data = {
     port,
     pid,
@@ -35,8 +34,8 @@ export function writeRuntimePort(port, pid, extra = {}) {
   } catch {}
 }
 
-export function readRuntimePort() {
-  const { runtimePortPath } = getRuntimePaths();
+export function readRuntimePort(env = process.env) {
+  const { runtimePortPath } = getRuntimePaths(env);
   if (!existsSync(runtimePortPath)) return null;
   try {
     return JSON.parse(readFileSync(runtimePortPath, "utf8"));
@@ -45,8 +44,8 @@ export function readRuntimePort() {
   }
 }
 
-export function writeHeartbeat(status = {}) {
-  const { heartbeatPath } = getRuntimePaths();
+export function writeHeartbeat(status = {}, env = process.env) {
+  const { heartbeatPath } = getRuntimePaths(env);
   let previous = {};
   if (existsSync(heartbeatPath)) {
     try { previous = JSON.parse(readFileSync(heartbeatPath, "utf8")); } catch {}

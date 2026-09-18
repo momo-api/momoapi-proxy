@@ -5,6 +5,10 @@ import { randomBytes } from "node:crypto";
 
 export const DEFAULT_ENDPOINT = "https://momoapi.us";
 
+export function userHome(env = process.env) {
+  return env.USERPROFILE || env.HOME || homedir();
+}
+
 export function normalizeEndpoint(value = DEFAULT_ENDPOINT) {
   const normalized = String(value || DEFAULT_ENDPOINT).replace(/\/+$/, "");
   let parsed;
@@ -24,15 +28,17 @@ export function normalizeEndpoint(value = DEFAULT_ENDPOINT) {
 }
 
 export function appHome(env = process.env) {
-  return env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME || join(homedir(), ".momoapi-proxy");
+  return env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME || join(userHome(env), ".momoapi-proxy");
 }
 
 export function settingsPath(env = process.env) {
   const primary = join(appHome(env), "settings.json");
   if (existsSync(primary)) return primary;
-  const legacy1 = join(homedir(), ".momo-codex-bridge", "settings.json");
+  if (env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME) return primary;
+  const home = userHome(env);
+  const legacy1 = join(home, ".momo-codex-bridge", "settings.json");
   if (existsSync(legacy1)) return legacy1;
-  const legacy2 = join(homedir(), ".momo-codex-switch", "settings.json");
+  const legacy2 = join(home, ".momo-codex-switch", "settings.json");
   if (existsSync(legacy2)) return legacy2;
   return primary;
 }

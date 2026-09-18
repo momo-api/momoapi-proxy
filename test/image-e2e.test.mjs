@@ -27,7 +27,7 @@ test("image MCP end-to-end over a fake upstream", async () => {
     }
     throw new Error("unexpected upstream: " + target);
   };
-  const server = createMomoSwitch(settings, { fetchImpl: fakeFetch });
+  const server = createMomoSwitch(settings, { fetchImpl: fakeFetch, env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, ".codex"), MOMO_PROXY_HOME: join(home, ".proxy") } });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;
   const unavailable = await fetch(`http://127.0.0.1:${port}/internal/images/generate`, {

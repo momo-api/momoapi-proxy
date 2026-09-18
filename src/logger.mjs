@@ -1,14 +1,13 @@
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { recordDiagnosticEvent } from "./diagnostics.mjs";
 import { defaultLoggingRuntime, requestEventPath } from "./logging-runtime.mjs";
 import { readRotatingLogTail } from "./log-tail.mjs";
+import { appHome } from "./config.mjs";
 
 const MAX_TEXT = 1000;
 
 export function legacyLogPath(env = process.env) {
-  const root = env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || join(homedir(), ".momoapi-proxy");
-  return join(root, "proxy.log");
+  return join(appHome(env), "proxy.log");
 }
 
 export function logPath(env = process.env) {

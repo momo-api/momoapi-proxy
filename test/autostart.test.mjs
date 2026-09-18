@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { autostartTarget, installAutostart, isAutostartInstalled, migrateWindowsAutostart, uninstallAutostart, WINDOWS_SERVICE_STARTUP, WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_SERVICE_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP } from "../src/autostart.mjs";
-import { buildWindowsServiceWrapperCmd, resolveWindowsServiceBinPath } from "../src/service.mjs";
+import { buildWindowsServiceWrapperCmd, readRuntimePort, resolveWindowsServiceBinPath, writeHeartbeat, writeRuntimePort } from "../src/service.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "momo-startup-test-"));
@@ -14,6 +14,17 @@ function fixture(t) {
   mkdirSync(dir, { recursive: true });
   return { env, dir };
 }
+
+test("runtime state writers honor an isolated proxy home", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "momo-runtime-state-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const env = { MOMO_PROXY_HOME: join(root, "proxy") };
+  writeRuntimePort(19999, 12345, { marker: "isolated" }, env);
+  writeHeartbeat({ running: true, port: 19999 }, env);
+  assert.equal(readRuntimePort(env).marker, "isolated");
+  assert.equal(existsSync(join(env.MOMO_PROXY_HOME, "runtime-port.json")), true);
+  assert.equal(existsSync(join(env.MOMO_PROXY_HOME, "tray-heartbeat.json")), true);
+});
 
 test("Windows startup migration preserves both files and is idempotent", (t) => {
   const { env, dir } = fixture(t);

@@ -7,6 +7,9 @@ import { flushLogging } from "../src/logging-runtime.mjs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isolatedProfile } from "./support/isolated-profile.mjs";
+
+const testProfile = isolatedProfile("momo-context-policy-test-");
 
 const image = (seed, bytes = 256) => `data:image/png;base64,${seed.repeat(bytes)}`;
 
@@ -18,7 +21,7 @@ async function withServer(settings, fetchImpl, run) {
     host: "127.0.0.1",
     port: 0,
     ...settings,
-  }, { fetchImpl });
+  }, { fetchImpl, env: testProfile.env });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try { await run(base); } finally { await new Promise((resolve) => server.close(resolve)); }

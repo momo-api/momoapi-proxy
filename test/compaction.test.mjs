@@ -5,8 +5,10 @@ import { preparePreviousResponseReplay, rememberResponseState, resetResponseStat
 import { commitProviderRoute, observeProviderRoute, resetProviderRouteStateForTests } from "../src/provider-switch-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
 import { compactFixture } from "../scripts/compact-fixtures.mjs";
+import { isolatedProfile } from "./support/isolated-profile.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "test_gateway_key", localToken: "test_local_token", host: "127.0.0.1", port: 0, compactionMode: "upstream" };
+const testProfile = isolatedProfile("momo-compaction-test-");
 
 test("provider route state detects protocol switches without retaining raw thread ids", () => {
   resetProviderRouteStateForTests();
@@ -290,7 +292,7 @@ test("mock upstream tool round trip survives checkpoint and encrypted local enve
 });
 
 async function withServer(fetchImpl, run, overrides = {}) {
-  const server = createMomoSwitch({ ...settings, ...overrides }, { fetchImpl });
+  const server = createMomoSwitch({ ...settings, ...overrides }, { fetchImpl, env: testProfile.env });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     await run(`http://127.0.0.1:${server.address().port}`);

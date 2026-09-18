@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { daemonEnvironment, resolveDaemonSettings, resolveSettings } from "../src/config.mjs";
+import { appHome, daemonEnvironment, resolveDaemonSettings, resolveSettings, settingsPath } from "../src/config.mjs";
+
+test("injected user homes never fall back to the real profile", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-home-"));
+  const explicitProxyHome = join(home, "isolated-proxy");
+  try {
+    mkdirSync(join(home, ".momo-codex-bridge"), { recursive: true });
+    writeFileSync(join(home, ".momo-codex-bridge", "settings.json"), "{}\n");
+    assert.equal(appHome({ HOME: home }), join(home, ".momoapi-proxy"));
+    assert.equal(appHome({ USERPROFILE: home }), join(home, ".momoapi-proxy"));
+    assert.equal(settingsPath({ HOME: home }), join(home, ".momo-codex-bridge", "settings.json"));
+    assert.equal(settingsPath({ HOME: home, MOMO_PROXY_HOME: explicitProxyHome }), join(explicitProxyHome, "settings.json"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("saved API key wins over a stale process environment key", () => {
   const home = mkdtempSync(join(tmpdir(), "momo-config-"));

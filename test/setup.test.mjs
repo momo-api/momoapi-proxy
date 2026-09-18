@@ -8,15 +8,22 @@ import { isAutostartInstalled } from "../src/autostart.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 
 test("setup rejects reserved placeholder endpoints before writing configuration", async () => {
+  const root = mkdtempSync(join(tmpdir(), "momo-setup-placeholder-"));
+  const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex"), MOMO_PROXY_HOME: join(root, ".proxy") };
   let fetched = false;
-  await assert.rejects(() => setup({
-    apiKey: "momo-secret",
-    endpoint: "https://gateway.example",
-    autostart: false,
-    imagePlugin: false,
-    fetchImpl: async () => { fetched = true; return new Response("unexpected"); },
-  }), (error) => error.code === "endpoint_placeholder");
-  assert.equal(fetched, false);
+  try {
+    await assert.rejects(() => setup({
+      apiKey: "momo-secret",
+      endpoint: "https://gateway.example",
+      autostart: false,
+      imagePlugin: false,
+      fetchImpl: async () => { fetched = true; return new Response("unexpected"); },
+      env,
+    }), (error) => error.code === "endpoint_placeholder");
+    assert.equal(fetched, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("setup writes a local provider configuration and rollback restores it", async () => {

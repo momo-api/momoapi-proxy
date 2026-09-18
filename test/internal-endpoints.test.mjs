@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMomoSwitch } from "../src/server.mjs";
+import { isolatedProfile } from "./support/isolated-profile.mjs";
+
+const testProfile = isolatedProfile("momo-internal-endpoints-test-");
 
 test("internal endpoints enforce loopback and localToken authentication", async () => {
   const localToken = "secret_local_test_token_123";
@@ -12,7 +15,7 @@ test("internal endpoints enforce loopback and localToken authentication", async 
       host: "127.0.0.1",
       localToken,
     },
-    { exitImpl: () => {} }
+    { exitImpl: () => {}, env: testProfile.env }
   );
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

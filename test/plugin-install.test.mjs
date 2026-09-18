@@ -81,6 +81,8 @@ test("image plugin installer is idempotent for its bundled local marketplace", (
 
 test("image plugin installer replaces a previously configured marketplace with the bundled copy", () => {
   const calls = [];
+  const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-install-"));
+  const env = { MOMO_PROXY_HOME: proxyHome };
   const runCodex = (args) => {
     calls.push(args);
     if (args[1] === "marketplace" && args[2] === "list") {
@@ -92,25 +94,37 @@ test("image plugin installer replaces a previously configured marketplace with t
     return result("{}");
   };
 
-  const installed = installImagePlugin({ runCodex });
-  assert.equal(installed.installed, true);
-  assert.equal(installed.marketplaceSource, "bundled");
-  assert.ok(calls.some((args) => args.join(" ") === "plugin marketplace remove momo-api --json"));
-  assert.ok(calls.some((args) => args[0] === "plugin" && args[1] === "marketplace" && args[2] === "add"));
+  try {
+    const installed = installImagePlugin({ env, runCodex });
+    assert.equal(installed.installed, true);
+    assert.equal(installed.marketplaceSource, "bundled");
+    assert.ok(calls.some((args) => args.join(" ") === "plugin marketplace remove momo-api --json"));
+    assert.ok(calls.some((args) => args[0] === "plugin" && args[1] === "marketplace" && args[2] === "add"));
+  } finally {
+    rmSync(proxyHome, { recursive: true, force: true });
+  }
 });
 
 test("missing or old Codex does not make proxy setup unsafe", () => {
-  const missing = installImagePlugin({
-    runCodex: () => result("", null, "", Object.assign(new Error("missing"), { code: "ENOENT" })),
-  });
-  assert.equal(missing.installed, false);
-  assert.equal(missing.errorCode, "codex_cli_not_found");
+  const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-install-"));
+  const env = { MOMO_PROXY_HOME: proxyHome };
+  try {
+    const missing = installImagePlugin({
+      env,
+      runCodex: () => result("", null, "", Object.assign(new Error("missing"), { code: "ENOENT" })),
+    });
+    assert.equal(missing.installed, false);
+    assert.equal(missing.errorCode, "codex_cli_not_found");
 
-  const old = getImagePluginStatus({
-    runCodex: () => result("", 2, "error: unrecognized subcommand 'plugin'"),
-  });
-  assert.equal(old.installed, false);
-  assert.equal(old.errorCode, "codex_plugin_cli_unsupported");
+    const old = getImagePluginStatus({
+      env,
+      runCodex: () => result("", 2, "error: unrecognized subcommand 'plugin'"),
+    });
+    assert.equal(old.installed, false);
+    assert.equal(old.errorCode, "codex_plugin_cli_unsupported");
+  } finally {
+    rmSync(proxyHome, { recursive: true, force: true });
+  }
 });
 
 test("discovers the Codex Desktop executable without relying on PATH", () => {
