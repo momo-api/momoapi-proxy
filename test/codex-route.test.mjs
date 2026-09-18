@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { codexRouteStatus, readCodexCredential, restoreCodexRoute, switchCodexRoute } from "../src/codex-route.mjs";
+import { codexRouteStatus, migrateManagedRouteAliases, readCodexCredential, restoreCodexRoute, switchCodexRoute } from "../src/codex-route.mjs";
 
 const cliPath = fileURLToPath(new URL("../bin/momoapi-proxy.mjs", import.meta.url));
 
@@ -20,14 +20,16 @@ function fixture() {
   return { root, env };
 }
 
-test("Codex route switches without changing auth or unrelated config", () => {
+test("Codex route switches all MOMO provider aliases without changing auth or unrelated config", () => {
   const { root, env } = fixture();
   try {
     const direct = switchCodexRoute("direct", { env, nodePath: "C:\\node.exe", cliPath: "C:\\proxy\\momoapi-proxy.mjs" });
     assert.equal(direct.mode, "direct");
     let content = readFileSync(direct.config, "utf8");
-    assert.match(content, /model_provider = "momo-route"/);
-    assert.match(content, /base_url = "https:\/\/momoapi.us\/v1"/);
+    assert.match(content, /model_provider = "Codex"/);
+    assert.match(content, /\[model_providers\.Codex\][\s\S]*base_url = "https:\/\/momoapi.us\/v1"/);
+    assert.match(content, /\[model_providers\.momo-route\][\s\S]*base_url = "https:\/\/momoapi.us\/v1"/);
+    assert.match(content, /\[model_providers\.momo-codex-bridge\]/);
     assert.match(content, /"credential", "upstream"/);
     assert.match(content, /model = "gpt-5.6-luna"/);
     assert.doesNotMatch(content, /upstream-secret|local-secret/);
@@ -35,7 +37,8 @@ test("Codex route switches without changing auth or unrelated config", () => {
 
     const proxy = switchCodexRoute("proxy", { env, nodePath: "C:\\node.exe", cliPath: "C:\\proxy\\momoapi-proxy.mjs" });
     content = readFileSync(proxy.config, "utf8");
-    assert.match(content, /base_url = "http:\/\/127.0.0.1:18789\/v1"/);
+    assert.match(content, /\[model_providers\.Codex\][\s\S]*base_url = "http:\/\/127.0.0.1:18789\/v1"/);
+    assert.equal((content.match(/base_url = "http:\/\/127.0.0.1:18789\/v1"/g) || []).length, proxy.aliases.length);
     assert.match(content, /"credential", "local"/);
     assert.equal((content.match(/MOMOAPI_ROUTE_MANAGED_BEGIN/g) || []).length, 1);
     assert.equal(codexRouteStatus(env).mode, "proxy");
@@ -46,6 +49,64 @@ test("Codex route switches without changing auth or unrelated config", () => {
     assert.equal(restored.mode, "direct");
     assert.match(readFileSync(restored.restored, "utf8"), /model_provider = "Codex"/);
     assert.doesNotMatch(readFileSync(restored.restored, "utf8"), /MOMOAPI_ROUTE_MANAGED_BEGIN/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("route status follows the active provider instead of a stale managed marker", () => {
+  const { root, env } = fixture();
+  try {
+    writeFileSync(join(env.CODEX_HOME, "config.toml"), [
+      'model_provider = "Codex"',
+      '# MOMOAPI_ROUTE_MANAGED_BEGIN',
+      '# MOMOAPI_ROUTE_MODE=proxy',
+      '[model_providers.Codex]',
+      'base_url = "https://momoapi.us/v1"',
+      '[model_providers.momo-route]',
+      'base_url = "http://127.0.0.1:18789/v1"',
+      '# MOMOAPI_ROUTE_MANAGED_END',
+      '',
+    ].join("\n"));
+    const status = codexRouteStatus(env);
+    assert.equal(status.mode, "direct");
+    assert.equal(status.markerMode, "proxy");
+    assert.equal(status.markerMismatch, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("route switch removes legacy top-level override that can defeat provider routing", () => {
+  const { root, env } = fixture();
+  try {
+    const path = join(env.CODEX_HOME, "config.toml");
+    writeFileSync(path, '# MOMOAPI_PROXY_MANAGED\nopenai_base_url = "http://127.0.0.1:18789/v1"\n' + readFileSync(path, "utf8"));
+    switchCodexRoute("direct", { env, nodePath: "C:\\node.exe", cliPath: "C:\\proxy\\momoapi-proxy.mjs" });
+    const content = readFileSync(path, "utf8");
+    assert.doesNotMatch(content, /^openai_base_url\s*=/m);
+    assert.doesNotMatch(content, /MOMOAPI_PROXY_MANAGED/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("managed route migration repairs aliases for existing conversations after update", () => {
+  const { root, env } = fixture();
+  try {
+    const path = join(env.CODEX_HOME, "config.toml");
+    writeFileSync(path, [
+      'model_provider = "momo-route"',
+      '[model_providers.Codex]',
+      'base_url = "https://momoapi.us/v1"',
+      '# MOMOAPI_ROUTE_MANAGED_BEGIN',
+      '# MOMOAPI_ROUTE_MODE=proxy',
+      '[model_providers.momo-route]',
+      'base_url = "http://127.0.0.1:18789/v1"',
+      '# MOMOAPI_ROUTE_MANAGED_END',
+      '',
+    ].join("\n"));
+    assert.equal(codexRouteStatus(env).consistent, false);
+    const migration = migrateManagedRouteAliases({ env, nodePath: "C:\\node.exe", cliPath: "C:\\proxy\\momoapi-proxy.mjs" });
+    assert.equal(migration.changed, true);
+    const content = readFileSync(path, "utf8");
+    assert.match(content, /\[model_providers\.Codex\][\s\S]*base_url = "http:\/\/127.0.0.1:18789\/v1"/);
+    assert.equal(codexRouteStatus(env).consistent, true);
+    assert.deepEqual(migrateManagedRouteAliases({ env, nodePath: "C:\\node.exe", cliPath: "C:\\proxy\\momoapi-proxy.mjs" }).reason, "current");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

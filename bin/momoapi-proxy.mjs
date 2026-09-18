@@ -21,7 +21,7 @@ import { configureDiagnostics, readRecentDiagnosticReport, recordDiagnosticEvent
 import { closeLogging, configureLoggingRuntime, createLoggingRuntime } from "../src/logging-runtime.mjs";
 import { createSignalStopper } from "../src/process-shutdown.mjs";
 import { getImagePluginStatus, installImagePlugin } from "../src/plugin-install.mjs";
-import { codexRouteStatus, readCodexCredential, resolveInstalledCliPath, restoreCodexRoute, switchCodexRoute } from "../src/codex-route.mjs";
+import { codexRouteStatus, migrateManagedRouteAliases, readCodexCredential, resolveInstalledCliPath, restoreCodexRoute, switchCodexRoute } from "../src/codex-route.mjs";
 
 process.on("uncaughtException", (err) => {
   logError("Uncaught Exception", err);
@@ -326,6 +326,13 @@ async function main() {
     await startDaemon(binFile, scriptDir, port);
     console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
   } else if (command === "serve") {
+    try {
+      const currentCliPath = fileURLToPath(import.meta.url);
+      const migration = migrateManagedRouteAliases({ cliPath: resolveInstalledCliPath(currentCliPath) });
+      if (migration.changed) console.log("Repaired managed Codex route aliases for existing conversations. Restart Codex Desktop or VS Code to apply the route.");
+    } catch (error) {
+      console.warn("Managed Codex route aliases could not be updated:", error.message);
+    }
     try {
       const migration = migrateManagedCompactionConfig();
       if (migration.changed) console.log("Removed legacy MOMO Codex compaction overrides. Start a new conversation to use the Codex defaults.");

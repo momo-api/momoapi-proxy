@@ -55,19 +55,42 @@ namespace MomoApi.Tray
 
         public static string RouteModeFromConfig(string content)
         {
-            var marker = Regex.Match(content ?? "", "^# MOMOAPI_ROUTE_MODE=(direct|proxy)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
-            if (marker.Success) return marker.Groups[1].Value.ToLowerInvariant();
-            if (Regex.IsMatch(content ?? "", "base_url\\s*=\\s*\"http://(?:127\\.0\\.0\\.1|localhost):[0-9]+/v1/?\"", RegexOptions.IgnoreCase)) return "proxy";
-            if (Regex.IsMatch(content ?? "", "base_url\\s*=\\s*\"https://momoapi\\.us(?:/v1)?/?\"", RegexOptions.IgnoreCase)) return "direct";
+            string provider = "";
+            foreach (string line in (content ?? "").Replace("\r\n", "\n").Split('\n'))
+            {
+                if (Regex.IsMatch(line, "^\\s*\\[")) break;
+                var match = Regex.Match(line, "^\\s*model_provider\\s*=\\s*[\"']([^\"']+)[\"']");
+                if (match.Success) provider = match.Groups[1].Value;
+            }
+            if (string.IsNullOrEmpty(provider)) return "custom";
+
+            bool active = false;
+            string baseUrl = "";
+            foreach (string line in (content ?? "").Replace("\r\n", "\n").Split('\n'))
+            {
+                var section = Regex.Match(line.Trim(), "^\\[model_providers\\.(?:\"([^\"]+)\"|([A-Za-z0-9_-]+))\\]$");
+                if (section.Success)
+                {
+                    string sectionProvider = section.Groups[1].Success ? section.Groups[1].Value : section.Groups[2].Value;
+                    active = string.Equals(sectionProvider, provider, StringComparison.Ordinal);
+                    continue;
+                }
+                if (Regex.IsMatch(line, "^\\s*\\[")) active = false;
+                if (!active) continue;
+                var match = Regex.Match(line, "^\\s*base_url\\s*=\\s*[\"']([^\"']+)[\"']");
+                if (match.Success) { baseUrl = match.Groups[1].Value; break; }
+            }
+            if (Regex.IsMatch(baseUrl, "^http://(?:127\\.0\\.0\\.1|localhost):[0-9]+/v1/?$", RegexOptions.IgnoreCase)) return "proxy";
+            if (Regex.IsMatch(baseUrl, "^https://momoapi\\.us(?:/v1)?/?$", RegexOptions.IgnoreCase)) return "direct";
             return "custom";
         }
 
         public static string RouteTitle(string mode)
         {
-            if (mode == "proxy") return "Codex 路由：本地 Proxy";
-            if (mode == "direct") return "Codex 路由：MOMO 直连";
-            if (mode == "unconfigured") return "Codex 路由：尚未配置";
-            return "Codex 路由：自定义";
+            if (mode == "proxy") return "Codex 配置：本地 Proxy（重启生效）";
+            if (mode == "direct") return "Codex 配置：MOMO 直连（重启生效）";
+            if (mode == "unconfigured") return "Codex 配置：尚未配置";
+            return "Codex 配置：自定义/不一致";
         }
     }
 
@@ -199,6 +222,8 @@ namespace MomoApi.Tray
             routeProxyItem.Click += async (s, e) => await SwitchCodexRouteAsync("proxy");
             routeMenuItem.DropDownItems.Add(routeDirectItem);
             routeMenuItem.DropDownItems.Add(routeProxyItem);
+            var restartNotice = routeMenuItem.DropDownItems.Add("切换后需完全重启 Codex / VS Code");
+            restartNotice.Enabled = false;
             routeMenuItem.DropDownItems.Add(new ToolStripSeparator());
             var restoreRoute = routeMenuItem.DropDownItems.Add("恢复切换前配置");
             restoreRoute.Click += async (s, e) => await RestoreCodexRouteAsync();
@@ -403,7 +428,7 @@ namespace MomoApi.Tray
             if (switched)
             {
                 string label = mode == "proxy" ? "本地 Proxy" : "MOMO 直连";
-                notifyIcon.ShowBalloonTip(3500, "Codex 路由已切换", "当前模式：" + label + "。请重启已打开的 Codex 会话。", ToolTipIcon.Info);
+                notifyIcon.ShowBalloonTip(5000, "Codex 配置已切换", "目标线路：" + label + "。请完全退出并重新启动 Codex Desktop / VS Code；已打开任务不会立即切线。", ToolTipIcon.Info);
             }
             else
             {
@@ -415,7 +440,7 @@ namespace MomoApi.Tray
         {
             bool restored = await RunCliAsync("route restore", false);
             RefreshRouteMenu();
-            MessageBox.Show(restored ? "已恢复切换前的 Codex 配置。请重启已打开的 Codex 会话。" : "没有可恢复的配置，或恢复失败。", "MOMO API Proxy", MessageBoxButtons.OK, restored ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            MessageBox.Show(restored ? "已恢复切换前的 Codex 配置。请完全退出并重新启动 Codex Desktop / VS Code。" : "没有可恢复的配置，或恢复失败。", "MOMO API Proxy", MessageBoxButtons.OK, restored ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
         }
 
         private string ReadInstalledVersion()

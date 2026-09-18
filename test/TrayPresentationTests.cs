@@ -20,10 +20,12 @@ public static class TrayPresentationTests
         Assert(TrayPresentation.PluginStatus("{\"installed\":true,\"enabled\":false}", false).Contains("未启用"), "plugin disabled");
         Assert(TrayPresentation.PluginStatus("{\"installed\":false,\"enabled\":false}", false).Contains("未安装"), "plugin missing despite status exit code");
         Assert(TrayPresentation.PluginStatus("", false).Contains("检测失败"), "plugin status failure");
-        Assert(TrayPresentation.RouteModeFromConfig("# MOMOAPI_ROUTE_MODE=proxy\n") == "proxy", "managed proxy route");
-        Assert(TrayPresentation.RouteModeFromConfig("base_url = \"https://momoapi.us/v1\"") == "direct", "legacy direct route");
+        Assert(TrayPresentation.RouteModeFromConfig("model_provider = \"momo-route\"\n[model_providers.momo-route]\nbase_url = \"http://127.0.0.1:18789/v1\"") == "proxy", "managed proxy route");
+        Assert(TrayPresentation.RouteModeFromConfig("model_provider = \"Codex\"\n[model_providers.Codex]\nbase_url = \"https://momoapi.us/v1\"") == "direct", "legacy direct route");
+        Assert(TrayPresentation.RouteModeFromConfig("model_provider = \"Codex\"\n# MOMOAPI_ROUTE_MODE=proxy\n[model_providers.Codex]\nbase_url = \"https://momoapi.us/v1\"\n[model_providers.momo-route]\nbase_url = \"http://127.0.0.1:18789/v1\"") == "direct", "active provider beats unrelated proxy section");
         Assert(TrayPresentation.RouteTitle("proxy").Contains("本地 Proxy"), "proxy route title");
-        Console.WriteLine("Tray presentation: 18 assertions passed");
+        Assert(TrayPresentation.RouteTitle("proxy").Contains("重启生效"), "route restart warning");
+        Console.WriteLine("Tray presentation: 20 assertions passed");
         return 0;
     }
     private static void Assert(bool value, string label) { if (!value) throw new Exception(label); }
