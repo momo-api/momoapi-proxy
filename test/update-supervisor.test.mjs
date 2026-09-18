@@ -3,13 +3,28 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isManagedImageMcpProcess, isManagedTrayProcess, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
+import { isManagedImageMcpProcess, isManagedTrayProcess, pruneFailedUpdateDirectories, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
 
 function createVersion(root, version) {
   mkdirSync(join(root, "bin"), { recursive: true });
   writeFileSync(join(root, "bin", "momoapi-proxy.mjs"), `// ${version}\n`);
   writeFileSync(join(root, "package.json"), JSON.stringify({ version }));
 }
+
+test("failed update directory retention is bounded to the newest three", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-retention-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const root = join(home, "app");
+  createVersion(root, "0.13.28");
+  for (const stamp of [100, 200, 300, 400, 500]) mkdirSync(`${root}.failed-${stamp}-1`);
+  const result = pruneFailedUpdateDirectories(root);
+  assert.equal(result.kept.length, 3);
+  assert.equal(result.removed.length, 2);
+  assert.deepEqual(
+    result.kept.map((entry) => entry.split(".failed-")[1]),
+    ["500-1", "400-1", "300-1"],
+  );
+});
 
 test("update readiness checks authenticated upstream reachability while rollback health stays local", async () => {
   const calls = [];
@@ -545,6 +560,9 @@ test("rollback accepts delayed previous-version health after its start command t
     const status = JSON.parse(readFileSync(join(home, "update-status.json"), "utf8"));
     assert.equal(status.status, "rolled_back");
     assert.equal(status.checkFailed, false);
+    assert.equal(status.failedTarget, "0.13.18");
+    assert.equal(status.automaticRetryBlocked, true);
+    assert.match(status.failedAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -1,12 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { isAutostartInstalled } from "./autostart.mjs";
 import { catalogPath, readCatalog } from "./catalog.mjs";
-import { resolveSettings } from "./config.mjs";
+import { resolveSettings, userHome } from "./config.mjs";
 
 export function checkCodexHome(env = process.env) {
-  const standardHome = join(homedir(), ".codex");
+  const standardHome = join(userHome(env), ".codex");
   const currentHome = env.CODEX_HOME || standardHome;
   const isOrca = /orca[\\/]codex-runtime-home/i.test(currentHome) || Boolean(env.ORCA_CODEX_HOME);
   const mismatch = isOrca || (Boolean(env.CODEX_HOME) && env.CODEX_HOME.toLowerCase() !== standardHome.toLowerCase());
@@ -22,7 +21,7 @@ export function checkCodexHome(env = process.env) {
 }
 
 export function checkCodexConfig(env = process.env) {
-  const home = env.CODEX_HOME || join(homedir(), ".codex");
+  const home = env.CODEX_HOME || join(userHome(env), ".codex");
   const configFile = join(home, "config.toml");
   if (!existsSync(configFile)) {
     return { exists: false, managed: false, hasResponsesWire: false, error: "config.toml not found at " + configFile };

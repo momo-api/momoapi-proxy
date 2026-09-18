@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createMomoSwitch } from "../src/server.mjs";
 import { extractFunctions, restoreToolName } from "../src/tools.mjs";
+import { isolatedProfile } from "./support/isolated-profile.mjs";
+
+const testProfile = isolatedProfile("momo-gemini-tool-test-");
 
 test("extractFunctions: functions namespace produces bare tool name for upstream", () => {
   const request = {
@@ -101,7 +104,7 @@ test("Gemini bridge: converts Gemini bare exec with raw/input/command/cmd to Cod
       host: "127.0.0.1",
       localToken,
     },
-    { fetchImpl: fakeFetch }
+    { fetchImpl: fakeFetch, env: testProfile.env }
   );
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -212,7 +215,7 @@ test("Gemini bridge: second turn custom_tool_call_output is replayed properly to
       host: "127.0.0.1",
       localToken,
     },
-    { fetchImpl: fakeFetch }
+    { fetchImpl: fakeFetch, env: testProfile.env }
   );
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

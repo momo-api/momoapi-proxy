@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runDoctor } from "../src/doctor.mjs";
+import { isolatedProfile } from "./support/isolated-profile.mjs";
+
+const testProfile = isolatedProfile("momo-doctor-test-");
 
 test("doctor correctly reports daemon metrics when daemon is online", async () => {
   const fakeMetrics = {
@@ -29,6 +32,7 @@ test("doctor correctly reports daemon metrics when daemon is online", async () =
 
   const res = await runDoctor({
     env: {
+      ...testProfile.env,
       MOMO_API_KEY: "sk-mock-key",
       MOMO_ENDPOINT: "https://mock.momo",
       MOMO_LOCAL_TOKEN: "mock-token",
@@ -59,6 +63,7 @@ test("doctor reports offline reason without fabricating zero values when daemon 
 
   const res = await runDoctor({
     env: {
+      ...testProfile.env,
       MOMO_API_KEY: "sk-mock-key",
       MOMO_ENDPOINT: "https://mock.momo",
     },
@@ -73,7 +78,7 @@ test("doctor reports offline reason without fabricating zero values when daemon 
 test("doctor preserves unavailable timing samples instead of converting null to zero", async () => {
   const absent = { available: false, samples: 0, observations: 0, p50: null, p95: null, p99: null };
   const result = await runDoctor({
-    env: { MOMO_API_KEY: "synthetic_key", MOMO_ENDPOINT: "https://synthetic.invalid", MOMO_LOCAL_TOKEN: "synthetic_local" },
+    env: { ...testProfile.env, MOMO_API_KEY: "synthetic_key", MOMO_ENDPOINT: "https://synthetic.invalid", MOMO_LOCAL_TOKEN: "synthetic_local" },
     fetchImpl: async (url) => Response.json(url.includes("/internal/metrics")
       ? { ttfbMs: absent, requestMetrics: { schemaVersion: 1, groups: {} } }
       : { data: [] }),

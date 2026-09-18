@@ -327,10 +327,10 @@ export class ImageAssetStore {
   }
 }
 
-export function createImageAssetStore(settings = {}) {
+export function createImageAssetStore(settings = {}, env = process.env) {
   const policy = settings.imageAssets && typeof settings.imageAssets === "object" ? settings.imageAssets : {};
   return new ImageAssetStore({
-    rootDir: settings.imageAssetDirectory || join(appHome(), "images"),
+    rootDir: settings.imageAssetDirectory || join(appHome(env), "images"),
     maxAssetBytes: positiveNumber(policy.maxAssetMb, 20, 1, 20) * MEBIBYTE,
     maxTotalBytes: positiveNumber(policy.maxTotalMb, 2048, 20, 65536) * MEBIBYTE,
     maxAssets: positiveNumber(policy.maxAssets, 2000, 10, 100000),

@@ -5,16 +5,40 @@ import { randomBytes } from "node:crypto";
 
 export const DEFAULT_ENDPOINT = "https://momoapi.us";
 
+export function userHome(env = process.env) {
+  return env.USERPROFILE || env.HOME || homedir();
+}
+
+export function normalizeEndpoint(value = DEFAULT_ENDPOINT) {
+  const normalized = String(value || DEFAULT_ENDPOINT).replace(/\/+$/, "");
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw Object.assign(new Error("MOMO API endpoint must be a valid HTTP(S) URL."), { code: "endpoint_invalid" });
+  }
+  if (!new Set(["http:", "https:"]).has(parsed.protocol)) {
+    throw Object.assign(new Error("MOMO API endpoint must use HTTP or HTTPS."), { code: "endpoint_invalid" });
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "gateway.example" || hostname.endsWith(".example") || hostname.endsWith(".invalid") || hostname.endsWith(".test")) {
+    throw Object.assign(new Error("MOMO API endpoint is a reserved placeholder hostname."), { code: "endpoint_placeholder" });
+  }
+  return normalized;
+}
+
 export function appHome(env = process.env) {
-  return env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME || join(homedir(), ".momoapi-proxy");
+  return env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME || join(userHome(env), ".momoapi-proxy");
 }
 
 export function settingsPath(env = process.env) {
   const primary = join(appHome(env), "settings.json");
   if (existsSync(primary)) return primary;
-  const legacy1 = join(homedir(), ".momo-codex-bridge", "settings.json");
+  if (env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME) return primary;
+  const home = userHome(env);
+  const legacy1 = join(home, ".momo-codex-bridge", "settings.json");
   if (existsSync(legacy1)) return legacy1;
-  const legacy2 = join(homedir(), ".momo-codex-switch", "settings.json");
+  const legacy2 = join(home, ".momo-codex-switch", "settings.json");
   if (existsSync(legacy2)) return legacy2;
   return primary;
 }
@@ -68,7 +92,9 @@ export function resolveDaemonSettings(env = process.env) {
 
 export function resolveSettings(env = process.env) {
   const saved = readSettings(env);
-  const updateMode = saved.updateMode === "notify" ? "notify" : "automatic";
+  const updateMode = new Set(["automatic", "notify", "manual"]).has(saved.updateMode)
+    ? saved.updateMode
+    : (saved.autoUpdateEnabled === false ? "notify" : "automatic");
   const imageAssets = saved.imageAssets && typeof saved.imageAssets === "object" ? saved.imageAssets : {};
   const attachmentAssets = saved.attachmentAssets && typeof saved.attachmentAssets === "object" ? saved.attachmentAssets : {};
   // An installed daemon must remain pinned to its saved credential. Long-lived
@@ -80,7 +106,7 @@ export function resolveSettings(env = process.env) {
   if (!apiKey) throw new Error("MOMO API key is not configured. Run setup with --api-key.");
   if (!localToken) throw new Error("MOMO Switch local token is not configured. Run setup again.");
   return {
-    endpoint: (env.MOMO_API_ENDPOINT || env.MOMO_ENDPOINT || saved.endpoint || DEFAULT_ENDPOINT).replace(/\/$/, ""),
+    endpoint: normalizeEndpoint(env.MOMO_API_ENDPOINT || env.MOMO_ENDPOINT || saved.endpoint || DEFAULT_ENDPOINT),
     apiKey,
     localToken,
     port: Number(env.MOMO_BRIDGE_PORT || env.MOMO_SWITCH_PORT || saved.port || 18789),
@@ -88,7 +114,7 @@ export function resolveSettings(env = process.env) {
     syncIntervalMinutes: Number(saved.syncIntervalMinutes || 60),
     updateCheckEnabled: saved.updateCheckEnabled !== false,
     updateMode,
-    autoUpdateEnabled: updateMode === "automatic",
+    autoUpdateEnabled: updateMode === "automatic" && saved.autoUpdateEnabled !== false,
     updateCheckIntervalHours: Math.max(1, Number(saved.updateCheckIntervalHours || 12)),
     desktopAliases: saved.desktopAliases !== false,
     autostart: saved.autostart !== false,

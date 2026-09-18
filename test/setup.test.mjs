@@ -7,6 +7,25 @@ import { migrateManagedCompactionConfig, rollback, setup, uninstall } from "../s
 import { isAutostartInstalled } from "../src/autostart.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 
+test("setup rejects reserved placeholder endpoints before writing configuration", async () => {
+  const root = mkdtempSync(join(tmpdir(), "momo-setup-placeholder-"));
+  const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex"), MOMO_PROXY_HOME: join(root, ".proxy") };
+  let fetched = false;
+  try {
+    await assert.rejects(() => setup({
+      apiKey: "momo-secret",
+      endpoint: "https://gateway.example",
+      autostart: false,
+      imagePlugin: false,
+      fetchImpl: async () => { fetched = true; return new Response("unexpected"); },
+      env,
+    }), (error) => error.code === "endpoint_placeholder");
+    assert.equal(fetched, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("setup writes a local provider configuration and rollback restores it", async () => {
   const root = mkdtempSync(join(tmpdir(), "momo-switch-"));
   const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex"), MOMO_SWITCH_HOME: join(root, ".switch"), MOMO_BRIDGE_HOME: join(root, ".bridge") };
@@ -15,7 +34,7 @@ test("setup writes a local provider configuration and rollback restores it", asy
   writeFileSync(config, 'model = "old-model"\ncompact_prompt = "my own compact rules"\n');
   const fakeFetch = async () => new Response(JSON.stringify({ data: [{ id: "gemini-3.7-flash", agent_status: "stable" }] }), { status: 200, headers: { "content-type": "application/json" } });
   try {
-    const result = await setup({ apiKey: "momo-secret", endpoint: "https://gateway.example", port: 19999, imagePlugin: false, fetchImpl: fakeFetch, env });
+    const result = await setup({ apiKey: "momo-secret", endpoint: "https://gateway.internal", port: 19999, imagePlugin: false, fetchImpl: fakeFetch, env });
     const written = readFileSync(result.config, "utf8");
     assert.equal(result.defaultModel, "gemini-3.7-flash");
     assert.match(written, /model = "gemini-3\.7-flash"/);
@@ -47,11 +66,11 @@ test("setup writes a local provider configuration and rollback restores it", asy
 
 test("macOS setup fails when its LaunchAgent cannot be activated", async () => {
   const root = mkdtempSync(join(tmpdir(), "momo-setup-mac-failure-"));
-  const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex") };
+  const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex"), MOMO_PROXY_HOME: join(root, ".proxy") };
   const fakeFetch = async () => new Response(JSON.stringify({ data: [{ id: "gpt-5.5", agent_status: "stable" }] }), { status: 200, headers: { "content-type": "application/json" } });
   try {
     await assert.rejects(() => setup({
-      apiKey: "momo-secret", endpoint: "https://gateway.example", imagePlugin: false,
+      apiKey: "momo-secret", endpoint: "https://gateway.internal", imagePlugin: false,
       fetchImpl: fakeFetch, env, osPlatform: "darwin",
       autostartInstaller() { throw new Error("launchctl bootstrap failed"); },
     }), /launchctl bootstrap failed/);
@@ -103,7 +122,7 @@ test("setup exposes the verified Ox model when the agent catalog falls back to /
       : new Response(JSON.stringify({ data: [{ id: "ox-alpha-free" }] }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
-    const result = await setup({ apiKey: "momo-secret", endpoint: "https://gateway.example", imagePlugin: false, fetchImpl: fakeFetch, env });
+    const result = await setup({ apiKey: "momo-secret", endpoint: "https://gateway.internal", imagePlugin: false, fetchImpl: fakeFetch, env });
     const catalog = JSON.parse(readFileSync(result.catalog, "utf8"));
     assert.equal(result.defaultModel, "ox-alpha-free");
     const oxModel = catalog.models.find((m) => m.slug === "ox-alpha-free");
@@ -123,7 +142,7 @@ test("setup installs the MOMO Image plugin by default and records the preference
   try {
     const result = await setup({
       apiKey: "momo-secret",
-      endpoint: "https://gateway.example",
+      endpoint: "https://gateway.internal",
       autostart: false,
       fetchImpl: fakeFetch,
       env,
@@ -144,7 +163,7 @@ test("doctor and uninstall lifecycle verification", async () => {
   const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: join(root, "appdata"), CODEX_HOME: join(root, ".codex"), MOMO_SWITCH_HOME: join(root, ".switch"), MOMO_BRIDGE_HOME: join(root, ".bridge") };
   const fakeFetch = async () => new Response(JSON.stringify({ data: [{ id: "gpt-5.5", agent_status: "stable" }] }), { status: 200, headers: { "content-type": "application/json" } });
   try {
-    await setup({ apiKey: "momo-secret", endpoint: "https://gateway.example", imagePlugin: false, fetchImpl: fakeFetch, env });
+    await setup({ apiKey: "momo-secret", endpoint: "https://gateway.internal", imagePlugin: false, fetchImpl: fakeFetch, env });
     const report = await runDoctor({ env, fetchImpl: fakeFetch });
     assert.equal(report.checks.codexConfig.hasResponsesWire, true);
     assert.equal(report.checks.catalog.ok, true);

@@ -84,8 +84,8 @@ export class AttachmentAssetStore {
   }
 }
 
-export function createAttachmentAssetStore(settings = {}) {
+export function createAttachmentAssetStore(settings = {}, env = process.env) {
   return new AttachmentAssetStore({
-    rootDir: settings.attachmentAssetDirectory || join(appHome(), "attachments"),
+    rootDir: settings.attachmentAssetDirectory || join(appHome(env), "attachments"),
   });
 }

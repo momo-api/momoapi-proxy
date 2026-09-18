@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
+import { isolatedProfile } from "./support/isolated-profile.mjs";
+
+const testProfile = isolatedProfile("momo-metrics-test-");
 
 test("metrics accurately track requests, successes, failures, and TTFB", async () => {
   resetMetrics();
@@ -22,7 +25,7 @@ test("metrics accurately track requests, successes, failures, and TTFB", async (
     port: 0,
     host: "127.0.0.1",
     localToken,
-  }, { fetchImpl: fakeFetch });
+  }, { fetchImpl: fakeFetch, env: testProfile.env });
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = server.address().port;

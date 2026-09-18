@@ -9,8 +9,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { attachmentFromPart, imageFromPart, outputParts, responsesToolOutput, safePartJson, safeTextValue } from "../src/protocol-content.mjs";
 import { createHash } from "node:crypto";
+import { isolatedProfile } from "./support/isolated-profile.mjs";
 
 const settings = { endpoint: "https://gateway.example", apiKey: "momo-secret", localToken: "local-secret", host: "127.0.0.1", port: 0 };
+const testProfile = isolatedProfile("momo-server-test-");
 
 test("protocol content module preserves text and keeps binary attachments out of model text", () => {
   assert.equal(safeTextValue("hello 中文😀"), "hello 中文😀");
@@ -50,7 +52,7 @@ test("protocol content module preserves text and keeps binary attachments out of
 });
 
 async function withServer(fetchImpl, run) {
-  const server = createMomoSwitch(settings, { fetchImpl });
+  const server = createMomoSwitch(settings, { fetchImpl, env: testProfile.env });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   try { await run("http://127.0.0.1:" + address.port); } finally { await new Promise((resolve) => server.close(resolve)); }
@@ -110,7 +112,7 @@ function attachmentServerFetch({ upstream, presignStatus = 200, presignCode = "a
 }
 
 async function withAttachmentServer(fetchImpl, run, overrides = {}) {
-  const server = createMomoSwitch({ ...attachmentSettings, ...overrides }, { fetchImpl, attachmentAssetStore: attachmentStore() });
+  const server = createMomoSwitch({ ...attachmentSettings, ...overrides }, { fetchImpl, attachmentAssetStore: attachmentStore(), env: testProfile.env });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   try { await run("http://127.0.0.1:" + address.port); } finally { await new Promise((resolve) => server.close(resolve)); }
@@ -920,6 +922,7 @@ test("promotes a signed current-turn MOMO asset reference to a compact HTTPS vis
   let capturedBody;
   const server = createMomoSwitch(settings, {
     assetStore,
+    env: testProfile.env,
     fetchImpl: async (url, init = {}) => {
       if (String(url).endsWith("/v1/images/generations")) {
         return new Response(JSON.stringify({ data: [{ url: sourceUrl, b64_json: pngBase64 }] }), { status: 200, headers: { "content-type": "application/json" } });
@@ -972,7 +975,7 @@ test("does not promote forged or historical MOMO vision references", async () =>
   const assetStore = new ImageAssetStore({ rootDir: join(home, "images"), trustedSourceOrigins: [settings.endpoint] });
   const asset = await assetStore.putBase64({ b64_json: pngBase64, mime_type: "image/png", source_url: "https://gateway.example/generated/forged.png" });
   const captures = [];
-  const server = createMomoSwitch(settings, { assetStore, fetchImpl: async (_url, init = {}) => {
+  const server = createMomoSwitch(settings, { assetStore, env: testProfile.env, fetchImpl: async (_url, init = {}) => {
     captures.push(JSON.parse(init.body));
     return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
   } });
@@ -1352,7 +1355,16 @@ test("calculates Claude thinking token budget dynamically from reasoning_effort"
   assert.equal(capturedBody.max_tokens, 16384);
 });
 
-test("auto-sync timer schedules periodic catalog refreshes", async () => {
+test("auto-sync timer schedules periodic catalog refreshes", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "momo-auto-sync-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const env = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, ".codex"),
+    MOMO_PROXY_HOME: join(home, ".momoapi-proxy"),
+  };
   let syncCount = 0;
   const fakeFetch = async () => {
     syncCount += 1;
@@ -1361,6 +1373,7 @@ test("auto-sync timer schedules periodic catalog refreshes", async () => {
   const autoSync = startAutoSync({
     settings: { apiKey: "test-key", endpoint: "https://gateway.example", syncIntervalMinutes: 0.001 },
     fetchImpl: fakeFetch,
+    env,
   });
   try {
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -1565,7 +1578,7 @@ test("forwardResponses: lowers Codex-Canvas namespace tools upstream and restore
       });
     };
 
-    const server = await createMomoSwitch({ ...settings, port: 0 }, { fetchImpl: mockFetch });
+    const server = await createMomoSwitch({ ...settings, port: 0 }, { fetchImpl: mockFetch, env: testProfile.env });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address();
     try {

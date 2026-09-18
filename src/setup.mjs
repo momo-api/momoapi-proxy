@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync } fro
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexHome, catalogPath, writeCatalog } from "./catalog.mjs";
-import { newLocalToken, writeSettings, settingsPath } from "./config.mjs";
+import { newLocalToken, normalizeEndpoint, writeSettings, settingsPath } from "./config.mjs";
 import { installAutostart, uninstallAutostart } from "./autostart.mjs";
 import { installWindowsService, uninstallWindowsService } from "./service.mjs";
 import { migrateHistory } from "./history.mjs";
@@ -145,7 +145,7 @@ export async function setup({
   const localToken = newLocalToken();
   const settings = {
     apiKey,
-    endpoint: (endpoint || "https://momoapi.us").replace(/\/$/, ""),
+    endpoint: normalizeEndpoint(endpoint || "https://momoapi.us"),
     port,
     localToken,
     autostart: Boolean(autostart),
@@ -203,7 +203,7 @@ export async function setup({
       if (osPlatform === "win32") {
         const binFile = fileURLToPath(import.meta.url);
         const bridgeBin = join(dirname(binFile), "..", "bin", "momo-codex-bridge.mjs");
-        const serviceResult = windowsServiceInstaller(bridgeBin);
+        const serviceResult = windowsServiceInstaller(bridgeBin, { env });
         autostartResult = serviceResult.installed ? serviceResult : autostartInstaller(settings, { env, osPlatform });
       } else {
         autostartResult = autostartInstaller(settings, { env, osPlatform });

@@ -680,9 +680,10 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
 
 export function createMomoSwitch(settings, options = {}) {
   const { fetchImpl = fetch, exitImpl = process.exit, assetStore, attachmentAssetStore: suppliedAttachmentAssetStore } = options;
+  const runtimeEnv = options.env || process.env;
   const ownsLoggingRuntime = !options.loggingRuntime;
   const loggingRuntime = options.loggingRuntime || (options.loggingRuntimeFactory || createLoggingRuntime)({
-    diagnosticsEnabled: settings.diagnosticsEnabled, consoleMirror: false,
+    env: runtimeEnv, diagnosticsEnabled: settings.diagnosticsEnabled, consoleMirror: false,
   });
   const requestMetrics = new RequestMetrics();
   const originalFetch = fetchImpl;
@@ -693,8 +694,8 @@ export function createMomoSwitch(settings, options = {}) {
   const activeAbortControllers = new Set();
   const compactLocks = new Set();
   const admission = new RequestAdmission(settings);
-  const imageAssetStore = assetStore || createImageAssetStore(settings);
-  const attachmentAssetStore = suppliedAttachmentAssetStore || createAttachmentAssetStore(settings);
+  const imageAssetStore = assetStore || createImageAssetStore(settings, runtimeEnv);
+  const attachmentAssetStore = suppliedAttachmentAssetStore || createAttachmentAssetStore(settings, runtimeEnv);
   const logRequest = (fields) => writeRequestLog(fields, loggingRuntime.env, { runtime: loggingRuntime, settings });
   let serverInstance = null;
   let shutdownLifecycle = null;

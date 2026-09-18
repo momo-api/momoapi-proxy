@@ -1,9 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { daemonEnvironment, resolveDaemonSettings, resolveSettings } from "../src/config.mjs";
+import { appHome, daemonEnvironment, resolveDaemonSettings, resolveSettings, settingsPath } from "../src/config.mjs";
+
+test("injected user homes never fall back to the real profile", () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-config-home-"));
+  const explicitProxyHome = join(home, "isolated-proxy");
+  try {
+    mkdirSync(join(home, ".momo-codex-bridge"), { recursive: true });
+    writeFileSync(join(home, ".momo-codex-bridge", "settings.json"), "{}\n");
+    assert.equal(appHome({ HOME: home }), join(home, ".momoapi-proxy"));
+    assert.equal(appHome({ USERPROFILE: home }), join(home, ".momoapi-proxy"));
+    assert.equal(settingsPath({ HOME: home }), join(home, ".momo-codex-bridge", "settings.json"));
+    assert.equal(settingsPath({ HOME: home, MOMO_PROXY_HOME: explicitProxyHome }), join(explicitProxyHome, "settings.json"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 test("saved API key wins over a stale process environment key", () => {
   const home = mkdtempSync(join(tmpdir(), "momo-config-"));
@@ -30,9 +45,9 @@ test("daemon settings ignore a stale process endpoint while ordinary commands re
       apiKey: "saved-current-key", localToken: "local-token", endpoint: "https://momoapi.us",
     }));
     const env = {
-      MOMO_PROXY_HOME: home, MOMO_API_ENDPOINT: "https://gateway.example",
+      MOMO_PROXY_HOME: home, MOMO_API_ENDPOINT: "https://gateway.internal",
     };
-    assert.equal(resolveSettings(env).endpoint, "https://gateway.example");
+    assert.equal(resolveSettings(env).endpoint, "https://gateway.internal");
     assert.equal(resolveDaemonSettings(env).endpoint, "https://momoapi.us");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -125,15 +140,15 @@ test("diagnostic reporting and update checks have safe configurable defaults", (
   }
 });
 
-test("legacy installations migrate to verified automatic updates unless notification-only mode is explicit", () => {
+test("saved update preferences are respected, including manual mode", () => {
   const home = mkdtempSync(join(tmpdir(), "momo-config-"));
   try {
     writeFileSync(join(home, "settings.json"), JSON.stringify({
       apiKey: "saved-current-key", localToken: "local-token", autoUpdateEnabled: false,
     }));
     const migrated = resolveSettings({ MOMO_PROXY_HOME: home });
-    assert.equal(migrated.updateMode, "automatic");
-    assert.equal(migrated.autoUpdateEnabled, true);
+    assert.equal(migrated.updateMode, "notify");
+    assert.equal(migrated.autoUpdateEnabled, false);
 
     writeFileSync(join(home, "settings.json"), JSON.stringify({
       apiKey: "saved-current-key", localToken: "local-token", updateMode: "notify",
@@ -141,6 +156,13 @@ test("legacy installations migrate to verified automatic updates unless notifica
     const notifyOnly = resolveSettings({ MOMO_PROXY_HOME: home });
     assert.equal(notifyOnly.updateMode, "notify");
     assert.equal(notifyOnly.autoUpdateEnabled, false);
+
+    writeFileSync(join(home, "settings.json"), JSON.stringify({
+      apiKey: "saved-current-key", localToken: "local-token", updateMode: "manual", autoUpdateEnabled: false,
+    }));
+    const manual = resolveSettings({ MOMO_PROXY_HOME: home });
+    assert.equal(manual.updateMode, "manual");
+    assert.equal(manual.autoUpdateEnabled, false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

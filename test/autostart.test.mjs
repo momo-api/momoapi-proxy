@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { autostartTarget, installAutostart, isAutostartInstalled, migrateWindowsAutostart, uninstallAutostart, WINDOWS_SERVICE_STARTUP, WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_SERVICE_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP } from "../src/autostart.mjs";
-import { buildWindowsServiceWrapperCmd } from "../src/service.mjs";
+import { buildWindowsServiceWrapperCmd, readRuntimePort, resolveWindowsServiceBinPath, writeHeartbeat, writeRuntimePort } from "../src/service.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "momo-startup-test-"));
@@ -14,6 +14,17 @@ function fixture(t) {
   mkdirSync(dir, { recursive: true });
   return { env, dir };
 }
+
+test("runtime state writers honor an isolated proxy home", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "momo-runtime-state-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const env = { MOMO_PROXY_HOME: join(root, "proxy") };
+  writeRuntimePort(19999, 12345, { marker: "isolated" }, env);
+  writeHeartbeat({ running: true, port: 19999 }, env);
+  assert.equal(readRuntimePort(env).marker, "isolated");
+  assert.equal(existsSync(join(env.MOMO_PROXY_HOME, "runtime-port.json")), true);
+  assert.equal(existsSync(join(env.MOMO_PROXY_HOME, "tray-heartbeat.json")), true);
+});
 
 test("Windows startup migration preserves both files and is idempotent", (t) => {
   const { env, dir } = fixture(t);
@@ -68,6 +79,19 @@ test("background launchers explicitly disable request-log console mirroring", (t
 
   const wrapper = buildWindowsServiceWrapperCmd("C:\\app\\momoapi-proxy.mjs", "C:\\logs\\daemon.log");
   assert.match(wrapper, /set MOMO_PROXY_CONSOLE_MIRROR=0\r\n/);
+});
+
+test("Windows service wrappers prefer the stable installed application path", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "momo-service-path-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, ".momoapi-proxy");
+  const installedBin = join(home, "app", "bin", "momoapi-proxy.mjs");
+  mkdirSync(dirname(installedBin), { recursive: true });
+  writeFileSync(installedBin, "// installed\n");
+  assert.equal(
+    resolveWindowsServiceBinPath("C:\\dev\\momoapi-proxy\\bin\\momoapi-proxy.mjs", { MOMO_PROXY_HOME: home }),
+    installedBin,
+  );
 });
 
 test("macOS autostart bootstraps the LaunchAgent for the current GUI user", (t) => {

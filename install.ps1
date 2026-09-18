@@ -116,9 +116,27 @@ if (Test-Path -LiteralPath $installDir) {
   & node @supervisorArgs
   $supervisorExit = $LASTEXITCODE
   Remove-Item -LiteralPath $supervisorPath -Force -ErrorAction SilentlyContinue
-  if ($supervisorExit -ne 0) { throw "Existing proxy upgrade failed safely; the previous version was restored." }
+  $updateStatus = $null
+  $updateStatusPath = Join-Path $installRoot "update-status.json"
+  if (Test-Path -LiteralPath $updateStatusPath) {
+    try { $updateStatus = Get-Content -LiteralPath $updateStatusPath -Raw | ConvertFrom-Json } catch {}
+  }
+  if ($supervisorExit -ne 0) {
+    $reason = if ($updateStatus.errorCode) { [string]$updateStatus.errorCode } else { "unknown_update_failure" }
+    throw "Existing proxy upgrade failed ($reason). Check update-status.json; automatic retry of this version is blocked."
+  }
   $activatedPackage = Get-Content -LiteralPath (Join-Path $installDir "package.json") -Raw | ConvertFrom-Json
-  if ([string]$activatedPackage.version -ne $version) { throw "Existing proxy upgrade did not activate the verified target version." }
+  if ([string]$activatedPackage.version -ne $version) {
+    if ($updateStatus.status -eq "rolled_back") {
+      $reason = if ($updateStatus.errorCode) { [string]$updateStatus.errorCode } else { "update_activation_failed" }
+      throw "MOMO API Proxy v$version failed activation and was rolled back safely to v$previousVersion ($reason). Automatic retry of v$version is blocked."
+    }
+    if ($updateStatus.status -eq "rollback_failed") {
+      $reason = if ($updateStatus.errorCode) { [string]$updateStatus.errorCode } else { "update_rollback_failed" }
+      throw "MOMO API Proxy v$version failed activation and rollback health verification ($reason). Check update-status.json immediately."
+    }
+    throw "Existing proxy upgrade ended on v$($activatedPackage.version), not verified target v$version. Check update-status.json for the activation result."
+  }
 } else {
   Move-Item -LiteralPath $stagingDir -Destination $installDir
 }

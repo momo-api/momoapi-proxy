@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { userHome } from "./config.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BUNDLED_JSON_PATH = join(__dirname, "bundled-model-template.json");
@@ -71,7 +71,7 @@ const EFFORT_DESCRIPTIONS = {
 };
 
 export function codexHome(env = process.env) {
-  return env.CODEX_HOME || join(homedir(), ".codex");
+  return env.CODEX_HOME || join(userHome(env), ".codex");
 }
 
 export function catalogPath(env = process.env) {
