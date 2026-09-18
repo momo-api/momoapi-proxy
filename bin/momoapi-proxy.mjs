@@ -14,7 +14,7 @@ import { logPath, readRecentLogReport, logInfo, logError } from "../src/logger.m
 import { readLogTail } from "../src/log-tail.mjs";
 import { checkAndRecordLatestVersion, getCurrentVersion, readUpdateStatus, startUpdateChecker, updateSelf, writeUpdateStatus } from "../src/updater.mjs";
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
-import { installWindowsDesktop } from "../src/desktop-install.mjs";
+import { installWindowsDesktop, refreshWindowsTray } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
 import { createImageAssetStore } from "../src/image-assets.mjs";
 import { configureDiagnostics, readRecentDiagnosticReport, recordDiagnosticEvent } from "../src/diagnostics.mjs";
@@ -158,6 +158,11 @@ async function main() {
       console.error(error.message);
       process.exitCode = 1;
     }
+    return;
+  }
+  if (command === "desktop" && String(args[0] || "").toLowerCase() === "refresh") {
+    const result = refreshWindowsTray();
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
   if (command === "auto") {

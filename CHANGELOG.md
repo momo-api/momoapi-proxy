@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.33 - 2026-09-18
+
+- Refresh the stable Windows tray executable from the newly activated release during self-update, preserving whether the tray was running and rolling the whole update back if the desktop binary cannot be replaced safely.
+- Build and embed the matching tray executable as part of this release so the daemon, updater, and installed tray all report the same version.
+
 ## 0.13.32 - 2026-09-18
 
 - Make direct/Proxy switching update every managed MOMO provider alias so existing Codex conversations no longer stay pinned to a stale direct provider while the tray reports Proxy.
