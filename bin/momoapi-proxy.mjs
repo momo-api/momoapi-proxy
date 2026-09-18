@@ -7,7 +7,7 @@ import readline from "node:readline/promises";
 import { readSettings, resolveSettings, resolveDaemonSettings, appHome, daemonEnvironment } from "../src/config.mjs";
 import { listen } from "../src/server.mjs";
 import { migrateManagedCompactionConfig, rollback, setup, uninstall } from "../src/setup.mjs";
-import { readCatalog } from "../src/catalog.mjs";
+import { catalogPath, readCatalog } from "../src/catalog.mjs";
 import { syncCatalog, startAutoSync } from "../src/sync.mjs";
 import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogReport, logInfo, logError } from "../src/logger.mjs";
@@ -334,7 +334,7 @@ async function main() {
     try {
       const currentCliPath = fileURLToPath(import.meta.url);
       const migration = migrateManagedRouteAliases({ cliPath: resolveInstalledCliPath(currentCliPath) });
-      if (migration.changed) console.log("Repaired managed Codex route aliases for existing conversations. Restart Codex Desktop or VS Code to apply the route.");
+      if (migration.changed) console.log("Repaired managed Codex route aliases and model catalog for existing conversations. Restart Codex Desktop or VS Code to apply the route.");
     } catch (error) {
       console.warn("Managed Codex route aliases could not be updated:", error.message);
     }
@@ -632,8 +632,13 @@ async function main() {
       console.log("Codex route configuration restored:", result.restored);
     } else if (action === "direct" || action === "proxy") {
       const currentCliPath = fileURLToPath(import.meta.url);
-      const result = switchCodexRoute(action, { cliPath: resolveInstalledCliPath(currentCliPath) });
+      const settings = resolveSettings();
+      if (action === "proxy" && !existsSync(catalogPath())) {
+        await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint, desktopAliases: settings.desktopAliases });
+      }
+      const result = switchCodexRoute(action, { cliPath: resolveInstalledCliPath(currentCliPath), settings });
       console.log("Codex route switched to " + action + ": " + result.baseUrl);
+      console.log("Codex model catalog switched to " + (result.catalog || "the built-in official catalog") + ".");
       console.log("Restart open Codex sessions to load the new route.");
     } else {
       throw new Error("Usage: momoapi-proxy route [status|direct|proxy|restore]");

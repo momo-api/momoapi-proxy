@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.13.34 - 2026-09-18
+
+- Switch the Codex model catalog together with the route: direct mode now uses the official-only MOMO/Codex catalog, while local Proxy mode uses the automatically synced proxy catalog that includes supported third-party models.
+- Repair stale catalog paths during managed route migration and make `doctor` fail when Codex is reading a catalog that does not match the active route.
+
 ## 0.13.33 - 2026-09-18
 
 - Refresh the stable Windows tray executable from the newly activated release during self-update, preserving whether the tray was running and rolling the whole update back if the desktop binary cannot be replaced safely.

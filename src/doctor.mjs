@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { isAutostartInstalled } from "./autostart.mjs";
 import { catalogPath, readCatalog } from "./catalog.mjs";
 import { resolveSettings, userHome } from "./config.mjs";
+import { codexRouteStatus } from "./codex-route.mjs";
 
 export function checkCodexHome(env = process.env) {
   const standardHome = join(userHome(env), ".codex");
@@ -31,6 +32,9 @@ export function checkCodexConfig(env = process.env) {
     content.includes("MOMOAPI_PROXY_MANAGED") ||
     content.includes("MOMO_CODEX_BRIDGE_MANAGED") ||
     content.includes("MOMO_CODEX_SWITCH_MANAGED") ||
+    content.includes("MOMOAPI_ROUTE_MANAGED_BEGIN") ||
+    content.includes("[model_providers.momo-route]") ||
+    content.includes('[model_providers."momo-route"]') ||
     content.includes("[model_providers.momoapi-proxy]") ||
     content.includes('[model_providers."momoapi-proxy"]') ||
     content.includes('[model_providers."momoapi proxy"]') ||
@@ -83,6 +87,30 @@ export async function runDoctor({ env = process.env, fetchImpl = fetch } = {}) {
     modelCount: catalog?.models?.length || 0,
   };
   if (!results.checks.catalog.ok) results.ok = false;
+
+  const route = codexRouteStatus(env);
+  let activeCatalogModels = null;
+  let activeCatalogError = null;
+  if (route.expectedCatalog) {
+    try {
+      const activeCatalog = JSON.parse(readFileSync(route.expectedCatalog, "utf8"));
+      activeCatalogModels = activeCatalog?.models?.length || 0;
+    } catch (err) {
+      activeCatalogError = err.message;
+    }
+  }
+  const activeCatalogHasModels = !route.expectedCatalog || Boolean(activeCatalogModels);
+  const routeCatalogOk = new Set(["direct", "proxy"]).has(route.mode) && route.catalogConsistent && route.catalogExists && activeCatalogHasModels;
+  results.checks.routeCatalog = {
+    ok: routeCatalogOk,
+    mode: route.mode,
+    configuredPath: route.configuredCatalog || null,
+    expectedPath: route.expectedCatalog || null,
+    exists: route.catalogExists,
+    modelCount: activeCatalogModels,
+    error: activeCatalogError,
+  };
+  if (!routeCatalogOk) results.ok = false;
 
   results.checks.autostart = {
     installed: isAutostartInstalled(process.platform, env),

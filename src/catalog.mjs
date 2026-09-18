@@ -78,6 +78,10 @@ export function catalogPath(env = process.env) {
   return join(codexHome(env), "model-catalogs", "momoapi-proxy.json");
 }
 
+export function directCatalogPath(env = process.env) {
+  return join(codexHome(env), "model-catalogs", "momo-models.json");
+}
+
 let cachedTemplate = null;
 
 function getBundledTemplate() {

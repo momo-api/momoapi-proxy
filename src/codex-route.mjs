@@ -2,7 +2,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSyn
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { appHome, normalizeEndpoint, readSettings } from "./config.mjs";
-import { codexHome } from "./catalog.mjs";
+import { catalogPath as proxyCatalogPath, codexHome, directCatalogPath } from "./catalog.mjs";
 
 export const ROUTE_PROVIDER = "momo-route";
 export const ROUTE_BEGIN = "# MOMOAPI_ROUTE_MANAGED_BEGIN";
@@ -33,6 +33,30 @@ function topLevelProvider(content) {
     if (/^\s*\[/.test(line)) break;
     const match = line.match(/^\s*model_provider\s*=\s*["']([^"']+)["']/);
     if (match) return match[1];
+  }
+  return "";
+}
+
+function topLevelString(content, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp("^\\s*" + escaped + "\\s*=\\s*[\"']([^\"']+)[\"']");
+  for (const line of String(content || "").replace(/\r\n/g, "\n").split("\n")) {
+    if (/^\s*\[/.test(line)) break;
+    const match = line.match(pattern);
+    if (match) return match[1];
+  }
+  return "";
+}
+
+function normalizedCatalogPath(path) {
+  return String(path || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+export function routeCatalogPath(mode, env = process.env) {
+  if (mode === "proxy") return proxyCatalogPath(env);
+  if (mode === "direct") {
+    const direct = directCatalogPath(env);
+    return existsSync(direct) ? direct : "";
   }
   return "";
 }
@@ -110,7 +134,7 @@ function withoutTopLevelRouteKeys(content) {
   let topLevel = true;
   for (const line of String(content || "").replace(/\r\n/g, "\n").split("\n")) {
     if (/^\s*\[/.test(line)) topLevel = false;
-    if (topLevel && /^\s*(?:model_provider|openai_base_url)\s*=/.test(line)) continue;
+    if (topLevel && /^\s*(?:model_provider|model_catalog_json|openai_base_url)\s*=/.test(line)) continue;
     if (topLevel && /^\s*#\s*MOMO(?:API_PROXY|_CODEX_BRIDGE|_CODEX_SWITCH)_MANAGED\s*$/.test(line)) continue;
     kept.push(line);
   }
@@ -201,6 +225,12 @@ export function codexRouteStatus(env = process.env) {
   const baseUrl = providerBaseUrl(content, provider);
   const settings = readSettings(env);
   const mode = routeModeFromBaseUrl(baseUrl, settings);
+  const configuredCatalog = topLevelString(content, "model_catalog_json");
+  const expectedCatalog = routeCatalogPath(mode, env);
+  const catalogConsistent = new Set(["direct", "proxy"]).has(mode) && (expectedCatalog
+    ? normalizedCatalogPath(configuredCatalog) === normalizedCatalogPath(expectedCatalog)
+    : !configuredCatalog);
+  const catalogExists = !expectedCatalog || existsSync(expectedCatalog);
   const markerMode = marker?.[1] || "";
   const aliases = content.includes(ROUTE_BEGIN) ? routeProviderAliases(content, settings) : [];
   const inconsistentProviders = aliases.filter((alias) => providerBaseUrl(content, alias) !== baseUrl);
@@ -211,9 +241,13 @@ export function codexRouteStatus(env = process.env) {
     markerMismatch: Boolean(markerMode && markerMode !== mode),
     aliases,
     inconsistentProviders,
-    consistent: mode !== "custom" && (!markerMode || markerMode === mode) && inconsistentProviders.length === 0 && !hasTopLevelKey(content, "openai_base_url"),
+    consistent: mode !== "custom" && (!markerMode || markerMode === mode) && inconsistentProviders.length === 0 && !hasTopLevelKey(content, "openai_base_url") && catalogConsistent && catalogExists,
     provider,
     baseUrl,
+    configuredCatalog,
+    expectedCatalog,
+    catalogConsistent,
+    catalogExists,
     config: target,
   };
 }
@@ -247,6 +281,11 @@ export function switchCodexRoute(mode, {
   if (!settings?.apiKey) throw new Error("MOMO API key is not configured.");
   if (mode === "proxy" && !settings?.localToken) throw new Error("MOMO local proxy token is not configured.");
 
+  const selectedCatalog = routeCatalogPath(mode, env);
+  if (mode === "proxy" && !existsSync(selectedCatalog)) {
+    throw new Error("MOMO proxy model catalog is missing. Run 'momoapi-proxy sync' and retry.");
+  }
+
   const target = configPath(env);
   const original = existsSync(target) ? readFileSync(target, "utf8") : "";
   const backup = saveBackup(target, env);
@@ -262,13 +301,14 @@ export function switchCodexRoute(mode, {
     : directBaseUrl;
   const content = [
     `model_provider = ${tomlString(provider)}`,
+    selectedCatalog ? `model_catalog_json = ${tomlString(selectedCatalog.replace(/\\/g, "/"))}` : "",
     cleaned,
     managedRouteBlock({ mode, baseUrl, aliases, nodePath, cliPath }),
     "",
   ].filter((part) => part !== "").join("\n\n").replace(/\n{3,}/g, "\n\n");
   atomicWrite(target, content);
-  const stateFile = writeRouteState({ mode, provider, aliases, baseUrl, changedAt: new Date().toISOString(), backup: backup.timestamped }, env);
-  return { mode, provider, aliases, baseUrl, config: target, backup: backup.timestamped, rollback: backup.rollback, stateFile };
+  const stateFile = writeRouteState({ mode, provider, aliases, baseUrl, catalog: selectedCatalog || null, changedAt: new Date().toISOString(), backup: backup.timestamped }, env);
+  return { mode, provider, aliases, baseUrl, catalog: selectedCatalog || null, config: target, backup: backup.timestamped, rollback: backup.rollback, stateFile };
 }
 
 export function restoreCodexRoute(env = process.env) {
