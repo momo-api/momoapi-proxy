@@ -370,7 +370,7 @@ async function main() {
           latestVersion: info.latest,
           updateCheckFailed: Boolean(info.checkFailed),
         });
-        if (info.hasUpdate && settings.autoUpdateEnabled && !automaticUpdateStarted) {
+        if (info.hasUpdate && settings.autoUpdateEnabled && !info.automaticUpdateBlocked && !automaticUpdateStarted) {
           automaticUpdateStarted = true;
           writeUpdateStatus({ status: "automatic_update_starting", latest: info.latest, hasUpdate: true, checkFailed: false });
           try {
@@ -607,10 +607,11 @@ async function main() {
   } else if (command === "update" || command === "upgrade") {
     const settings = resolveSettings();
     const force = hasFlag("--force");
+    const automatic = hasFlag("--automatic");
     console.log("Checking for MOMO Codex Bridge updates (current: v" + getCurrentVersion() + ")...");
     let res;
     try {
-      res = await updateSelf({ endpoint: settings.endpoint, force });
+      res = await updateSelf({ endpoint: settings.endpoint, force, automatic });
     } catch (error) {
       recordDiagnosticEvent({ event: "proxy_update_error", errorCode: error.code || "update_failed" }, { settings });
       throw error;

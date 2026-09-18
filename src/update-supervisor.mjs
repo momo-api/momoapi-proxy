@@ -32,6 +32,23 @@ function validateStagedLayout({ rootDir, stagingDir, backupDir }) {
   }
 }
 
+export function pruneFailedUpdateDirectories(rootDir, { keep = 3, remove = (target) => rmSync(target, { recursive: true, force: true }) } = {}) {
+  const parent = dirname(resolve(rootDir));
+  const prefix = `${basename(resolve(rootDir))}.failed-`;
+  const retained = Math.max(0, Number.isFinite(Number(keep)) ? Math.floor(Number(keep)) : 3);
+  const candidates = readdirSync(parent, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+  const removed = [];
+  for (const name of candidates.slice(retained)) {
+    const target = join(parent, name);
+    remove(target);
+    removed.push(target);
+  }
+  return { kept: candidates.slice(0, retained).map((name) => join(parent, name)), removed };
+}
+
 function copyDirectoryContents(source, destination) {
   mkdirSync(destination, { recursive: true, mode: 0o700 });
   for (const entry of readdirSync(source)) {
@@ -84,7 +101,17 @@ function writeSupervisorStatus(status, env = process.env) {
   try {
     const target = join(proxyHome(env), "update-status.json");
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
-    writeFileSync(target, JSON.stringify({ checkedAt: new Date().toISOString(), ...status }, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+    const checkedAt = new Date().toISOString();
+    const failed = new Set(["activation_failed", "rolled_back", "rollback_failed"]).has(status.status);
+    let previous = null;
+    try { previous = JSON.parse(readFileSync(target, "utf8")); } catch {}
+    const failedTarget = failed ? (status.failedTarget || status.latest || status.target || null) : null;
+    const failureFields = failedTarget ? {
+      failedTarget,
+      failedAt: previous?.failedTarget === failedTarget ? (previous.failedAt || checkedAt) : checkedAt,
+      automaticRetryBlocked: true,
+    } : {};
+    writeFileSync(target, JSON.stringify({ checkedAt, ...status, ...failureFields }, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
   } catch {}
 }
 
@@ -463,6 +490,9 @@ export async function superviseUpdate({
           }, env);
           appendSupervisorLog(`Transactional in-place activation failed: ${fallbackError?.code || fallbackError?.name || "unknown_error"}.`, env);
           restoreTray(restoredHealthy, "the in-place rollback");
+          if (restoredHealthy) {
+            try { pruneFailedUpdateDirectories(rootDir); } catch {}
+          }
           return {
             activated: false, rolledBack: restoredTreeContents, restoredHealthy,
             errorCode: restoredHealthy ? "update_inplace_failed" : "update_inplace_restore_failed",
@@ -483,6 +513,9 @@ export async function superviseUpdate({
         }, env);
         appendSupervisorLog(`Update file swap failed: ${error?.code || error?.name || "unknown_error"}.`, env);
         restoreTray(restoredHealthy, "the file-swap rollback");
+        if (restoredHealthy) {
+          try { pruneFailedUpdateDirectories(rootDir); } catch {}
+        }
         return {
           activated: false, rolledBack: restoredTree, restoredHealthy,
           errorCode: restoredHealthy ? "update_swap_failed" : "update_swap_restore_failed",
@@ -549,6 +582,9 @@ export async function superviseUpdate({
       errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
     }, env);
     restoreTray(restoredHealthy, "the health-check rollback");
+    if (restoredHealthy) {
+      try { pruneFailedUpdateDirectories(rootDir); } catch {}
+    }
     return {
       activated: false, rolledBack: restoredTree, restoredHealthy,
       errorCode: restoredHealthy ? "update_activation_failed" : "update_inplace_restore_failed",
@@ -601,6 +637,9 @@ export async function superviseUpdate({
     ? `Rollback to proxy v${previousVersion} completed.`
     : `Rollback restored proxy v${previousVersion}, but its health check failed.`, env);
   restoreTray(restoredHealthy, `rollback to v${previousVersion}`);
+  if (restoredHealthy) {
+    try { pruneFailedUpdateDirectories(rootDir); } catch {}
+  }
   return {
     activated: false,
     rolledBack: true,

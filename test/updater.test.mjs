@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertSafeArchiveListing, checkAndRecordLatestVersion, checkLatestVersion, getCurrentVersion, isNewer, isTrustedResolvedPackageUrl, isTrustedUpdateUrl, isTrustedVersionedPackageUrl, readUpdateStatus, updateSelf } from "../src/updater.mjs";
+import { assertSafeArchiveListing, checkAndRecordLatestVersion, checkLatestVersion, getCurrentVersion, isAutomaticUpdateBlocked, isNewer, isTrustedResolvedPackageUrl, isTrustedUpdateUrl, isTrustedVersionedPackageUrl, readUpdateStatus, updateSelf, writeUpdateStatus } from "../src/updater.mjs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -285,6 +285,50 @@ test("failed update checks are persisted instead of being reported as latest", a
     const status = readUpdateStatus({ MOMO_PROXY_HOME: home });
     assert.equal(status.checkFailed, true);
     assert.equal(status.errorCode, "all_update_sources_failed");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("automatic updates latch a failed target until a newer release appears", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-update-latch-"));
+  const env = { MOMO_PROXY_HOME: home };
+  const releaseFetch = (version) => async (url) => {
+    if (url.includes("bridge-latest.json")) {
+      return new Response(JSON.stringify({
+        version,
+        url: `https://momoapi.us/install/packages/momoapi-proxy-${version}.tgz`,
+      }), { status: 200 });
+    }
+    if (url.includes("api.github.com")) {
+      return new Response(JSON.stringify({
+        tag_name: `v${version}`,
+        assets: [{
+          name: `momoapi-proxy-${version}.tgz`,
+          browser_download_url: `https://github.com/momo-api/momoapi-proxy/releases/download/v${version}/momoapi-proxy-${version}.tgz`,
+          digest: `sha256:${"a".repeat(64)}`,
+        }],
+      }), { status: 200 });
+    }
+    return new Response("missing", { status: 404 });
+  };
+  try {
+    writeUpdateStatus({
+      status: "rolled_back",
+      latest: "999.0.0",
+      failedTarget: "999.0.0",
+      failedAt: "2026-09-18T00:00:00.000Z",
+      automaticRetryBlocked: true,
+    }, env);
+    const blocked = await checkAndRecordLatestVersion({ fetchImpl: releaseFetch("999.0.0"), env });
+    assert.equal(blocked.automaticUpdateBlocked, true);
+    assert.equal(isAutomaticUpdateBlocked("999.0.0", env), true);
+    const automatic = await updateSelf({ fetchImpl: releaseFetch("999.0.0"), env, automatic: true });
+    assert.equal(automatic.blocked, true);
+
+    const newer = await checkAndRecordLatestVersion({ fetchImpl: releaseFetch("1000.0.0"), env });
+    assert.equal(newer.automaticUpdateBlocked, false);
+    assert.equal(readUpdateStatus(env).failedTarget, undefined);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

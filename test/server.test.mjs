@@ -1352,7 +1352,16 @@ test("calculates Claude thinking token budget dynamically from reasoning_effort"
   assert.equal(capturedBody.max_tokens, 16384);
 });
 
-test("auto-sync timer schedules periodic catalog refreshes", async () => {
+test("auto-sync timer schedules periodic catalog refreshes", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "momo-auto-sync-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const env = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, ".codex"),
+    MOMO_PROXY_HOME: join(home, ".momoapi-proxy"),
+  };
   let syncCount = 0;
   const fakeFetch = async () => {
     syncCount += 1;
@@ -1361,6 +1370,7 @@ test("auto-sync timer schedules periodic catalog refreshes", async () => {
   const autoSync = startAutoSync({
     settings: { apiKey: "test-key", endpoint: "https://gateway.example", syncIntervalMinutes: 0.001 },
     fetchImpl: fakeFetch,
+    env,
   });
   try {
     await new Promise((resolve) => setTimeout(resolve, 150));

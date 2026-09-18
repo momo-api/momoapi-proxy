@@ -297,15 +297,44 @@ export function readUpdateStatus(env = process.env) {
   try { return JSON.parse(readFileSync(target, "utf8")); } catch { return null; }
 }
 
+const FAILED_UPDATE_STATES = new Set(["activation_failed", "rolled_back", "rollback_failed"]);
+
+export function failedAutomaticUpdateTarget(status) {
+  if (!status || typeof status !== "object") return null;
+  if (typeof status.failedTarget === "string" && status.failedTarget) return status.failedTarget;
+  if (FAILED_UPDATE_STATES.has(status.status) && typeof status.latest === "string" && status.latest) return status.latest;
+  return null;
+}
+
+export function isAutomaticUpdateBlocked(version, env = process.env) {
+  if (!version) return false;
+  const status = readUpdateStatus(env);
+  return failedAutomaticUpdateTarget(status) === version
+    && status?.automaticRetryBlocked !== false;
+}
+
 export async function checkAndRecordLatestVersion({ endpoint = "https://momoapi.us", fetchImpl = fetch, env = process.env } = {}) {
   const info = await checkLatestVersion({ endpoint, fetchImpl });
-  writeUpdateStatus({
+  const previous = readUpdateStatus(env);
+  const failedTarget = failedAutomaticUpdateTarget(previous);
+  const preserveFailure = Boolean(failedTarget) && (info.checkFailed || failedTarget === info.latest);
+  const automaticUpdateBlocked = preserveFailure && !info.checkFailed && failedTarget === info.latest;
+  const nextStatus = {
     latest: info.latest,
     hasUpdate: info.hasUpdate,
     checkFailed: info.checkFailed,
     errorCode: info.checkFailed ? "all_update_sources_failed" : null,
-  }, env);
-  return info;
+  };
+  if (preserveFailure) {
+    Object.assign(nextStatus, {
+      status: previous.status || "automatic_update_blocked",
+      failedTarget,
+      failedAt: previous.failedAt || previous.checkedAt || new Date().toISOString(),
+      automaticRetryBlocked: true,
+    });
+  }
+  writeUpdateStatus(nextStatus, env);
+  return { ...info, automaticUpdateBlocked, failedTarget: preserveFailure ? failedTarget : null };
 }
 
 export function startUpdateChecker({ endpoint = "https://momoapi.us", fetchImpl = fetch, env = process.env, enabled = true, initialDelayMs = 60_000, intervalHours = 12, onCheck } = {}) {
@@ -331,7 +360,7 @@ export function startUpdateChecker({ endpoint = "https://momoapi.us", fetchImpl 
   };
 }
 
-export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = fetch, force = false, env = process.env } = {}) {
+export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = fetch, force = false, automatic = false, env = process.env } = {}) {
   const info = await checkLatestVersion({ endpoint, fetchImpl });
   if (info.checkFailed) {
     throw Object.assign(new Error("Unable to check for updates: all release sources failed."), { code: "update_check_failed" });
@@ -341,6 +370,15 @@ export async function updateSelf({ endpoint = "https://momoapi.us", fetchImpl = 
   }
   if (!info.hasUpdate && !force) {
     return { updated: false, current: info.current, latest: info.latest, message: "Already on the latest version (v" + info.current + ")." };
+  }
+  if (automatic && isAutomaticUpdateBlocked(info.latest, env)) {
+    return {
+      updated: false,
+      blocked: true,
+      current: info.current,
+      latest: info.latest,
+      message: "Automatic retry of v" + info.latest + " is blocked after a failed activation. Run a manual update to retry.",
+    };
   }
   if (!/^[a-f0-9]{64}$/.test(info.sha256 || "")) {
     throw Object.assign(new Error("Release metadata does not include a valid SHA-256 checksum."), { code: "update_checksum_missing" });
