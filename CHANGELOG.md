@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.14.1 - 2026-09-20
+
+- Rename the Windows tray plugin section to MOMO media plugins and show separate installed, enabled, and version states for MOMO Image and MOMO Video.
+- Make the tray repair action explicitly install or repair both image and video plugins.
+
 ## 0.13.34 - 2026-09-18
 
 - Switch the Codex model catalog together with the route: direct mode now uses the official-only MOMO/Codex catalog, while local Proxy mode uses the automatically synced proxy catalog that includes supported third-party models.
