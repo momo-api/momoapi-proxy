@@ -1,0 +1,15 @@
+---
+name: momo-video
+description: Generate text-to-video or image-to-video tasks with MOMO video models through the locally authenticated MOMO API Proxy. Use for video generation, video model capability checks, and video task status polling; do not use it for editing an existing video file.
+---
+
+# MOMO Video
+
+Use the MCP tools from this plugin. The local proxy keeps the MOMO credential out of tool arguments.
+
+1. Call `video_capabilities` before choosing model-specific controls. Treat its returned duration, aspect ratio, resolution, audio, reference-image, availability, and operation fields as authoritative.
+2. Call `video_generate` with a prompt and only parameters supported by the selected model. For image-to-video, pass references as `asset:img_...`, an image data URL, or a public HTTPS image URL.
+3. If generation is asynchronous, call `video_task_status` with the returned task ID until it reaches a terminal state.
+4. Return the remote output URL to the user. Do not download or duplicate the video on the local computer, VPS, R2, or another CDN unless the user explicitly requests that transfer.
+
+Do not infer capabilities from model names or silently substitute another model when validation fails.

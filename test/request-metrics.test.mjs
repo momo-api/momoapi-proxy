@@ -53,12 +53,13 @@ test("metric windows use nearest rank, reject invalid values and retain only the
   assert.deepEqual(window.snapshot(), { available: true, observations: 1001, samples: 500, p50: 750, p95: 975, p99: 995 });
 });
 
-test("route classes are fixed and exact, including image and preflight isolation", () => {
+test("route classes are fixed and exact, including media and preflight isolation", () => {
   for (const path of ["/v1/responses", "/responses/compact", "/chat/completions"]) assert.equal(requestMetricGroup("POST", path), "business");
   assert.equal(requestMetricGroup("GET", "/v1/models"), "business");
   assert.equal(requestMetricGroup("GET", "/healthz"), "health");
   assert.equal(requestMetricGroup("GET", "/readyz"), "health");
   assert.equal(requestMetricGroup("GET", "/internal/images/tasks/opaque"), "image");
+  assert.equal(requestMetricGroup("GET", "/internal/videos/tasks/opaque"), "video");
   assert.equal(requestMetricGroup("GET", "/internal/metrics"), "control");
   for (const [method, path] of [["OPTIONS", "/v1/responses"], ["POST", "/health"], ["GET", "/v1/responses-extra"], ["POST", "/v1/models/foo"]]) assert.equal(requestMetricGroup(method, path), "other");
 });
@@ -235,7 +236,7 @@ test("arbitrary path cardinality never grows metric labels or leaks path data", 
     timing.firstWrite(); timing.finish(404);
   }
   const value = collector.snapshot();
-  assert.equal(Object.keys(value.groups).length, 5);
+  assert.equal(Object.keys(value.groups).length, 6);
   assert.equal(value.groups.other.stages.clientFirstWriteMs.samples, 500);
   assert.equal(value.groups.other.requests.total, 10000);
   assert.doesNotMatch(JSON.stringify(value), /PRIVATE_SENTINEL/);

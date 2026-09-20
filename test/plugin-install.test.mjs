@@ -9,7 +9,7 @@ function result(stdout = "", status = 0, stderr = "", error = null) {
   return { status, stdout, stderr, error };
 }
 
-test("image plugin installer adds the bundled marketplace and enables the plugin", () => {
+test("media plugin installer adds the bundled marketplace and enables both plugins", () => {
   const calls = [];
   const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-install-"));
   const env = { MOMO_PROXY_HOME: proxyHome };
@@ -27,6 +27,13 @@ test("image plugin installer adds the bundled marketplace and enables the plugin
         version: "0.4.0",
         installed: true,
         enabled: true,
+      }, {
+        pluginId: "momo-video@momo-api",
+        name: "momo-video",
+        marketplaceName: "momo-api",
+        version: "0.1.0",
+        installed: true,
+        enabled: true,
       }] }));
     }
     return result("{}");
@@ -36,11 +43,13 @@ test("image plugin installer adds the bundled marketplace and enables the plugin
     const installed = installImagePlugin({ env, runCodex });
     assert.equal(installed.installed, true);
     assert.equal(installed.enabled, true);
+    assert.deepEqual(Object.keys(installed.plugins), ["momo-image", "momo-video"]);
     assert.equal(installed.marketplaceSource, "bundled");
     assert.deepEqual(calls, [
       ["plugin", "marketplace", "list", "--json"],
       ["plugin", "marketplace", "add", mirrorRoot, "--json"],
       ["plugin", "add", "momo-image@momo-api", "--json"],
+      ["plugin", "add", "momo-video@momo-api", "--json"],
       ["plugin", "list", "--json"],
     ]);
   } finally {
@@ -48,7 +57,7 @@ test("image plugin installer adds the bundled marketplace and enables the plugin
   }
 });
 
-test("image plugin installer is idempotent for its bundled local marketplace", () => {
+test("media plugin installer is idempotent for its bundled local marketplace", () => {
   const calls = [];
   const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-install-"));
   const env = { MOMO_PROXY_HOME: proxyHome };
@@ -61,6 +70,10 @@ test("image plugin installer is idempotent for its bundled local marketplace", (
     if (args[1] === "list") {
       return result(JSON.stringify({ installed: [{
         pluginId: "momo-image@momo-api",
+        installed: true,
+        enabled: true,
+      }, {
+        pluginId: "momo-video@momo-api",
         installed: true,
         enabled: true,
       }] }));
@@ -79,7 +92,7 @@ test("image plugin installer is idempotent for its bundled local marketplace", (
   }
 });
 
-test("image plugin installer replaces a previously configured marketplace with the bundled copy", () => {
+test("media plugin installer replaces a previously configured marketplace with the bundled copy", () => {
   const calls = [];
   const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-install-"));
   const env = { MOMO_PROXY_HOME: proxyHome };
@@ -89,7 +102,10 @@ test("image plugin installer replaces a previously configured marketplace with t
       return result(JSON.stringify({ marketplaces: [{ name: "momo-api", root: "C:/codex/cache/momo-api" }] }));
     }
     if (args[1] === "list") {
-      return result(JSON.stringify({ installed: [{ pluginId: "momo-image@momo-api", installed: true, enabled: true }] }));
+      return result(JSON.stringify({ installed: [
+        { pluginId: "momo-image@momo-api", installed: true, enabled: true },
+        { pluginId: "momo-video@momo-api", installed: true, enabled: true },
+      ] }));
     }
     return result("{}");
   };
@@ -158,13 +174,14 @@ test("Codex commands are passed as argument arrays without a shell", () => {
   assert.equal(calls.flat().some((value) => String(value).includes("&&")), false);
 });
 
-test("marketplace mirror contains only the public plugin bundle outside the application tree", () => {
+test("marketplace mirror contains only the public media plugin bundle outside the application tree", () => {
   const proxyHome = mkdtempSync(join(tmpdir(), "momo-plugin-mirror-"));
   const env = { MOMO_PROXY_HOME: proxyHome };
   try {
     const mirror = materializeMarketplaceMirror({ env });
     assert.equal(mirror.startsWith(join(proxyHome, "marketplaces")), true);
     assert.notEqual(mirror, BUNDLED_MARKETPLACE_ROOT);
+    assert.match(readFileSync(join(mirror, "plugins", "momo-video", ".codex-plugin", "plugin.json"), "utf8"), /momo-video/);
     assert.equal(materializeMarketplaceMirror({ env }), mirror);
   } finally {
     rmSync(proxyHome, { recursive: true, force: true });
@@ -180,4 +197,13 @@ test("MOMO Image declares the default routing preference in plugin metadata and 
     assert.match(value, /MOMO Image.*default/i);
     assert.match(value, /official ImageGen.*explicit/i);
   }
+});
+
+test("MOMO Video declares dynamic capabilities and remote-only default storage", () => {
+  const pluginRoot = join(BUNDLED_MARKETPLACE_ROOT, "plugins", "momo-video");
+  const manifest = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+  const skill = readFileSync(join(pluginRoot, "skills", "momo-video", "SKILL.md"), "utf8");
+  assert.match(manifest.interface.defaultPrompt, /video_capabilities/);
+  assert.match(skill, /Do not infer capabilities from model names/);
+  assert.match(skill, /Do not download or duplicate the video/);
 });

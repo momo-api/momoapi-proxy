@@ -1,0 +1,4 @@
+interface:
+  display_name: "MOMO Video"
+  short_description: "Generate videos through MOMO API Proxy"
+  default_prompt: "Use MOMO Video for video generation. Check video_capabilities first, return remote result URLs, and do not download large video files unless explicitly requested."

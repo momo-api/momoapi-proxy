@@ -8,6 +8,30 @@ const GPT_IMAGE_25_QUALITY = ["auto", "low", "medium", "high", "xhigh", "max"];
 const OUTPUT_FORMATS = ["png", "jpeg", "webp"];
 
 const MODEL_RULES = {
+  "momoapi-gpt-image-2-5-flare": {
+    maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
+    aspectRatios: ASPECT_RATIOS, qualities: ["low", "medium", "high"],
+    generateTransport: "images-generations", editTransport: "images-generations-reference",
+    dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
+  },
+  "momoapi-gpt-image-2-5-prism": {
+    maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
+    aspectRatios: ASPECT_RATIOS, qualities: ["low", "medium", "high"],
+    generateTransport: "images-generations", editTransport: "images-generations-reference",
+    dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
+  },
+  "momoapi-gpt-image-2": {
+    maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
+    aspectRatios: ASPECT_RATIOS, qualities: ["low", "medium", "high"],
+    generateTransport: "images-generations", editTransport: "images-generations-reference",
+    dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
+  },
+  "momoapi-gemini-nano-banana-3": {
+    maxN: 1, maxReferenceImages: 4, operations: ["generate", "edit"],
+    aspectRatios: ASPECT_RATIOS, resolutions: ["1k", "2k", "4k"],
+    generateTransport: "images-generations", editTransport: "images-generations-reference",
+    dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
+  },
   "gpt-image-2": {
     maxN: 1, maxReferenceImages: 1, operations: ["generate", "edit"],
     aspectRatios: ASPECT_RATIOS, resolutions: ["1k", "2k", "4k"],
@@ -46,13 +70,14 @@ function capability(model, displayName) {
     id: model,
     display_name: displayName,
     operations: rules.operations,
-    parameters: rules.nativeControls ? nativeParameters : ["prompt", "n", "aspect_ratio", "resolution", "reference_images"],
+    parameters: rules.nativeControls ? nativeParameters : ["prompt", "n", "aspect_ratio", ...(rules.resolutions ? ["resolution"] : []), ...(rules.qualities ? ["quality"] : []), "reference_images"],
     transports: { generate: rules.generateTransport, edit: rules.editTransport },
     limits: {
       max_n: rules.maxN,
       max_reference_images: rules.maxReferenceImages,
       ...(rules.aspectRatios ? { aspect_ratios: rules.aspectRatios } : {}),
       ...(rules.resolutions ? { resolutions: rules.resolutions } : {}),
+      ...(rules.qualities ? { qualities: rules.qualities } : {}),
       ...(rules.nativeControls ? {
         sizes: { ratios: ASPECT_RATIOS, arbitrary: true, multiple_of: 16, aspect_ratio_range: "1:3 to 3:1", max_edge: 3840, min_pixels: 655360, max_pixels: 8294400 },
         qualities: GPT_IMAGE_25_QUALITY, output_formats: OUTPUT_FORMATS, partial_images: { supported: false },
@@ -67,8 +92,12 @@ function capability(model, displayName) {
 }
 
 export const IMAGE_CAPABILITIES = {
-  version: 4,
+  version: 5,
   models: [
+    capability("momoapi-gpt-image-2-5-flare", "MOMO GPT Image 2.5 Flare"),
+    capability("momoapi-gpt-image-2-5-prism", "MOMO GPT Image 2.5 Prism"),
+    capability("momoapi-gpt-image-2", "MOMO GPT Image 2"),
+    capability("momoapi-gemini-nano-banana-3", "MOMO Gemini Nano Banana 3"),
     capability("gpt-image-2", "GPT Image 2"),
     capability("gpt-image-2-momoapi", "GPT Image 2 MOMO"),
     capability("gemini-3.1-flash-image", "Gemini 3.1 Flash Image"),
@@ -90,6 +119,67 @@ export const IMAGE_CAPABILITIES = {
   },
 };
 
+function numberMaximum(parameter, fallback) {
+  if (Number.isInteger(parameter?.maximum)) return parameter.maximum;
+  const allowed = Array.isArray(parameter?.allowed) ? parameter.allowed.filter(Number.isInteger) : [];
+  return allowed.length ? Math.max(...allowed) : fallback;
+}
+
+function enumAllowed(parameter, fallback) {
+  return Array.isArray(parameter?.allowed) && parameter.allowed.length ? [...parameter.allowed] : fallback;
+}
+
+function ruleFromCapability(model, base = {}) {
+  const parameters = model?.parameters || {};
+  const operations = Array.isArray(model?.operations) ? model.operations.filter((item) => item === "generate" || item === "edit") : [];
+  return {
+    ...base,
+    maxN: numberMaximum(parameters.n, base.maxN || 1),
+    maxReferenceImages: numberMaximum(parameters.max_reference_images, base.maxReferenceImages || 0),
+    operations: operations.length ? operations : (base.operations || ["generate"]),
+    aspectRatios: enumAllowed(parameters.aspect_ratio, base.aspectRatios),
+    resolutions: enumAllowed(parameters.resolution, base.resolutions),
+    qualities: enumAllowed(parameters.quality, base.qualities),
+    available: model?.available !== false,
+    role: model?.role,
+    dynamic: true,
+  };
+}
+
+function ruleFromPublicCapability(model, base = {}) {
+  const limits = model?.limits || {};
+  return {
+    ...base,
+    maxN: Number.isInteger(limits.max_n) ? limits.max_n : (base.maxN || 1),
+    maxReferenceImages: Number.isInteger(limits.max_reference_images) ? limits.max_reference_images : (base.maxReferenceImages || 0),
+    operations: Array.isArray(model?.operations) ? model.operations.filter((item) => item === "generate" || item === "edit") : (base.operations || ["generate"]),
+    aspectRatios: Array.isArray(limits.aspect_ratios) ? limits.aspect_ratios : base.aspectRatios,
+    resolutions: Array.isArray(limits.resolutions) ? limits.resolutions : base.resolutions,
+    qualities: Array.isArray(limits.qualities) ? limits.qualities : base.qualities,
+    available: model?.available !== false,
+    role: model?.role,
+    dynamic: true,
+  };
+}
+
+function publicCapability(model, rules) {
+  return {
+    ...model,
+    parameter_schema: model.parameters || {},
+    parameters: Object.keys(model.parameters || {}),
+    limits: {
+      max_n: rules.maxN,
+      max_reference_images: rules.maxReferenceImages,
+      ...(rules.aspectRatios ? { aspect_ratios: rules.aspectRatios } : {}),
+      ...(rules.resolutions ? { resolutions: rules.resolutions } : {}),
+      ...(rules.qualities ? { qualities: rules.qualities } : {}),
+      max_reference_bytes_each: MAX_REFERENCE_BYTES,
+    },
+    transports: { generate: rules.generateTransport, edit: rules.editTransport },
+    mask_edits: Boolean(rules.maskEdits),
+  };
+}
+
 function catalogModelIds(payload) {
   const rows = Array.isArray(payload?.data) ? payload.data : (Array.isArray(payload?.models) ? payload.models : []);
   return new Set(rows.map((item) => typeof item === "string" ? item : item?.id).filter((id) => typeof id === "string"));
@@ -97,23 +187,43 @@ function catalogModelIds(payload) {
 
 export async function resolveImageCapabilities({ settings, fetchImpl = fetch, signal } = {}) {
   const capability = structuredClone(IMAGE_CAPABILITIES);
-  const gated = capability.models.filter((model) => MODEL_RULES[model.id]?.requiresCatalog);
-  if (!settings || gated.length === 0) return capability;
+  if (!settings) return capability;
   try {
     const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
-    const response = await fetchImpl(endpoint + "/v1/models", {
+    const response = await fetchImpl(endpoint + "/agent/media-capabilities", {
       headers: { authorization: "Bearer " + settings.apiKey },
       signal: imageSignal(signal, 15000),
     });
-    if (!response.ok) throw new Error("model catalog returned HTTP " + response.status);
-    const ids = catalogModelIds(await response.json());
-    for (const model of gated) {
-      model.available = ids.has(model.id);
-      model.availability = model.available ? "upstream_catalog" : "not_in_upstream_catalog";
+    if (!response.ok) throw new Error("media capability catalog returned HTTP " + response.status);
+    const payload = await response.json();
+    if (!Array.isArray(payload?.models)) throw new Error("media capability catalog has no models");
+    const models = [];
+    for (const model of payload.models) {
+      if (model?.modality !== "image" || !MODEL_RULES[model.id]) continue;
+      const rules = ruleFromCapability(model, MODEL_RULES[model.id]);
+      models.push(publicCapability(model, rules));
     }
+    if (models.length) capability.models = models;
+    const preferred = ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-prism", "momoapi-gpt-image-2", "momoapi-gemini-nano-banana-3", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2", "gpt-image-2-momoapi"];
+    capability.defaults.model = preferred.find((id) => capability.models.some((model) => model.id === id && model.available !== false)) || capability.models[0]?.id || IMAGE_CAPABILITIES.defaults.model;
     capability.catalog_status = "available";
   } catch {
     capability.catalog_status = "unavailable";
+    try {
+      const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
+      const response = await fetchImpl(endpoint + "/v1/models", {
+        headers: { authorization: "Bearer " + settings.apiKey },
+        signal: imageSignal(signal, 15000),
+      });
+      if (!response.ok) return capability;
+      const ids = catalogModelIds(await response.json());
+      for (const model of capability.models) {
+        if (!MODEL_RULES[model.id]?.requiresCatalog || MODEL_RULES[model.id]?.adobe) continue;
+        model.available = ids.has(model.id);
+        model.availability = model.available ? "legacy_upstream_catalog" : "not_in_upstream_catalog";
+      }
+      capability.catalog_status = "legacy_fallback";
+    } catch {}
   }
   return capability;
 }
@@ -173,11 +283,17 @@ function optionalEnum(input, key, values, fallback) {
   return value;
 }
 
-export function normalizeImageRequest(input, operation = "generate") {
+export function normalizeImageRequest(input, operation = "generate", capabilities = IMAGE_CAPABILITIES) {
   if (!input || typeof input !== "object") throw fail("Image request must be a JSON object.");
-  const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : IMAGE_CAPABILITIES.defaults.model;
+  const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : capabilities.defaults.model;
   if (!IMAGE_MODELS.has(model)) throw fail("Unsupported image model: " + model);
-  const rules = MODEL_RULES[model];
+  const dynamicCapability = capabilities.models?.find((item) => item.id === model);
+  const rules = dynamicCapability?.limits
+    ? ruleFromPublicCapability(dynamicCapability, MODEL_RULES[model])
+    : (dynamicCapability?.parameters && !Array.isArray(dynamicCapability.parameters)
+      ? ruleFromCapability(dynamicCapability, MODEL_RULES[model])
+      : MODEL_RULES[model]);
+  if (dynamicCapability?.available === false || rules.available === false) throw fail("Image model " + model + " is not currently available.", 503, "model_unavailable");
   if (!rules.operations.includes(operation)) throw fail("Model " + model + " does not support " + operation + ".");
 
   const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
@@ -190,7 +306,22 @@ export function normalizeImageRequest(input, operation = "generate") {
   let aspectRatio;
   let resolution;
   let nativeControls = {};
-  if (rules.nativeControls) {
+  if (rules.adobe) {
+    const legacyAspect = input.aspect_ratio || input.aspectRatio;
+    if (legacyAspect && rules.aspectRatios && !rules.aspectRatios.includes(legacyAspect)) throw fail("Unsupported aspect_ratio for " + model + ": " + legacyAspect);
+    aspectRatio = legacyAspect || capabilities.defaults.aspect_ratio;
+    const requestedSize = input.size;
+    if (requestedSize && requestedSize !== "auto") nativeControls.size = nativeSize(requestedSize);
+    if (rules.resolutions) {
+      const requestedResolution = String(input.resolution || input.imageSize || capabilities.defaults.resolution).toLowerCase();
+      if (!rules.resolutions.includes(requestedResolution)) throw fail("Unsupported resolution for " + model + ": " + requestedResolution);
+      resolution = requestedResolution;
+    }
+    if (rules.qualities) nativeControls.quality = optionalEnum(input, "quality", rules.qualities, "medium");
+    for (const key of ["output_format", "output_compression", "background", "moderation", "input_fidelity", "stream", "partial_images"]) {
+      if (input[key] !== undefined) throw fail(key + " is not supported for " + model + " by its current verified profile.");
+    }
+  } else if (rules.nativeControls) {
     const legacyAspect = input.aspect_ratio || input.aspectRatio;
     if (legacyAspect && !ASPECT_RATIOS.includes(legacyAspect)) throw fail("Unsupported aspect_ratio for " + model + ": " + legacyAspect);
     const requestedSize = input.size ?? (legacyAspect || "auto");
@@ -215,15 +346,16 @@ export function normalizeImageRequest(input, operation = "generate") {
       background, moderation,
     };
   } else {
-    const nativeOnly = ["size", "quality", "output_format", "output_compression", "background", "moderation", "input_fidelity", "stream", "partial_images"];
+    const nativeOnly = ["size", ...(rules.qualities ? [] : ["quality"]), "output_format", "output_compression", "background", "moderation", "input_fidelity", "stream", "partial_images"];
     const unsupported = nativeOnly.find((key) => input[key] !== undefined);
     if (unsupported) throw fail(unsupported + " is supported only for GPT Image 2.5 models.");
-    aspectRatio = input.aspect_ratio || input.aspectRatio || IMAGE_CAPABILITIES.defaults.aspect_ratio;
+    aspectRatio = input.aspect_ratio || input.aspectRatio || capabilities.defaults.aspect_ratio;
     if (!rules.aspectRatios.includes(aspectRatio)) throw fail("Unsupported aspect_ratio for " + model + ": " + aspectRatio);
-    const requestedResolution = input.resolution || input.imageSize || IMAGE_CAPABILITIES.defaults.resolution;
+    const requestedResolution = input.resolution || input.imageSize || capabilities.defaults.resolution;
     const aliases = { low: "1k", medium: "2k", high: "4k", "1K": "1k", "2K": "2k", "4K": "4k" };
     resolution = aliases[requestedResolution] || String(requestedResolution).toLowerCase();
-    if (!rules.resolutions.includes(resolution)) throw fail("Unsupported resolution for " + model + ": " + requestedResolution);
+    if (rules.resolutions && !rules.resolutions.includes(resolution)) throw fail("Unsupported resolution for " + model + ": " + requestedResolution);
+    if (rules.qualities) nativeControls.quality = optionalEnum(input, "quality", rules.qualities, "medium");
   }
 
   const references = input.reference_images || input.referenceImages || [];
@@ -324,7 +456,7 @@ async function responseBytesWithinLimit(response) {
   return Buffer.concat(chunks, total);
 }
 
-async function resolveReferenceDataUrls(request, fetchImpl, signal, lookupImpl, assetResolver) {
+export async function resolveImageReferenceDataUrls(request, fetchImpl, signal, lookupImpl, assetResolver) {
   const dataUrls = [];
   for (const reference of request.reference_images) {
     if (isImageAssetReference(reference)) {
@@ -358,6 +490,15 @@ function nativeImageBody(request) {
 }
 
 function generationBody(request) {
+  if (MODEL_RULES[request.model]?.adobe) {
+    return {
+      model: request.model, prompt: request.prompt, n: request.n,
+      ...(request.size ? { size: request.size } : {}),
+      ...(request.aspect_ratio ? { aspect_ratio: request.aspect_ratio } : {}),
+      ...(request.resolution ? { resolution: request.resolution } : {}),
+      ...(request.quality ? { quality: request.quality } : {}),
+    };
+  }
   if (request.model === "gemini-3.1-flash-image") {
     return { model: request.model, prompt: request.prompt, n: request.n, size: request.aspect_ratio, quality: request.resolution.toUpperCase() };
   }
@@ -551,18 +692,11 @@ async function readUpstreamPayload(upstream) {
 }
 
 export async function generateImage({ settings, request, fetchImpl = fetch, lookupImpl = lookup, assetResolver, signal, operation = "generate" }) {
-  const normalized = normalizeImageRequest(request, operation);
-  if (MODEL_RULES[normalized.model]?.requiresCatalog) {
-    const capabilities = await resolveImageCapabilities({ settings, fetchImpl, signal });
-    const model = capabilities.models.find((item) => item.id === normalized.model);
-    if (!model?.available) {
-      throw fail(
-        "Image model " + normalized.model + " is not currently available in the authenticated MOMO model catalog.",
-        503,
-        "model_unavailable",
-      );
-    }
-  }
+  const requestedModel = typeof request?.model === "string" && request.model.trim() ? request.model.trim() : null;
+  const capabilities = !requestedModel || MODEL_RULES[requestedModel]?.requiresCatalog
+    ? await resolveImageCapabilities({ settings, fetchImpl, signal })
+    : IMAGE_CAPABILITIES;
+  const normalized = normalizeImageRequest(request, operation, capabilities);
   const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
   let path = "/v1/images/generations";
   let body;
@@ -573,8 +707,8 @@ export async function generateImage({ settings, request, fetchImpl = fetch, look
       body = { ...nativeImageBody(normalized), image_urls: await apimartReferenceUrls(normalized, endpoint, settings, fetchImpl, signal, lookupImpl, assetResolver) };
     }
     else {
-      const references = await resolveReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
-      if (normalized.model === "gpt-image-2") body = { ...generationBody(normalized), image_urls: references };
+      const references = await resolveImageReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);
+      if (MODEL_RULES[normalized.model]?.adobe || normalized.model === "gpt-image-2") body = { ...generationBody(normalized), image_urls: references };
       else if (normalized.model === "gpt-image-2-momoapi") { path = "/v1/chat/completions"; body = gptMomoEditBody(normalized, references); }
       else { path = "/v1/chat/completions"; body = geminiEditBody(normalized, references); }
     }

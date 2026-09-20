@@ -189,11 +189,12 @@ test("Windows activation rolls back when the stable tray cannot be refreshed", a
   }
 });
 
-test("managed image MCP matching is exact to the old proxy script and image subcommand", () => {
+test("managed media MCP matching is exact to the old proxy script and media subcommands", () => {
   const root = join("C:\\Users\\test user\\.momoapi-proxy", "app");
   const target = join(root, "bin", "momoapi-proxy.mjs");
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "node.exe", CommandLine: `node.exe "${target}" mcp image` }, root), true);
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "node.exe", CommandLine: `node.exe ${target} mcp image --stdio` }, root), true);
+  assert.equal(isManagedImageMcpProcess({ ProcessId: 4322, Name: "node.exe", CommandLine: `node.exe "${target}" mcp video` }, root), true);
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "node.exe", CommandLine: `node.exe "${target}" serve` }, root), false);
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "cmd.exe", CommandLine: `cmd /c node "${target}" mcp image` }, root), false);
   assert.equal(isManagedImageMcpProcess({ ProcessId: 4321, Name: "node.exe", CommandLine: `node.exe "${root}-other\\bin\\momoapi-proxy.mjs" mcp image` }, root), false);

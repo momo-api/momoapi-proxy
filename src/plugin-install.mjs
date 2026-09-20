@@ -8,7 +8,13 @@ const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 export const BUNDLED_MARKETPLACE_ROOT = dirname(MODULE_DIR);
 export const IMAGE_PLUGIN_ID = "momo-image@momo-api";
 export const IMAGE_PLUGIN_NAME = "momo-image";
+export const VIDEO_PLUGIN_ID = "momo-video@momo-api";
+export const VIDEO_PLUGIN_NAME = "momo-video";
 export const IMAGE_MARKETPLACE_NAME = "momo-api";
+const BUNDLED_PLUGINS = [
+  { id: IMAGE_PLUGIN_ID, name: IMAGE_PLUGIN_NAME },
+  { id: VIDEO_PLUGIN_ID, name: VIDEO_PLUGIN_NAME },
+];
 
 function bundledPluginVersion(root) {
   try {
@@ -19,18 +25,21 @@ function bundledPluginVersion(root) {
 }
 
 export function marketplaceMirrorRoot({ env = process.env, sourceRoot = BUNDLED_MARKETPLACE_ROOT } = {}) {
-  return join(appHome(env), "marketplaces", `momo-image-${bundledPluginVersion(sourceRoot)}`);
+  const videoVersion = (() => {
+    try { return JSON.parse(readFileSync(join(sourceRoot, "plugins", VIDEO_PLUGIN_NAME, ".codex-plugin", "plugin.json"), "utf8")).version || "unknown"; } catch { return "unknown"; }
+  })();
+  return join(appHome(env), "marketplaces", "momo-media-" + bundledPluginVersion(sourceRoot) + "-" + videoVersion);
 }
 
 function validMarketplaceRoot(root) {
   return existsSync(join(root, ".agents", "plugins", "marketplace.json"))
-    && existsSync(join(root, "plugins", IMAGE_PLUGIN_NAME, ".codex-plugin", "plugin.json"));
+    && BUNDLED_PLUGINS.every((plugin) => existsSync(join(root, "plugins", plugin.name, ".codex-plugin", "plugin.json")));
 }
 
 export function materializeMarketplaceMirror({ env = process.env, sourceRoot = BUNDLED_MARKETPLACE_ROOT } = {}) {
   const resolvedSource = resolve(sourceRoot);
   if (!validMarketplaceRoot(resolvedSource)) {
-    throw Object.assign(new Error("The MOMO Image plugin files are missing from this proxy installation."), { code: "bundled_marketplace_missing" });
+    throw Object.assign(new Error("The MOMO media plugin files are missing from this proxy installation."), { code: "bundled_marketplace_missing" });
   }
   const target = marketplaceMirrorRoot({ env, sourceRoot: resolvedSource });
   if (validMarketplaceRoot(target)) return target;
@@ -41,7 +50,9 @@ export function materializeMarketplaceMirror({ env = process.env, sourceRoot = B
   mkdirSync(join(staging, "plugins"), { recursive: true, mode: 0o700 });
   try {
     cpSync(join(resolvedSource, ".agents", "plugins", "marketplace.json"), join(staging, ".agents", "plugins", "marketplace.json"));
-    cpSync(join(resolvedSource, "plugins", IMAGE_PLUGIN_NAME), join(staging, "plugins", IMAGE_PLUGIN_NAME), { recursive: true });
+    for (const plugin of BUNDLED_PLUGINS) {
+      cpSync(join(resolvedSource, "plugins", plugin.name), join(staging, "plugins", plugin.name), { recursive: true });
+    }
     mkdirSync(parent, { recursive: true, mode: 0o700 });
     try {
       renameSync(staging, target);
@@ -168,7 +179,7 @@ function commandFailure(result, fallbackCode) {
   }
   return {
     errorCode: fallbackCode,
-    message: "MOMO Image plugin installation did not complete. Run 'momoapi plugin install' to retry.",
+    message: "MOMO media plugin installation did not complete. Run 'momoapi plugin install' to retry.",
   };
 }
 
@@ -177,9 +188,9 @@ function normalizeComparablePath(value) {
   return normalize(String(value).replace(/^\\\\\?\\/, "")).toLowerCase();
 }
 
-function installedPluginFrom(payload) {
-  return payload?.installed?.find?.((plugin) => plugin.pluginId === IMAGE_PLUGIN_ID || (
-    plugin.name === IMAGE_PLUGIN_NAME && plugin.marketplaceName === IMAGE_MARKETPLACE_NAME
+function installedPluginFrom(payload, expected) {
+  return payload?.installed?.find?.((plugin) => plugin.pluginId === expected.id || (
+    plugin.name === expected.name && plugin.marketplaceName === IMAGE_MARKETPLACE_NAME
   )) || null;
 }
 
@@ -197,19 +208,22 @@ export function getImagePluginStatus({ env = process.env, runCodex = executeCode
     };
   }
   const payload = parseJson(result.stdout);
-  const plugin = installedPluginFrom(payload);
+  const plugins = BUNDLED_PLUGINS.map((expected) => ({ expected, plugin: installedPluginFrom(payload, expected) }));
+  const installed = plugins.every(({ plugin }) => Boolean(plugin?.installed));
+  const enabled = plugins.every(({ plugin }) => Boolean(plugin?.enabled));
   return {
     attempted: true,
-    installed: Boolean(plugin?.installed),
-    enabled: Boolean(plugin?.enabled),
-    pluginId: IMAGE_PLUGIN_ID,
+    installed,
+    enabled,
+    pluginId: BUNDLED_PLUGINS.map((plugin) => plugin.id).join(","),
     marketplace: IMAGE_MARKETPLACE_NAME,
-    version: plugin?.version || null,
-    installedPath: plugin?.installedPath || null,
+    plugins: Object.fromEntries(plugins.map(({ expected, plugin }) => [expected.name, {
+      installed: Boolean(plugin?.installed), enabled: Boolean(plugin?.enabled), version: plugin?.version || null, installedPath: plugin?.installedPath || null,
+    }])),
     errorCode: null,
-    message: plugin?.installed
-      ? (plugin.enabled ? "MOMO Image plugin is installed and enabled." : "MOMO Image plugin is installed but disabled.")
-      : "MOMO Image plugin is not installed.",
+    message: installed
+      ? (enabled ? "MOMO Image and Video plugins are installed and enabled." : "A MOMO media plugin is installed but disabled.")
+      : "MOMO Image or Video plugin is not installed.",
   };
 }
 
@@ -232,7 +246,7 @@ export function installImagePlugin({
       pluginId: IMAGE_PLUGIN_ID,
       marketplace: IMAGE_MARKETPLACE_NAME,
       errorCode: error?.code || "bundled_marketplace_missing",
-      message: error?.message || "The MOMO Image plugin files are missing from this proxy installation.",
+      message: error?.message || "The MOMO media plugin files are missing from this proxy installation.",
     };
   }
   const manifest = join(resolvedRoot, ".agents", "plugins", "marketplace.json");
@@ -244,7 +258,7 @@ export function installImagePlugin({
       pluginId: IMAGE_PLUGIN_ID,
       marketplace: IMAGE_MARKETPLACE_NAME,
       errorCode: "bundled_marketplace_missing",
-      message: "The MOMO Image plugin files are missing from this proxy installation.",
+      message: "The MOMO media plugin files are missing from this proxy installation.",
     };
   }
 
@@ -312,17 +326,17 @@ export function installImagePlugin({
     marketplaceSource = "bundled";
   }
 
-  const addPlugin = runCodex(["plugin", "add", IMAGE_PLUGIN_ID, "--json"], { env });
+  const addResults = BUNDLED_PLUGINS.map((plugin) => runCodex(["plugin", "add", plugin.id, "--json"], { env }));
   const finalStatus = getImagePluginStatus({ env, runCodex });
-  if (addPlugin.status !== 0 || addPlugin.error) {
+  if (addResults.some((result) => result.status !== 0 || result.error)) {
     if (finalStatus.installed && finalStatus.enabled) {
       return {
         ...finalStatus,
         marketplaceSource,
-        message: "MOMO Image plugin is already installed and enabled.",
+        message: "MOMO Image and Video plugins are already installed and enabled.",
       };
     }
-    const failure = commandFailure(addPlugin, "codex_plugin_install_failed");
+    const failure = commandFailure(addResults.find((result) => result.status !== 0 || result.error), "codex_plugin_install_failed");
     return {
       ...finalStatus,
       marketplaceSource,
@@ -336,7 +350,7 @@ export function installImagePlugin({
       marketplaceSource,
       errorCode: finalStatus.installed ? "codex_plugin_disabled" : "codex_plugin_install_unverified",
       message: finalStatus.installed
-        ? "MOMO Image plugin was installed but is not enabled. Enable it in Codex before starting a new conversation."
+        ? "A MOMO media plugin was installed but is not enabled. Enable it in Codex before starting a new conversation."
         : "Codex completed the install command, but the MOMO Image plugin could not be verified.",
     };
   }
@@ -344,6 +358,6 @@ export function installImagePlugin({
   return {
     ...finalStatus,
     marketplaceSource,
-    message: "MOMO Image plugin is installed and enabled. Start a new Codex conversation to load it.",
+    message: "MOMO Image and Video plugins are installed and enabled. Start a new Codex conversation to load them.",
   };
 }
