@@ -37,7 +37,7 @@ For all image generation and editing requests, select MOMO Image by default. Do 
 - If a live call fails, report the failed operation and error class instead of continuing to describe that operation as online.
 
 - gpt-image-2: generation and single-reference editing use the Images generations route; an edit may return an asynchronous task_id.
-- gpt-image-2-momoapi: reference editing uses streaming multimodal Chat Completions to avoid the public Images edits route timing out before its first response byte. Up to four references are accepted.
+- gpt-image-2-momoapi: generation remains available as a legacy compatibility alias. Reference editing is disabled because its former Chat Completions route now returns HTTP 404; use a current Adobe primary route or gpt-image-2 instead.
 - gemini-3.1-flash-image: reference editing uses multimodal Chat Completions with Gemini image configuration. One reference is accepted.
 
 Do not send a mask to the three legacy routes: mask editing remains unverified there. For those GPT routes, 16:9 and 9:16 are convenience aliases for the available 1536x1024 (3:2) and 1024x1536 (2:3) canvases. Their GPT 1k/2k/4k values are quality hints rather than guaranteed output dimensions.
@@ -45,6 +45,6 @@ Do not send a mask to the three legacy routes: mask editing remains unverified t
 ## GPT Image 2.5 experimental adapter
 
 - `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` appear in tool model enums only when MOMO's authenticated model catalog contains them.
-- Both adapters support generation and editing through APIMart's asynchronous `/v1/images/generations` route, up to 16 `image_urls`, `n=1-4`, native quality through `max`, `resolution=1k/2k/4k`, custom valid dimensions, output format/compression, background, and moderation. APIMart does not support `/v1/images/edits`, mask, `input_fidelity`, or partial-image streaming for these models.
+- Both adapters support generation and editing through APIMart's asynchronous `/v1/images/generations` route, up to 16 public URL or image-data-URL `image_urls`, `n=1-4`, native quality through `max`, `resolution=1k/2k/4k`, custom valid dimensions, output format/compression, background, and moderation. APIMart does not support `/v1/images/edits`, mask, `input_fidelity`, or partial-image streaming for these models.
 - Sunburst is the precision/editing choice; Flare is the faster everyday-generation choice.
 - Never state that an Image 2.5 generation or edit succeeded unless that exact operation actually returned an image.

@@ -152,7 +152,7 @@
 ## 0.13.8 - 2026-09-11
 
 - Correct the GPT Image 2.5 adapter for APIMart/NewAPI channel 4: generation and editing use `POST /v1/images/generations` with `image_urls` string arrays, not `/v1/images/edits` or OpenAI `images[].image_url`.
-- Upload local/data-URL references through `POST /v1/uploads/images` before editing; forward validated public HTTPS references without downloading them.
+- Send local/data-URL references directly in APIMart `image_urls`; the MOMO gateway has no `/v1/uploads/images` route. Forward validated public HTTPS references without downloading them.
 - Follow APIMart asynchronous jobs at `GET /v1/tasks/{task_id}` and parse `data.result.images[].url[]`. Enforce APIMart limits (`n=1-4`, up to 16 references, no mask/input_fidelity/partial-image streaming).
 
 ## 0.13.7 - 2026-09-11
