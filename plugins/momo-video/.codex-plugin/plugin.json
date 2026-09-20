@@ -1,0 +1,19 @@
+{
+  "name": "momo-video",
+  "version": "0.1.0",
+  "description": "Generate videos through the local MOMO API Proxy with dynamic model capabilities and remote output URLs.",
+  "author": {
+    "name": "MOMO API"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "MOMO Video",
+    "shortDescription": "Generate videos with MOMO models.",
+    "longDescription": "A Codex plugin for text-to-video and image-to-video tasks through the locally configured MOMO API Proxy. It discovers exact model parameters from the authenticated gateway and returns remote output URLs without downloading large video files by default.",
+    "developerName": "MOMO API",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Use MOMO Video for video generation. Check video_capabilities before selecting model-specific parameters, submit with video_generate, and poll with video_task_status. Do not download the completed video unless the user explicitly asks."
+  },
+  "mcpServers": "./.mcp.json"
+}

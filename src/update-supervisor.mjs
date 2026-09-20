@@ -319,7 +319,7 @@ export function isManagedImageMcpProcess(processInfo, rootDir) {
   const after = afterIndex < commandLine.length ? commandLine[afterIndex] : " ";
   if (!/[\s\"']/.test(before) || !/[\s\"']/.test(after)) return false;
   const remaining = commandLine.slice(afterIndex).replace(/^[\s\"']+/, "");
-  return /^(?:\"|')?mcp(?:\"|')?[\s]+(?:\"|')?image(?:\"|')?(?:[\s]|$)/i.test(remaining);
+  return /^(?:\"|')?mcp(?:\"|')?[\s]+(?:\"|')?(?:image|video)(?:\"|')?(?:[\s]|$)/i.test(remaining);
 }
 
 export async function stopManagedImageMcpProcesses(rootDir, {
@@ -352,7 +352,7 @@ export async function stopManagedImageMcpProcesses(rootDir, {
   const exitStates = await Promise.all(matchedPids.map((pid) => waitForExit(pid, 5_000)));
   for (let index = 0; index < matchedPids.length; index += 1) {
     if (!exitStates[index]) {
-      throw Object.assign(new Error(`Managed image MCP process ${matchedPids[index]} did not exit before the update.`), { code: "update_mcp_stop_failed" });
+      throw Object.assign(new Error(`Managed media MCP process ${matchedPids[index]} did not exit before the update.`), { code: "update_mcp_stop_failed" });
     }
   }
   return matchedPids;
@@ -429,7 +429,7 @@ export async function superviseUpdate({
     }
     try {
       const stoppedMcpPids = await stopMcpProcesses(rootDir);
-      if (stoppedMcpPids.length) appendSupervisorLog(`Stopped ${stoppedMcpPids.length} managed image MCP process(es) that referenced the old application tree.`, env);
+      if (stoppedMcpPids.length) appendSupervisorLog(`Stopped ${stoppedMcpPids.length} managed media MCP process(es) that referenced the old application tree.`, env);
     } catch (error) {
       const restoredHealthy = pathExists(newScript)
         ? (await runCliThenCheckHealth({
@@ -442,7 +442,7 @@ export async function superviseUpdate({
         hasUpdate: true, checkFailed: true, rolledBack: false,
         errorCode: error?.code || "update_mcp_stop_failed",
       }, env);
-      appendSupervisorLog(`Stopping managed image MCP processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
+      appendSupervisorLog(`Stopping managed media MCP processes failed: ${error?.code || error?.name || "unknown_error"}.`, env);
       await restoreTray(restoredHealthy, "the interrupted activation");
       return { activated: false, rolledBack: false, restoredHealthy, errorCode: error?.code || "update_mcp_stop_failed" };
     }

@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 
-const GROUPS = ["business", "health", "control", "image", "other"];
+const GROUPS = ["business", "health", "control", "image", "video", "other"];
 const STAGES = ["queueWaitMs", "bodyReadMs", "bodyParseMs", "preUpstreamMs", "upstreamHeadersMs", "clientFirstWriteMs", "transportTotalMs"];
 const WINDOW = 500;
 
@@ -9,6 +9,7 @@ export function requestMetricGroup(method, pathname) {
   if (method === "OPTIONS") return "other";
   if (method === "GET" && ["/health", "/healthz", "/readyz"].includes(pathname)) return "health";
   if (pathname === "/internal/images" || pathname.startsWith("/internal/images/")) return "image";
+  if (pathname === "/internal/videos" || pathname.startsWith("/internal/videos/")) return "video";
   if (pathname.startsWith("/internal/")) return "control";
   if ((method === "GET" && ["/models", "/v1/models"].includes(pathname))
     || (method === "POST" && ["/responses", "/v1/responses", "/responses/compact", "/v1/responses/compact", "/chat/completions", "/v1/chat/completions"].includes(pathname))) return "business";

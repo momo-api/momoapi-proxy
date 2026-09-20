@@ -25,6 +25,7 @@ import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefe
 import { encodeRecoverableCompaction, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
+import { generateVideo, getVideoTask, resolveVideoCapabilities } from "./video-service.mjs";
 import { createImageAssetStore, persistImageResult } from "./image-assets.mjs";
 import { createAttachmentAssetStore } from "./attachment-assets.mjs";
 import { assetizeAttachments, stripAttachmentMetadata } from "./attachment-routing.mjs";
@@ -1057,6 +1058,34 @@ export function createMomoSwitch(settings, options = {}) {
         return json(response, 404, { error: { message: "Image endpoint not found.", type: "invalid_request_error" } });
       }
 
+      // Video plugin endpoints are loopback-only and return remote output URLs by default.
+      if (pathname.startsWith("/internal/videos")) {
+        if (!isAuthorizedLoopbackRequest(request, remoteIp, settings.localToken)) {
+          return json(response, 403, { error: { message: "Forbidden: video endpoints require an authenticated loopback client.", type: "authentication_error" } });
+        }
+        if (request.method === "GET" && pathname === "/internal/videos/capabilities") {
+          const capabilities = await resolveVideoCapabilities({ settings, fetchImpl, signal: abortController.signal });
+          return json(response, 200, capabilities);
+        }
+        if (request.method === "POST" && pathname === "/internal/videos/generate") {
+          const payload = await receiveBody();
+          const result = await generateVideo({
+            settings,
+            request: payload,
+            fetchImpl,
+            signal: abortController.signal,
+            assetResolver: (reference) => imageAssetStore.dataUrl(reference),
+          });
+          return json(response, 200, result);
+        }
+        const taskMatch = /^\/internal\/videos\/tasks\/([^/]+)$/.exec(pathname);
+        if (request.method === "GET" && taskMatch) {
+          const result = await getVideoTask({ settings, taskId: decodeURIComponent(taskMatch[1]), fetchImpl, signal: abortController.signal });
+          return json(response, 200, result);
+        }
+        return json(response, 404, { error: { message: "Video endpoint not found.", type: "invalid_request_error" } });
+      }
+
       // 4. draining 期间拒绝任何新业务请求
       if (metricsState.isDraining) {
         finalStatus = 503;
@@ -1178,7 +1207,7 @@ export function createMomoSwitch(settings, options = {}) {
         return json(response, status, { error: { message: error.message, type: "request_admission_error", code: error.code } }, headers);
       }
 
-      if (pathname.startsWith("/internal/images") && Number.isInteger(error.statusCode)) {
+      if ((pathname.startsWith("/internal/images") || pathname.startsWith("/internal/videos")) && Number.isInteger(error.statusCode)) {
         const status = error.statusCode;
         logRequest({ method: request.method, url: pathname, status, elapsedMs: Date.now() - t0, error: error.message, ip: remoteIp });
         return json(response, status, { error: { message: error.message, type: error.code || "image_error", code: error.code || "image_error" } });

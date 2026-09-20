@@ -232,7 +232,7 @@ export async function setup({
     attempted: false,
     installed: false,
     enabled: false,
-    message: "MOMO Image plugin installation was skipped.",
+    message: "MOMO media plugin installation was skipped.",
   };
   if (imagePlugin) {
     try {
@@ -243,7 +243,7 @@ export async function setup({
         installed: false,
         enabled: false,
         errorCode: err.code || "codex_plugin_install_failed",
-        message: "MOMO Image plugin installation did not complete. Run 'momoapi plugin install' to retry.",
+        message: "MOMO media plugin installation did not complete. Run 'momoapi plugin install' to retry.",
       };
     }
   }

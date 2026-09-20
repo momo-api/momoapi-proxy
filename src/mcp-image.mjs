@@ -40,10 +40,13 @@ function toolDefs(capabilities) {
   const available = (capabilities?.models || []).filter((model) => model.available !== false).map((model) => model.id);
   const models = available.length ? available : LEGACY_MODELS;
   const model = { type: "string", enum: models };
+  const maxN = Math.max(1, ...(capabilities?.models || []).filter((item) => item.available !== false).map((item) => Number(item?.limits?.max_n) || 1));
+  const maxReferences = Math.max(1, ...(capabilities?.models || []).filter((item) => item.available !== false).map((item) => Number(item?.limits?.max_reference_images) || 1));
+  const properties = { ...COMMON_PROPERTIES, n: { ...COMMON_PROPERTIES.n, maximum: maxN } };
   return [
     { name: "image_capabilities", description: "List known MOMO image models, availability, operations, and limits.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "image_generate", description: "Generate one or more images through the local MOMO API Proxy. Call image_capabilities for model-specific limits.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES }, required: ["prompt"], additionalProperties: false } },
-    { name: "image_edit", description: "Edit up to the model-specific number of reference images. Use asset:<asset_id> to reuse a locally saved result without putting Base64 in history.", inputSchema: { type: "object", properties: { model, ...COMMON_PROPERTIES, reference_images: { type: "array", items: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, minItems: 1, maxItems: 16 } }, required: ["prompt", "reference_images"], additionalProperties: false } },
+    { name: "image_generate", description: "Generate one or more images through the local MOMO API Proxy. Call image_capabilities for model-specific limits.", inputSchema: { type: "object", properties: { model, ...properties }, required: ["prompt"], additionalProperties: false } },
+    { name: "image_edit", description: "Edit up to the model-specific number of reference images. Use asset:<asset_id> to reuse a locally saved result without putting Base64 in history.", inputSchema: { type: "object", properties: { model, ...properties, reference_images: { type: "array", items: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, minItems: 1, maxItems: maxReferences } }, required: ["prompt", "reference_images"], additionalProperties: false } },
     { name: "image_task_status", description: "Check an asynchronous MOMO image task. Completed images are saved locally and returned as compact references, never inline Base64.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false } },
     { name: "image_asset_get", description: "Get compact metadata for a locally saved image asset without returning inline Base64.", inputSchema: { type: "object", properties: { asset_id: { type: "string", pattern: "^img_[a-f0-9]{64}$" } }, required: ["asset_id"], additionalProperties: false } },
     { name: "image_asset_list", description: "List recently used images saved on this computer.", inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 1000, default: 100 } }, additionalProperties: false } },
@@ -103,7 +106,7 @@ export async function runImageMcp() {
     try { request = JSON.parse(line); } catch { continue; }
     if (request.method === "notifications/initialized" || request.method === "notifications/cancelled") continue;
     if (request.method === "initialize") {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.5.2" } } }) + "\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.6.0" } } }) + "\n");
       continue;
     }
     try {

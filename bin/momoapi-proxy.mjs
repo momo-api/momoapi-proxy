@@ -16,6 +16,7 @@ import { checkAndRecordLatestVersion, getCurrentVersion, readUpdateStatus, start
 import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
 import { installWindowsDesktop, refreshWindowsTray } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
+import { runVideoMcp } from "../src/mcp-video.mjs";
 import { createImageAssetStore } from "../src/image-assets.mjs";
 import { configureDiagnostics, readRecentDiagnosticReport, recordDiagnosticEvent } from "../src/diagnostics.mjs";
 import { closeLogging, configureLoggingRuntime, createLoggingRuntime } from "../src/logging-runtime.mjs";
@@ -195,9 +196,9 @@ async function main() {
 
     if (imagePluginResult) {
       if (imagePluginResult.installed && imagePluginResult.enabled) {
-        console.log("✅ MOMO Image 生图插件已安装并启用；新建 Codex 会话后生效。");
+        console.log("✅ MOMO Image / Video 媒体插件已安装并启用；新建 Codex 会话后生效。");
       } else {
-        console.warn("⚠️ 生图插件未自动启用: " + imagePluginResult.message);
+        console.warn("⚠️ 媒体插件未自动启用: " + imagePluginResult.message);
       }
     }
 
@@ -253,10 +254,10 @@ async function main() {
     console.log("  - 上游端点: " + (endpoint || "https://momoapi.us"));
     console.log("  - 本地代理: http://127.0.0.1:" + port + "/v1");
     console.log("  - 模型已同步: " + result.models + " (默认: " + result.defaultModel + ")");
-    console.log("  - MOMO Image 插件: " + (result.imagePlugin.installed && result.imagePlugin.enabled ? "已安装并启用" : result.imagePlugin.message));
+    console.log("  - MOMO Image / Video 插件: " + (result.imagePlugin.installed && result.imagePlugin.enabled ? "已安装并启用" : result.imagePlugin.message));
     console.log("  - 桌面快捷方式: " + (desktop?.installed ? "已创建 (桌面/开始菜单/开机自启)" : "无"));
     if (result.imagePlugin.installed && result.imagePlugin.enabled) {
-      console.log("  - 生图能力将在新建的 Codex 会话中加载");
+      console.log("  - 生图和生视频能力将在新建的 Codex 会话中加载");
     }
     console.log("\n运行 'momoapi start' 启动后台服务，或直接双击桌面 'MOMO API Proxy' 图标。");
   } else if (command === "start" || command === "up" || command === "daemon") {
@@ -433,6 +434,8 @@ async function main() {
     process.once("SIGTERM", stop);
   } else if (command === "mcp" && args[0] === "image") {
     await runImageMcp();
+  } else if (command === "mcp" && args[0] === "video") {
+    await runVideoMcp();
   } else if (command === "images" || command === "image-assets") {
     const settings = { imageAssetDirectory: join(appHome(), "images"), imageAssets: readSettings().imageAssets };
     const store = createImageAssetStore(settings);

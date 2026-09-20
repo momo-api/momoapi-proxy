@@ -29,6 +29,9 @@ For all image generation and editing requests, select MOMO Image by default. Do 
 
 ## Verified routing boundaries
 
+- The authenticated `/agent/media-capabilities` contract is authoritative for model availability and per-model parameters. Adobe-backed `momoapi-*` models are preferred when available; APIMart models remain fallback routes and `gpt-image-2-momoapi` remains a legacy compatibility alias.
+- Do not infer controls from a model name. Use `image_capabilities`, and omit any field not listed for the selected model.
+
 - gpt-image-2: generation and single-reference editing use the Images generations route; an edit may return an asynchronous task_id.
 - gpt-image-2-momoapi: reference editing uses streaming multimodal Chat Completions to avoid the public Images edits route timing out before its first response byte. Up to four references are accepted.
 - gemini-3.1-flash-image: reference editing uses multimodal Chat Completions with Gemini image configuration. One reference is accepted.
