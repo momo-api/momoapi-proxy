@@ -38,9 +38,9 @@ const MODEL_RULES = {
     generateTransport: "images-generations", editTransport: "images-generations-reference",
   },
   "gpt-image-2-momoapi": {
-    maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
+    maxN: 4, maxReferenceImages: 0, operations: ["generate"],
     aspectRatios: ASPECT_RATIOS, resolutions: ["1k", "2k", "4k"],
-    generateTransport: "images-generations", editTransport: "chat-completions-multimodal-stream",
+    generateTransport: "images-generations", editTransport: null,
   },
   "gemini-3.1-flash-image": {
     maxN: 1, maxReferenceImages: 1, operations: ["generate", "edit"],
@@ -114,7 +114,7 @@ export const IMAGE_CAPABILITIES = {
     gemini_resolution: "1k/2k/4k are sent as 1K/2K/4K image_size controls.",
     mask_edits: "APIMart GPT Image 2.5 does not document a mask field; edits use image_urls.",
     gpt_image_2_5: "Sunburst and Flare are advertised to tools only after the authenticated MOMO model catalog reports them.",
-    reference_url_transport: "APIMart GPT Image 2.5 edits use POST /v1/images/generations with image_urls (up to 16 public HTTP(S) URLs); the proxy does not download HTTPS references.",
+    reference_url_transport: "APIMart GPT Image 2.5 edits use POST /v1/images/generations with image_urls (up to 16 public HTTP(S) URLs or image data URLs); the proxy does not download HTTPS references.",
     apimart_tasks: "Generation returns data[0].task_id; poll /v1/tasks/{task_id} (MOMO compatibility also accepts /v1/images/generations/{task_id}).",
   },
 };
@@ -132,11 +132,13 @@ function enumAllowed(parameter, fallback) {
 function ruleFromCapability(model, base = {}) {
   const parameters = model?.parameters || {};
   const operations = Array.isArray(model?.operations) ? model.operations.filter((item) => item === "generate" || item === "edit") : [];
+  const advertisedOperations = operations.length ? operations : (base.operations || ["generate"]);
+  const safeOperations = advertisedOperations.filter((operation) => (base.operations || ["generate"]).includes(operation));
   return {
     ...base,
     maxN: numberMaximum(parameters.n, base.maxN || 1),
     maxReferenceImages: numberMaximum(parameters.max_reference_images, base.maxReferenceImages || 0),
-    operations: operations.length ? operations : (base.operations || ["generate"]),
+    operations: safeOperations.length ? safeOperations : (base.operations || ["generate"]),
     aspectRatios: enumAllowed(parameters.aspect_ratio, base.aspectRatios),
     resolutions: enumAllowed(parameters.resolution, base.resolutions),
     qualities: enumAllowed(parameters.quality, base.qualities),
@@ -517,23 +519,6 @@ function dataUrlFile(value, name) {
   return { blob: new Blob([bytes], { type: decoded.mimeType }), filename: `${name}.${subtype}` };
 }
 
-async function uploadApimartReference(dataUrl, endpoint, settings, fetchImpl, signal, name) {
-  const file = dataUrlFile(dataUrl, name);
-  const form = new FormData();
-  form.append("file", file.blob, file.filename);
-  const response = await fetchImpl(endpoint + "/v1/uploads/images", {
-    method: "POST",
-    headers: { authorization: "Bearer " + settings.apiKey },
-    body: form,
-    signal: imageSignal(signal, 60000),
-  });
-  const payload = await readUpstreamPayload(response);
-  if (!response.ok) throw fail(payload?.error?.message || "APIMart image upload returned HTTP " + response.status, response.status >= 400 && response.status < 500 ? response.status : 502, "image_upload_error");
-  const url = [payload?.url, payload?.data?.url, payload?.data?.[0]?.url].find((value) => typeof value === "string" && /^https:\/\//i.test(value));
-  if (!url) throw fail("APIMart image upload returned no public URL.", 502, "image_upload_error");
-  return url;
-}
-
 async function apimartReferenceUrls(request, endpoint, settings, fetchImpl, signal, lookupImpl, assetResolver) {
   const urls = [];
   for (const [index, reference] of request.reference_images.entries()) {
@@ -551,7 +536,9 @@ async function apimartReferenceUrls(request, endpoint, settings, fetchImpl, sign
       dataUrl = decodeDataUrl(reference)?.dataUrl;
     }
     if (!dataUrl) throw fail("APIMart reference images must be HTTPS URLs or valid image data URLs.", 400, "reference_image_error");
-    urls.push(await uploadApimartReference(dataUrl, endpoint, settings, fetchImpl, signal, `reference-${index + 1}`));
+    // Live APIMart probing confirms image data URLs are accepted directly in
+    // image_urls. MOMO has no /v1/uploads/images endpoint, so avoid a fake hop.
+    urls.push(dataUrl);
   }
   return urls;
 }

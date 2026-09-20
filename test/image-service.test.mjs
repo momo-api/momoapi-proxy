@@ -13,8 +13,9 @@ test("advertises the verified model-specific capability matrix", () => {
   assert.deepEqual(byId["momoapi-gpt-image-2-5-flare"].limits.qualities, ["low", "medium", "high"]);
   assert.equal(byId["gpt-image-2"].limits.max_reference_images, 1);
   assert.equal(byId["gpt-image-2"].transports.edit, "images-generations-reference");
-  assert.equal(byId["gpt-image-2-momoapi"].limits.max_reference_images, 4);
-  assert.equal(byId["gpt-image-2-momoapi"].transports.edit, "chat-completions-multimodal-stream");
+  assert.equal(byId["gpt-image-2-momoapi"].limits.max_reference_images, 0);
+  assert.deepEqual(byId["gpt-image-2-momoapi"].operations, ["generate"]);
+  assert.equal(byId["gpt-image-2-momoapi"].transports.edit, null);
   assert.deepEqual(byId["gemini-3.1-flash-image"].operations, ["generate", "edit"]);
   assert.equal(byId["gemini-3.1-flash-image"].transports.edit, "chat-completions-multimodal");
   assert.equal(byId["gemini-3.1-flash-image"].mask_edits, false);
@@ -163,7 +164,7 @@ test("routes GPT Image 2.5 editing with 16 public image_urls", async () => {
   });
 });
 
-test("uploads data URL references to APIMart before GPT Image 2.5 editing", async () => {
+test("passes data URL references directly to APIMart GPT Image 2.5 editing", async () => {
   const calls = [];
   await generateImage({
     settings, operation: "edit",
@@ -171,15 +172,12 @@ test("uploads data URL references to APIMart before GPT Image 2.5 editing", asyn
     fetchImpl: async (url, init = {}) => {
       if (String(url).endsWith("/agent/media-capabilities")) return new Response(JSON.stringify({ models: [{ id: "gpt-image-2.5-flare", modality: "image", available: true, operations: ["generate", "edit"], parameters: {} }] }), { status: 200, headers: { "content-type": "application/json" } });
       calls.push({ url: String(url), init });
-      if (String(url).endsWith("/v1/uploads/images")) return new Response(JSON.stringify({ url: "https://upload.apimart.ai/f/image/reference.png" }), { status: 200, headers: { "content-type": "application/json" } });
       return new Response(JSON.stringify({ code: 200, data: [{ status: "submitted", task_id: "task-upload-25" }] }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].url, "https://gateway.example/v1/uploads/images");
-  assert.equal(calls[0].init.body.get("file") instanceof Blob, true);
-  assert.equal(calls[1].url, "https://gateway.example/v1/images/generations");
-  assert.deepEqual(JSON.parse(calls[1].init.body).image_urls, ["https://upload.apimart.ai/f/image/reference.png"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://gateway.example/v1/images/generations");
+  assert.deepEqual(JSON.parse(calls[0].init.body).image_urls, [tinyPng]);
 });
 
 test("passes 16 public GPT Image 2.5 reference URLs without downloading them", async () => {
@@ -277,7 +275,7 @@ test("validates each model's n and reference-image limits", () => {
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2", prompt: "x", reference_images: [tinyPng] }, "generate"), /Use image_edit/);
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2", prompt: "x" }, "edit"), /reference_images/);
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2", prompt: "x", reference_images: [tinyPng, tinyPng] }, "edit"), /at most 1/);
-  assert.doesNotThrow(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "x", reference_images: [tinyPng, tinyPng, tinyPng, tinyPng] }, "edit"));
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "x", reference_images: [tinyPng] }, "edit"), /does not support edit/);
   assert.throws(() => normalizeImageRequest({ model: "gemini-3.1-flash-image", prompt: "x", reference_images: [tinyPng, tinyPng] }, "edit"), /at most 1/);
   assert.throws(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "x", quality: "max" }), /only for GPT Image 2.5/);
 });
@@ -301,33 +299,6 @@ test("routes gpt-image-2 reference editing through images/generations image_urls
   assert.equal(result.task_id, "official-edit-task");
 });
 
-test("routes gpt-image-2-momoapi editing through streaming multimodal chat", async () => {
-  let call;
-  const sse = [
-    "data: " + JSON.stringify({ choices: [{ delta: { content: "![image](data:image/png;base64," } }] }),
-    "",
-    "data: " + JSON.stringify({ choices: [{ delta: { content: "aGVsbG8=)" } }] }),
-    "",
-    "data: [DONE]",
-    "",
-  ].join("\n");
-  const result = await generateImage({
-    settings,
-    request: { model: "gpt-image-2-momoapi", prompt: "add a hat", reference_images: [tinyPng], aspect_ratio: "1:1", resolution: "1k" },
-    operation: "edit",
-    fetchImpl: async (url, init) => {
-      call = { url: String(url), body: JSON.parse(init.body) };
-      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
-    },
-  });
-  assert.equal(call.url, "https://gateway.example/v1/chat/completions");
-  assert.equal(call.body.stream, true);
-  assert.equal(call.body.messages[0].content[1].image_url.url, tinyPng);
-  assert.match(call.body.messages[0].content[0].text, /quality hint/);
-  assert.equal(result.images[0].b64_json, "aGVsbG8=");
-  assert.equal(result.images[0].mime_type, "image/png");
-});
-
 test("routes Gemini editing through multimodal chat and snake_case image_config", async () => {
   let call;
   const responseContent = "Edited: ![image](data:image/jpeg;base64,aGVsbG8=)";
@@ -348,69 +319,24 @@ test("routes Gemini editing through multimodal chat and snake_case image_config"
   assert.equal(result.images[0].mime_type, "image/jpeg");
 });
 
-test("downloads HTTPS references once as data URLs and blocks SSRF targets", async () => {
-  const calls = [];
-  await generateImage({
-    settings,
-    request: { model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["https://cdn.example/reference.png"] },
-    operation: "edit",
-    lookupImpl: publicLookup,
-    fetchImpl: async (url, init = {}) => {
-      calls.push({ url: String(url), init });
-      if (String(url) === "https://cdn.example/reference.png") return new Response(new Uint8Array([137, 80, 78, 71]), { status: 200, headers: { "content-type": "image/png" } });
-      return new Response("data: " + JSON.stringify({ choices: [{ delta: { content: "data:image/png;base64,aGVsbG8=" } }] }) + "\n\ndata: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
-    },
-  });
-  assert.equal(calls.length, 2);
-  const body = JSON.parse(calls[1].init.body);
-  assert.match(body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
-
+test("rejects editing through the retired gpt-image-2-momoapi route", async () => {
   await assert.rejects(() => generateImage({
     settings,
     request: { model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["https://127.0.0.1/private.png"] },
     fetchImpl: async () => { throw new Error("must not fetch blocked host"); },
     operation: "edit",
-  }), /host is not allowed/);
-  await assert.rejects(() => generateImage({
-    settings,
-    request: { model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["https://cdn.example/private.png"] },
-    lookupImpl: async () => [{ address: "10.10.10.10", family: 4 }],
-    fetchImpl: async () => { throw new Error("must not fetch DNS-resolved private host"); },
-    operation: "edit",
-  }), /resolved to a non-public address/);
-  await assert.rejects(() => generateImage({
-    settings,
-    request: { model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["http://cdn.example/reference.png"] },
-    fetchImpl: async () => { throw new Error("must not fetch insecure reference"); },
-    operation: "edit",
-  }), /must use HTTPS/);
-  await assert.rejects(() => generateImage({
-    settings,
-    request: { model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["https://[::1]/private.png"] },
-    fetchImpl: async () => { throw new Error("must not fetch IPv6 loopback"); },
-    operation: "edit",
-  }), /host is not allowed/);
+  }), /does not support edit/);
 });
 
-test("resolves local asset IDs only through the configured asset resolver", async () => {
+test("rejects local asset editing through the retired gpt-image-2-momoapi route", async () => {
   const assetId = "img_" + "a".repeat(64);
-  let resolved;
-  await generateImage({
+  await assert.rejects(() => generateImage({
     settings,
     request: { model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["asset:" + assetId] },
     operation: "edit",
-    assetResolver: async (reference) => {
-      resolved = reference;
-      return tinyPng;
-    },
-    fetchImpl: async (_url, init) => {
-      const body = JSON.parse(init.body);
-      assert.equal(body.messages[0].content[1].image_url.url, tinyPng);
-      return new Response("data: " + JSON.stringify({ choices: [{ delta: { content: "data:image/png;base64,aGVsbG8=" } }] }) + "\n\ndata: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
-    },
-  });
-  assert.equal(resolved, "asset:" + assetId);
-  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["C:\\Users\\example\\secret.png"] }, "edit"), /local asset IDs/);
+    assetResolver: async () => tinyPng,
+  }), /does not support edit/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2-momoapi", prompt: "edit", reference_images: ["C:\\Users\\example\\secret.png"] }, "edit"), /does not support edit/);
 });
 
 test("extracts direct, nested, data URL, and async image response shapes", () => {

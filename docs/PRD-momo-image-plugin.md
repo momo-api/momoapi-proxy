@@ -52,9 +52,9 @@ Both Image 2.5 adapters support:
 - `background`: `auto`, `opaque`, or `transparent`; transparent output requires PNG or WebP.
 - `moderation`: `auto` or `low`.
 - `resolution`: `1k`, `2k`, or `4k`.
-- `reference_images`: 1-16 data URLs, opaque local asset IDs, or HTTPS URLs for editing. Local/data inputs are uploaded first.
+- `reference_images`: 1-16 data URLs, opaque local asset IDs, or HTTPS URLs for editing. Local assets are resolved to data URLs.
 
-Generation and editing both use JSON `POST /v1/images/generations`. Editing supplies `image_urls` as a string array. Public HTTPS references are forwarded directly; data URLs and local asset references are uploaded with multipart `POST /v1/uploads/images` (`file` field) and replaced by the returned temporary URL. The APIMart GPT Image 2.5 contract does not include `/v1/images/edits`, `images[].image_url`, `mask`, `input_fidelity`, `stream`, or `partial_images`; the adapter fails closed when those fields are requested.
+Generation and editing both use JSON `POST /v1/images/generations`. Editing supplies `image_urls` as a string array. Public HTTPS references and image data URLs are forwarded directly; local asset references are resolved to data URLs. The MOMO gateway does not expose `/v1/uploads/images`. The APIMart GPT Image 2.5 contract does not include `/v1/images/edits`, `images[].image_url`, `mask`, `input_fidelity`, `stream`, or `partial_images`; the adapter fails closed when those fields are requested.
 
 ## Availability and failure behavior
 
