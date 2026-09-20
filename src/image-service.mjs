@@ -288,6 +288,9 @@ export function normalizeImageRequest(input, operation = "generate", capabilitie
   const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : capabilities.defaults.model;
   if (!IMAGE_MODELS.has(model)) throw fail("Unsupported image model: " + model);
   const dynamicCapability = capabilities.models?.find((item) => item.id === model);
+  if (capabilities.catalog_status === "available" && !dynamicCapability) {
+    throw fail("Image model " + model + " is not currently available.", 503, "model_unavailable");
+  }
   const rules = dynamicCapability?.limits
     ? ruleFromPublicCapability(dynamicCapability, MODEL_RULES[model])
     : (dynamicCapability?.parameters && !Array.isArray(dynamicCapability.parameters)

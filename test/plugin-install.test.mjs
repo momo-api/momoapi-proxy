@@ -197,6 +197,9 @@ test("MOMO Image declares the default routing preference in plugin metadata and 
     assert.match(value, /MOMO Image.*default/i);
     assert.match(value, /official ImageGen.*explicit/i);
   }
+  assert.match(skill, /Never invent.*model/i);
+  assert.match(skill, /Grok\/xAI.*unless.*returned as available/i);
+  assert.match(skill, /HEALTHY.*every operation.*live-tested/i);
 });
 
 test("MOMO Video declares dynamic capabilities and remote-only default storage", () => {

@@ -26,7 +26,7 @@ function localResourceContent(image) {
 const LEGACY_MODELS = ["gpt-image-2-momoapi", "gpt-image-2", "gemini-3.1-flash-image"];
 const COMMON_PROPERTIES = {
   prompt: { type: "string" }, n: { type: "integer", minimum: 1, maximum: 4 },
-  aspect_ratio: { type: "string", enum: ["1:1", "3:2", "2:3", "16:9", "9:16"] },
+  aspect_ratio: { type: "string", enum: ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21", "3:1", "1:3"] },
   resolution: { type: "string", enum: ["1k", "2k", "4k"] },
   size: { type: "string", description: "GPT Image 2.5: auto or WIDTHxHEIGHT using official size constraints." },
   quality: { type: "string", enum: ["auto", "low", "medium", "high", "xhigh", "max"] },
@@ -36,15 +36,35 @@ const COMMON_PROPERTIES = {
   moderation: { type: "string", enum: ["auto", "low"] },
 };
 
+function availableModels(capabilities) {
+  return (capabilities?.models || []).filter((model) => model.available !== false);
+}
+
+function allowedValues(models, parameterName, limitName, fallback) {
+  const values = [];
+  for (const model of models) {
+    const candidates = model?.parameter_schema?.[parameterName]?.allowed || model?.limits?.[limitName] || [];
+    for (const value of candidates) if (!values.includes(value)) values.push(value);
+  }
+  return values.length ? values : fallback;
+}
+
 function toolDefs(capabilities) {
-  const available = (capabilities?.models || []).filter((model) => model.available !== false).map((model) => model.id);
+  const availableModelProfiles = availableModels(capabilities);
+  const available = availableModelProfiles.map((model) => model.id);
   const models = available.length ? available : LEGACY_MODELS;
   const model = { type: "string", enum: models };
-  const maxN = Math.max(1, ...(capabilities?.models || []).filter((item) => item.available !== false).map((item) => Number(item?.limits?.max_n) || 1));
-  const maxReferences = Math.max(1, ...(capabilities?.models || []).filter((item) => item.available !== false).map((item) => Number(item?.limits?.max_reference_images) || 1));
-  const properties = { ...COMMON_PROPERTIES, n: { ...COMMON_PROPERTIES.n, maximum: maxN } };
+  const maxN = Math.max(1, ...availableModelProfiles.map((item) => Number(item?.limits?.max_n) || 1));
+  const maxReferences = Math.max(1, ...availableModelProfiles.map((item) => Number(item?.limits?.max_reference_images) || 1));
+  const properties = {
+    ...COMMON_PROPERTIES,
+    n: { ...COMMON_PROPERTIES.n, maximum: maxN },
+    aspect_ratio: { ...COMMON_PROPERTIES.aspect_ratio, enum: allowedValues(availableModelProfiles, "aspect_ratio", "aspect_ratios", COMMON_PROPERTIES.aspect_ratio.enum) },
+    resolution: { ...COMMON_PROPERTIES.resolution, enum: allowedValues(availableModelProfiles, "resolution", "resolutions", COMMON_PROPERTIES.resolution.enum) },
+    quality: { ...COMMON_PROPERTIES.quality, enum: allowedValues(availableModelProfiles, "quality", "qualities", COMMON_PROPERTIES.quality.enum) },
+  };
   return [
-    { name: "image_capabilities", description: "List known MOMO image models, availability, operations, and limits.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+    { name: "image_capabilities", description: "List authoritative MOMO image models, availability, operations, health metadata, and exact per-model limits. Only models returned here may be claimed as supported.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
     { name: "image_generate", description: "Generate one or more images through the local MOMO API Proxy. Call image_capabilities for model-specific limits.", inputSchema: { type: "object", properties: { model, ...properties }, required: ["prompt"], additionalProperties: false } },
     { name: "image_edit", description: "Edit up to the model-specific number of reference images. Use asset:<asset_id> to reuse a locally saved result without putting Base64 in history.", inputSchema: { type: "object", properties: { model, ...properties, reference_images: { type: "array", items: { type: "string", description: "asset:img_..., an image data URL, or an HTTPS URL" }, minItems: 1, maxItems: maxReferences } }, required: ["prompt", "reference_images"], additionalProperties: false } },
     { name: "image_task_status", description: "Check an asynchronous MOMO image task. Completed images are saved locally and returned as compact references, never inline Base64.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false } },
@@ -106,7 +126,7 @@ export async function runImageMcp() {
     try { request = JSON.parse(line); } catch { continue; }
     if (request.method === "notifications/initialized" || request.method === "notifications/cancelled") continue;
     if (request.method === "initialize") {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.6.0" } } }) + "\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-image", version: "0.6.1" } } }) + "\n");
       continue;
     }
     try {

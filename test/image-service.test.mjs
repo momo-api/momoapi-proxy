@@ -43,6 +43,18 @@ test("uses the authenticated media capability contract and prefers Adobe primary
   assert.equal(capabilities.catalog_status, "available");
 });
 
+test("rejects a known model omitted by an authoritative partial capability catalog", () => {
+  const capabilities = {
+    ...structuredClone(IMAGE_CAPABILITIES),
+    catalog_status: "available",
+    models: [{ id: "momoapi-gpt-image-2-5-flare", available: true, operations: ["generate"], limits: { max_n: 1, max_reference_images: 0, qualities: ["low"] } }],
+  };
+  assert.throws(
+    () => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x" }, "generate", capabilities),
+    (error) => error.code === "model_unavailable" && error.statusCode === 503,
+  );
+});
+
 test("validates Adobe primary controls from the returned model profile", () => {
   const capabilities = {
     ...structuredClone(IMAGE_CAPABILITIES),
@@ -56,6 +68,34 @@ test("validates Adobe primary controls from the returned model profile", () => {
   assert.throws(() => normalizeImageRequest({ prompt: "x", n: 3 }, "generate", capabilities), /between 1 and 2/);
   assert.throws(() => normalizeImageRequest({ prompt: "x", quality: "max" }, "generate", capabilities), /Unsupported quality/);
   assert.throws(() => normalizeImageRequest({ prompt: "x", reference_images: [tinyPng, tinyPng, tinyPng] }, "edit", capabilities), /at most 2/);
+});
+
+test("accepts every advertised image enum and enforces numeric boundaries", () => {
+  const capabilities = {
+    ...structuredClone(IMAGE_CAPABILITIES),
+    catalog_status: "available",
+    defaults: { model: "momoapi-gpt-image-2-5-flare", n: 1, aspect_ratio: "1:1", resolution: "1k" },
+    models: [
+      { id: "momoapi-gpt-image-2-5-flare", available: true, operations: ["generate", "edit"], parameters: { n: { allowed: [1, 2, 3, 4] }, quality: { allowed: ["low", "medium", "high"] }, max_reference_images: { maximum: 4 } } },
+      { id: "momoapi-gemini-nano-banana-3", available: true, operations: ["generate", "edit"], parameters: { n: { allowed: [1] }, aspect_ratio: { allowed: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] }, resolution: { allowed: ["1k", "2k", "4k"] }, max_reference_images: { maximum: 4 } } },
+      { id: "gpt-image-2.5-flare", available: true, operations: ["generate", "edit"], parameters: { n: { allowed: [1, 2, 3, 4] }, quality: { allowed: ["auto", "low", "medium", "high", "xhigh", "max"] }, resolution: { allowed: ["1k", "2k", "4k"] }, max_reference_images: { maximum: 16 } } },
+    ],
+  };
+  for (const n of [1, 2, 3, 4]) assert.equal(normalizeImageRequest({ model: "momoapi-gpt-image-2-5-flare", prompt: "x", n }, "generate", capabilities).n, n);
+  for (const quality of ["low", "medium", "high"]) assert.equal(normalizeImageRequest({ model: "momoapi-gpt-image-2-5-flare", prompt: "x", quality }, "generate", capabilities).quality, quality);
+  for (const aspect_ratio of ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"]) {
+    assert.equal(normalizeImageRequest({ model: "momoapi-gemini-nano-banana-3", prompt: "x", aspect_ratio }, "generate", capabilities).aspect_ratio, aspect_ratio);
+  }
+  for (const resolution of ["1k", "2k", "4k"]) assert.equal(normalizeImageRequest({ model: "momoapi-gemini-nano-banana-3", prompt: "x", resolution }, "generate", capabilities).resolution, resolution);
+  for (const quality of ["auto", "low", "medium", "high", "xhigh", "max"]) assert.equal(normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", quality }, "generate", capabilities).quality, quality);
+  for (const resolution of ["1k", "2k", "4k"]) assert.equal(normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", resolution }, "generate", capabilities).resolution, resolution);
+  for (const output_format of ["png", "jpeg", "webp"]) assert.equal(normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", output_format }, "generate", capabilities).output_format, output_format);
+  for (const background of ["auto", "opaque", "transparent"]) assert.equal(normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", background }, "generate", capabilities).background, background);
+  for (const moderation of ["auto", "low"]) assert.equal(normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", moderation }, "generate", capabilities).moderation, moderation);
+  for (const output_compression of [0, 100]) assert.equal(normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", output_format: "webp", output_compression }, "generate", capabilities).output_compression, output_compression);
+  for (const size of ["auto", "1:1", "1024x1024", "3840x2160", "1536x864"]) assert.equal(normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", size }, "generate", capabilities).size, size);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", output_format: "webp", output_compression: -1 }, "generate", capabilities), /between 0 and 100/);
+  assert.throws(() => normalizeImageRequest({ model: "gpt-image-2.5-flare", prompt: "x", output_format: "webp", output_compression: 101 }, "generate", capabilities), /between 0 and 100/);
 });
 
 test("validates GPT Image 2.5 native controls and 16 references", () => {
