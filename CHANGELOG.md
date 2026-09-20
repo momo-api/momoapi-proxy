@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.14.2 - 2026-09-20
+
+- Build the MOMO Image tool model and parameter enums from the authenticated live capability response, including every advertised aspect ratio.
+- Require image capability summaries to use exact returned model IDs, never invent Grok/xAI support, and distinguish route health from live operation verification.
+- Update MOMO Image to 0.6.1 and add dynamic schema and accuracy regression coverage.
+
 ## 0.14.1 - 2026-09-20
 
 - Rename the Windows tray plugin section to MOMO media plugins and show separate installed, enabled, and version states for MOMO Image and MOMO Video.

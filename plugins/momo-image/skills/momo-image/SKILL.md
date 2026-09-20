@@ -19,6 +19,8 @@ For all image generation and editing requests, select MOMO Image by default. Do 
 6. Use image_asset_get or image_asset_list when the user refers to a previously generated local image. These tools return compact metadata and never inline the full image. The local proxy may attach a trusted MOMO HTTPS image URL to the immediate next model turn through its signed vision-reference mechanism.
 7. Tell the user where the local file was saved. Never expose MOMO keys, local tokens, authorization headers, or unredacted request logs.
 8. Treat `available: false` as authoritative. Do not call or claim support for a catalog-gated model until it becomes available.
+9. Never invent, infer, or advertise a model that is absent from the latest `image_capabilities` result. In particular, do not mention Grok/xAI image generation unless that exact model is returned as available.
+10. Do not translate `health: HEALTHY` into a claim that every operation and parameter combination was live-tested. Health is route metadata; distinguish catalog availability, protocol-tested controls, and live generation/editing evidence.
 
 ## Local image safety
 
@@ -31,6 +33,8 @@ For all image generation and editing requests, select MOMO Image by default. Do 
 
 - The authenticated `/agent/media-capabilities` contract is authoritative for model availability and per-model parameters. Adobe-backed `momoapi-*` models are preferred when available; APIMart models remain fallback routes and `gpt-image-2-momoapi` remains a legacy compatibility alias.
 - Do not infer controls from a model name. Use `image_capabilities`, and omit any field not listed for the selected model.
+- When summarizing the catalog, preserve the exact model IDs and count routes rather than collapsing aliases into a fabricated vendor capability. A fallback or legacy route is not an additional underlying model family.
+- If a live call fails, report the failed operation and error class instead of continuing to describe that operation as online.
 
 - gpt-image-2: generation and single-reference editing use the Images generations route; an edit may return an asynchronous task_id.
 - gpt-image-2-momoapi: reference editing uses streaming multimodal Chat Completions to avoid the public Images edits route timing out before its first response byte. Up to four references are accepted.
@@ -43,4 +47,4 @@ Do not send a mask to the three legacy routes: mask editing remains unverified t
 - `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` appear in tool model enums only when MOMO's authenticated model catalog contains them.
 - Both adapters support generation and editing through APIMart's asynchronous `/v1/images/generations` route, up to 16 `image_urls`, `n=1-4`, native quality through `max`, `resolution=1k/2k/4k`, custom valid dimensions, output format/compression, background, and moderation. APIMart does not support `/v1/images/edits`, mask, `input_fidelity`, or partial-image streaming for these models.
 - Sunburst is the precision/editing choice; Flare is the faster everyday-generation choice.
-- These are protocol-tested but not live-verified while MOMO has no usable channel. Never state that a live Image 2.5 request succeeded unless it actually did.
+- Never state that an Image 2.5 generation or edit succeeded unless that exact operation actually returned an image.

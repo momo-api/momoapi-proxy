@@ -13,6 +13,11 @@ test("image MCP end-to-end over a fake upstream", async () => {
   let capturedResponsesBody = null;
   const fakeFetch = async (url, init = {}) => {
     const target = String(url);
+    if (target === "https://mock.gateway/agent/media-capabilities") return new Response(JSON.stringify({ models: [
+      { id: "momoapi-gpt-image-2-5-flare", modality: "image", available: true, operations: ["generate", "edit"], parameters: { n: { allowed: [1, 2, 3, 4] }, quality: { allowed: ["low", "medium", "high"] }, max_reference_images: { maximum: 4 } } },
+      { id: "momoapi-gemini-nano-banana-3", modality: "image", available: true, operations: ["generate", "edit"], parameters: { n: { allowed: [1] }, aspect_ratio: { allowed: ["1:1", "4:3", "3:4"] }, resolution: { allowed: ["1k", "2k", "4k"] }, max_reference_images: { maximum: 4 } } },
+      { id: "gpt-image-2.5-sunburst", modality: "image", available: true, operations: ["generate", "edit"], parameters: { n: { allowed: [1, 2, 3, 4] }, quality: { allowed: ["auto", "max"] }, resolution: { allowed: ["1k", "2k", "4k"] }, max_reference_images: { maximum: 16 } } },
+    ] }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/models") return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/images/generations") return new Response(JSON.stringify({ data: [{ url: "https://mock.gateway/generated/e2e.png", b64_json: pngBase64, task_id: "task-e2e" }] }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/tasks/task-e2e") return new Response(JSON.stringify({ code: 200, data: { id: "task-e2e", status: "completed", result: { images: [{ url: ["https://mock.gateway/generated/e2e.png"] }] } } }), { status: 200, headers: { "content-type": "application/json" } });
@@ -58,9 +63,13 @@ test("image MCP end-to-end over a fake upstream", async () => {
     await waitFor('"id":2');
     const listed = JSON.parse(output.trim().split(/\r?\n/).find((line) => line.includes('"id":2')));
     const models = listed.result.tools.find((tool) => tool.name === "image_generate").inputSchema.properties.model.enum;
-    assert.equal(models.includes("gpt-image-2.5-sunburst"), false);
-    assert.equal(models.includes("gpt-image-2.5-flare"), false);
-    send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "image_generate", arguments: { model: "gpt-image-2-momoapi", prompt: "test image", n: 1, aspect_ratio: "1:1", resolution: "1k" } } });
+    assert.deepEqual(models, ["momoapi-gpt-image-2-5-flare", "momoapi-gemini-nano-banana-3", "gpt-image-2.5-sunburst"]);
+    assert.equal(models.includes("grok-imagine-image-lite"), false);
+    const generateSchema = listed.result.tools.find((tool) => tool.name === "image_generate").inputSchema.properties;
+    assert.deepEqual(generateSchema.aspect_ratio.enum, ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "21:9", "9:21", "3:1", "1:3"]);
+    assert.deepEqual(generateSchema.resolution.enum, ["1k", "2k", "4k"]);
+    assert.deepEqual(generateSchema.quality.enum, ["low", "medium", "high", "auto", "max"]);
+    send({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "image_generate", arguments: { model: "momoapi-gpt-image-2-5-flare", prompt: "test image", n: 1, quality: "low" } } });
     await waitFor('"id":3');
     const generated = JSON.parse(output.trim().split(/\r?\n/).find((line) => line.includes('"id":3')));
     assert.doesNotMatch(JSON.stringify(generated), new RegExp(pngBase64));
@@ -114,7 +123,7 @@ test("image MCP end-to-end over a fake upstream", async () => {
     await waitFor('"id":8');
     const listedAssets = JSON.parse(output.trim().split(/\r?\n/).find((line) => line.includes('"id":8')));
     assert.doesNotMatch(JSON.stringify(listedAssets), /vision_reference|momo-image-ref/);
-    send({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "image_edit", arguments: { model: "gpt-image-2-momoapi", prompt: "edit local image", reference_images: [summary.images[0].reference] } } });
+    send({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "image_edit", arguments: { model: "momoapi-gpt-image-2-5-flare", prompt: "edit local image", reference_images: [summary.images[0].reference] } } });
     await waitFor('"id":6');
     const edited = JSON.parse(output.trim().split(/\r?\n/).find((line) => line.includes('"id":6')));
     assert.doesNotMatch(JSON.stringify(edited), new RegExp(pngBase64));
