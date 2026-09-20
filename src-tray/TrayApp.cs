@@ -38,19 +38,25 @@ namespace MomoApi.Tray
             return title.Length <= 63 ? title : title.Substring(0, 60) + "...";
         }
 
-        public static string PluginStatus(string json, bool commandSucceeded)
+        public static string PluginStatus(string json, string pluginName, string displayName, bool commandSucceeded)
         {
-            string version = VersionFromJson(json);
-            bool hasInstalledState = Regex.IsMatch(json ?? "", "\"installed\"\\s*:\\s*(?:true|false)", RegexOptions.IgnoreCase);
-            bool installed = Regex.IsMatch(json ?? "", "\"installed\"\\s*:\\s*true", RegexOptions.IgnoreCase);
-            bool enabled = Regex.IsMatch(json ?? "", "\"enabled\"\\s*:\\s*true", RegexOptions.IgnoreCase);
+            var plugin = Regex.Match(
+                json ?? "",
+                "\"" + Regex.Escape(pluginName) + "\"\\s*:\\s*\\{([^{}]*)\\}",
+                RegexOptions.IgnoreCase
+            );
+            string state = plugin.Success ? plugin.Groups[1].Value : "";
+            string version = VersionFromJson(state);
+            bool hasInstalledState = Regex.IsMatch(state, "\"installed\"\\s*:\\s*(?:true|false)", RegexOptions.IgnoreCase);
+            bool installed = Regex.IsMatch(state, "\"installed\"\\s*:\\s*true", RegexOptions.IgnoreCase);
+            bool enabled = Regex.IsMatch(state, "\"enabled\"\\s*:\\s*true", RegexOptions.IgnoreCase);
             if (hasInstalledState && installed && enabled)
             {
-                return "MOMO Image：已安装并启用" + (string.IsNullOrEmpty(version) ? "" : " v" + version);
+                return displayName + "：已安装并启用" + (string.IsNullOrEmpty(version) ? "" : " v" + version);
             }
-            if (hasInstalledState && installed) return "MOMO Image：已安装但未启用";
-            if (hasInstalledState) return "MOMO Image：未安装";
-            return commandSucceeded ? "MOMO Image：状态未知" : "MOMO Image：检测失败";
+            if (hasInstalledState && installed) return displayName + "：已安装但未启用";
+            if (hasInstalledState) return displayName + "：未安装";
+            return commandSucceeded ? displayName + "：状态未知" : displayName + "：检测失败";
         }
 
         public static string RouteModeFromConfig(string content)
@@ -153,7 +159,8 @@ namespace MomoApi.Tray
         private readonly Icon inactiveIcon;
         private readonly ToolStripMenuItem titleItem;
         private readonly ToolStripMenuItem updateItem;
-        private readonly ToolStripMenuItem pluginStatusItem;
+        private readonly ToolStripMenuItem imagePluginStatusItem;
+        private readonly ToolStripMenuItem videoPluginStatusItem;
         private readonly ToolStripMenuItem autostartItem;
         private readonly ToolStripMenuItem routeMenuItem;
         private readonly ToolStripMenuItem routeDirectItem;
@@ -199,15 +206,19 @@ namespace MomoApi.Tray
             var syncModels = modelsMenu.DropDownItems.Add("同步模型目录 (Sync)");
             syncModels.Click += async (s, e) => await RunCliAsync("sync", true);
 
-            var imageMenu = new ToolStripMenuItem("MOMO Image 插件");
-            menu.Items.Add(imageMenu);
+            var mediaMenu = new ToolStripMenuItem("MOMO 媒体插件");
+            menu.Items.Add(mediaMenu);
 
-            pluginStatusItem = new ToolStripMenuItem("MOMO Image：正在检测...");
-            pluginStatusItem.Enabled = false;
-            imageMenu.DropDownItems.Add(pluginStatusItem);
-            imageMenu.DropDownItems.Add(new ToolStripSeparator());
+            imagePluginStatusItem = new ToolStripMenuItem("MOMO Image：正在检测...");
+            imagePluginStatusItem.Enabled = false;
+            mediaMenu.DropDownItems.Add(imagePluginStatusItem);
 
-            var repairPlugin = imageMenu.DropDownItems.Add("安装或修复插件");
+            videoPluginStatusItem = new ToolStripMenuItem("MOMO Video：正在检测...");
+            videoPluginStatusItem.Enabled = false;
+            mediaMenu.DropDownItems.Add(videoPluginStatusItem);
+            mediaMenu.DropDownItems.Add(new ToolStripSeparator());
+
+            var repairPlugin = mediaMenu.DropDownItems.Add("安装或修复图片/视频插件");
             repairPlugin.Click += async (s, e) =>
             {
                 await RunCliAsync("plugin install", true);
@@ -826,8 +837,14 @@ namespace MomoApi.Tray
                 error = ex.Message;
             }
 
-            string label = TrayPresentation.PluginStatus(output + Environment.NewLine + error, exitCode == 0);
-            syncContext.Post(_ => pluginStatusItem.Text = label, null);
+            string statusJson = output + Environment.NewLine + error;
+            string imageLabel = TrayPresentation.PluginStatus(statusJson, "momo-image", "MOMO Image", exitCode == 0);
+            string videoLabel = TrayPresentation.PluginStatus(statusJson, "momo-video", "MOMO Video", exitCode == 0);
+            syncContext.Post(_ =>
+            {
+                imagePluginStatusItem.Text = imageLabel;
+                videoPluginStatusItem.Text = videoLabel;
+            }, null);
         }
 
         private void InitJobObject()
