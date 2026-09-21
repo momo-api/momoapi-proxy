@@ -154,9 +154,32 @@ function status(model) {
   return model.agent_status || model.agentStatus || "experimental";
 }
 
+// Media models are exposed through the dedicated image/video plugin APIs.
+// Some gateway catalog rows omit modality/capabilities, so keep an explicit
+// deny-list for known MOMO media IDs as a safe fallback for the Codex text
+// catalog. This does not disable the media plugin endpoints.
+const MEDIA_ONLY_MODEL_IDS = new Set([
+  "gpt-image-2-momoapi",
+  "gpt-image-2",
+  "gpt-image-2-official",
+  "gpt-image-2.5-flare",
+  "gpt-image-2.5-sunburst",
+  "momoapi-gpt-image-2-5-flare",
+  "momoapi-gpt-image-2-5-prism",
+  "momoapi-gpt-image-2",
+  "momoapi-gemini-nano-banana-3",
+  "momoapi-gemini-omni-flash",
+  "grok-imagine-image-lite",
+  "momoapi-veo-3-1-lite",
+  "momoapi-kling-3-standard",
+]);
+
 function isImageOrNonText(model) {
   if (!model?.id) return true;
   const id = model.id.toLowerCase();
+  if (MEDIA_ONLY_MODEL_IDS.has(id)) return true;
+  const modality = String(model.modality || model.media_type || model.mediaType || model.kind || model.category || "").toLowerCase();
+  if (["image", "images", "video", "videos", "audio", "embedding"].includes(modality)) return true;
   if (id.includes("-image") || id.includes("imagine") || id.includes("flux") || id.includes("midjourney") || id.includes("dall-e") || id.includes("sora")) {
     return true;
   }

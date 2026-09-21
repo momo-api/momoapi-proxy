@@ -242,6 +242,20 @@ test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other",
   ]);
 });
 
+test("catalog excludes known media models even when upstream omits modality", async () => {
+  const { buildCatalog } = await import("../src/catalog.mjs");
+  const catalog = buildCatalog([
+    { id: "gpt-5.5", agent_status: "stable" },
+    { id: "momoapi-gemini-nano-banana-3", agent_status: "stable" },
+    { id: "momoapi-gemini-omni-flash", agent_status: "stable" },
+    { id: "momoapi-kling-3-standard", agent_status: "stable" },
+    { id: "momoapi-veo-3-1-lite", agent_status: "stable" },
+    { id: "provider-image-model", agent_status: "stable" },
+    { id: "provider-video-model", modality: "video", agent_status: "stable" },
+  ], { includeDesktopAliases: false });
+  assert.deepEqual(catalog.models.map((model) => model.slug), ["gpt-5.5"]);
+});
+
 test("catalog uses one compact cross-provider instruction source", async () => {
   const { buildCatalog } = await import("../src/catalog.mjs");
   const catalog = buildCatalog([
