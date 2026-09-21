@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.14.5 - 2026-09-21
+
+- Keep image and video models out of the Codex text-model catalog even when the
+  upstream model list omits modality metadata.
+- Preserve the dedicated MOMO Image and MOMO Video plugin capability endpoints.
+
 ## 0.14.2 - 2026-09-20
 
 - Build the MOMO Image tool model and parameter enums from the authenticated live capability response, including every advertised aspect ratio.
