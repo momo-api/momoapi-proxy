@@ -163,7 +163,10 @@ function videoResult(payload, endpoint, taskId) {
     status,
     terminal: ["completed", "failed", "cancelled", "canceled", "expired"].includes(status),
     remote_url: remoteUrl,
-    content_url: id ? endpoint + "/v1/videos/" + encodeURIComponent(id) + "/content" : null,
+    // This gateway route requires the caller's API bearer token. It is useful
+    // to SDK clients, but it must not be presented as a browser-playable URL.
+    authenticated_content_url: id ? endpoint + "/v1/videos/" + encodeURIComponent(id) + "/content" : null,
+    playable_url: remoteUrl,
     ...(payload?.progress !== undefined ? { progress: payload.progress } : {}),
     ...(payload?.error ? { error: payload.error } : {}),
   };

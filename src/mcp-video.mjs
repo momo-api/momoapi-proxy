@@ -36,8 +36,8 @@ export function videoToolDefs(capabilities) {
   };
   return [
     { name: "video_capabilities", description: "List currently available MOMO video models and their exact duration, resolution, aspect-ratio, audio, and reference-image limits.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "video_generate", description: "Submit a MOMO text-to-video or image-to-video task. Completed remote URLs are returned without downloading the video.", inputSchema: { type: "object", properties, required: ["prompt"], additionalProperties: false } },
-    { name: "video_task_status", description: "Check a MOMO video task and return its remote output URL when complete, without downloading the video.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false } },
+    { name: "video_generate", description: "Submit a MOMO text-to-video or image-to-video task. When complete, use playable_url or remote_url for browser playback/download. authenticated_content_url requires the MOMO API bearer token and must not be shown as a clickable browser link.", inputSchema: { type: "object", properties, required: ["prompt"], additionalProperties: false } },
+    { name: "video_task_status", description: "Check a MOMO video task. Use playable_url or remote_url for browser playback/download. authenticated_content_url is only for authenticated API clients and must not be shown as a clickable browser link.", inputSchema: { type: "object", properties: { task_id: { type: "string" } }, required: ["task_id"], additionalProperties: false } },
   ];
 }
 
@@ -68,7 +68,7 @@ export async function runVideoMcp() {
     try { request = JSON.parse(line); } catch { continue; }
     if (request.method === "notifications/initialized" || request.method === "notifications/cancelled") continue;
     if (request.method === "initialize") {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-video", version: "0.1.0" } } }) + "\n");
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-video", version: "0.1.1" } } }) + "\n");
       continue;
     }
     try {
