@@ -59,7 +59,14 @@ test("submits multipart video tasks and does not download the completed asset", 
   assert.equal(calls[1].init.body.get("seconds"), "6");
   assert.equal(calls[1].init.body.get("resolution_name"), "1080p");
   assert.equal(calls[1].init.body.getAll("input_reference[]").length, 1);
-  assert.deepEqual(result, { task_id: "task-video-1", status: "queued", terminal: false, remote_url: null, content_url: "https://gateway.example/v1/videos/task-video-1/content" });
+  assert.deepEqual(result, {
+    task_id: "task-video-1",
+    status: "queued",
+    terminal: false,
+    remote_url: null,
+    authenticated_content_url: "https://gateway.example/v1/videos/task-video-1/content",
+    playable_url: null,
+  });
 });
 
 test("polls video status and returns the Adobe remote URL without fetching it", async () => {
@@ -70,6 +77,8 @@ test("polls video status and returns the Adobe remote URL without fetching it", 
   } });
   assert.deepEqual(calls, ["https://gateway.example/v1/videos/task-video-1"]);
   assert.equal(result.remote_url, "https://adobe.example/output.mp4");
+  assert.equal(result.playable_url, "https://adobe.example/output.mp4");
+  assert.equal(result.authenticated_content_url, "https://gateway.example/v1/videos/task-video-1/content");
   assert.equal(result.terminal, true);
 });
 
