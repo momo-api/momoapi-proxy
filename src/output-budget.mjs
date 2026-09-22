@@ -4,7 +4,7 @@ export function outputBudgetError() {
 }
 export function resolveOutputPolicy(settings = {}) {
   const supplied = settings.outputPolicy || {};
-  const specs = { maxStreamMb: [64, 1, 256], maxRetainedMb: [16, 1, 64], maxEvents: [65536, 1, 262144], maxItems: [16384, 1, 65536], maxCallCacheMb: [64, 1, 256] };
+  const specs = { maxStreamMb: [256, 1, 256], maxRetainedMb: [64, 1, 64], maxEvents: [262144, 1, 262144], maxItems: [65536, 1, 65536], maxCallCacheMb: [256, 1, 256] };
   return Object.fromEntries(Object.entries(specs).map(([key, [fallback, min, max]]) => {
     const value = supplied[key];
     return [key, Number.isSafeInteger(value) && value >= min && value <= max ? value : fallback];

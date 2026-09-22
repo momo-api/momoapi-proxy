@@ -280,14 +280,14 @@ output budgets and event-loop blocking remain tracked follow-ups in
 ### Local output safety budgets
 
 Responses and its Chat/Gemini/Claude adapters count upstream UTF-8 wire bytes
-before parsing (default 64 MiB) and SSE blocks including comments (65,536).
+before parsing (default 256 MiB) and SSE blocks including comments (262,144).
 Raw Chat passthrough counts wire bytes only. The existing 32 MiB single-event
 limit still applies to parsed SSE. Upstream diagnostic/error bodies have a
 separate fixed 1 MiB read ceiling; compact retains its existing 32 MiB limit.
 
 Each retained accumulator (DSML/text, adapter tool state, native custom restoration,
-provider-output collection, or response emitter) defaults to 16 MiB logical UTF-8
-bytes and 16,384 structural nodes/items; object traversal is limited to depth 64.
+provider-output collection, or response emitter) defaults to 64 MiB logical UTF-8
+bytes and 65,536 structural nodes/items; object traversal is limited to depth 64.
 These are per-accumulator monotonic budgets: repeated snapshots consume budget
 again; they are not a combined V8 heap/RSS cap. Already received frames and
 JSON parsing/serialization still have transient allocations.
@@ -296,11 +296,11 @@ Optional non-secret settings under outputPolicy (restart required):
 
 | Setting | Default | Valid integer range |
 | --- | --- | --- |
-| maxStreamMb | 64 | 1–256 |
-| maxRetainedMb | 16 | 1–64 |
-| maxEvents | 65536 | 1–262144 |
-| maxItems | 16384 | 1–65536 |
-| maxCallCacheMb | 64 | 1–256 |
+| maxStreamMb | 256 | 1–256 |
+| maxRetainedMb | 64 | 1–64 |
+| maxEvents | 262144 | 1–262144 |
+| maxItems | 65536 | 1–65536 |
+| maxCallCacheMb | 256 | 1–256 |
 
 Invalid fields fall back to defaults. The per-server tool continuation cache is
 limited to 512 whole entries and maxCallCacheMb logical bytes; each entry also

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.14.6 - 2026-09-22
+
+- Raise the default local output safety budgets to their existing supported
+  ceilings so long Responses and tool-heavy model output are not prematurely
+  cut off, while preserving bounded memory, event, and continuation-cache
+  protection.
+
 ## 0.14.5 - 2026-09-21
 
 - Keep image and video models out of the Codex text-model catalog even when the
