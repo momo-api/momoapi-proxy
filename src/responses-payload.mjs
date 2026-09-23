@@ -2,6 +2,17 @@ import { decodeLocalCompaction } from "./compaction.mjs";
 import { responsesToolOutput, safeTextValue } from "./protocol-content.mjs";
 
 const ALLOWED_CONTENT_TYPES = new Set(["input_text", "output_text", "input_image", "input_file"]);
+const VALID_TOOL_NAME = /^[a-zA-Z0-9_-]+$/;
+
+function safeToolName(value, fallback = "unknown") {
+  if (typeof value !== "string") return fallback;
+  const name = value.trim();
+  if (VALID_TOOL_NAME.test(name)) return name;
+  const sanitized = name.replace(/[^a-zA-Z0-9_-]+/g, "_");
+  if (VALID_TOOL_NAME.test(sanitized)) return sanitized;
+  return fallback;
+}
+
 const KNOWN_METADATA_TYPES = new Set([
   "session_meta", "event_msg", "task_started", "world_state", "turn_context",
   "item_completed", "token_count", "web_search_call", "task_complete",
@@ -92,7 +103,7 @@ export function normalizeResponsesPayload(payload) {
       cleanInput.push({
         type: "function_call",
         call_id: item.call_id || "call_unknown",
-        name: item.name || "unknown",
+        name: safeToolName(item.name),
         arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments ?? {}),
       });
       continue;
@@ -102,7 +113,7 @@ export function normalizeResponsesPayload(payload) {
       cleanInput.push({
         type: "custom_tool_call",
         call_id: item.call_id || "call_unknown",
-        name: item.name || "unknown",
+        name: safeToolName(item.name),
         input: typeof item.input === "string" ? item.input : JSON.stringify(item.input ?? ""),
       });
       continue;
