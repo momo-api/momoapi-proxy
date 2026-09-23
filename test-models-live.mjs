@@ -35,7 +35,7 @@ async function run() {
     "gemini-3.7-flash",
     "deepseek-v4-pro",
     "deepseek-v4-flash-vision-exp",
-    "muse-spark-1.3-contributor-free",
+    "mimo-v2.6-flash-free",
     "codex-auto-review"
   ];
   for (const m of models) {

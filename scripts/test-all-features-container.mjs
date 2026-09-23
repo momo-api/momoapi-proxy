@@ -39,7 +39,7 @@ if (!statusJson.keyConfigured || statusJson.catalogModelsCount < 10) {
 console.log("=== [3/8] Testing 'momo-codex-bridge models' ===");
 const modelsOut = runCli("models");
 console.log(modelsOut.slice(0, 300) + "...");
-if (!modelsOut.includes("claude-opus-4-6-thinking") || !modelsOut.includes("muse-spark")) {
+if (!modelsOut.includes("claude-opus-4-6-thinking") || !modelsOut.includes("mimo-v2.6-flash-free")) {
   throw new Error("Models listing missing expected models");
 }
 
@@ -82,10 +82,10 @@ async function runCodexPrompt(model, prompt) {
 try {
   console.log("=== [7/8] Running Real Codex CLI Prompts in Clean Container ===");
   
-  console.log("  -> Testing Muse (muse-spark-1.2-contributor-free)...");
-  const outMuse = await runCodexPrompt("muse-spark-1.2-contributor-free", "Reply with EXACT: MOMO_MUSE_OK");
-  if (!outMuse.includes("MOMO_MUSE_OK")) throw new Error("Muse failed: " + outMuse);
-  console.log("     Muse: PASS");
+  console.log("  -> Testing Mimo (mimo-v2.6-flash-free)...");
+  const outMimo = await runCodexPrompt("mimo-v2.6-flash-free", "Reply with EXACT: MOMO_MIMO_OK");
+  if (!outMimo.includes("MOMO_MIMO_OK")) throw new Error("Mimo failed: " + outMimo);
+  console.log("     Mimo: PASS");
 
   console.log("  -> Testing DeepSeek (deepseek-v4-pro)...");
   const outDs = await runCodexPrompt("deepseek-v4-pro", "Reply with EXACT: MOMO_DEEPSEEK_OK");

@@ -17,7 +17,7 @@ const defaultModels = [
   "deepseek-v4-flash-vision-exp",
   "claude-opus-4-6-thinking",
   "gemini-3.8-flash",
-  "muse-spark-1.3-contributor-free",
+  "mimo-v2.6-flash-free",
 ];
 const models = (process.env.BENCHMARK_MODELS || defaultModels.join(","))
   .split(",")

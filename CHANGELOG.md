@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.9 - 2026-09-23
+
+- Remove retired Muse routing and live-test coverage while routing Mimo 2.6 through its native Responses path.
+- Retain Mimo history cleanup, input normalization, and tool-output deduplication required for long-running tool sessions.
+
 ## 0.14.8 - 2026-09-23
 
 - Remove `additional_tools` history items before Muse/Mimo Responses forwarding while retaining their tool definitions at the top level, preventing unsupported `input[0]` errors when continuing old sessions.
