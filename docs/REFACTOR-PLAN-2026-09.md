@@ -434,3 +434,35 @@ P5 验收共同约束：
 实现将 bundled 模型能力元数据与代理维护的跨模型行为指令分离。`catalog.mjs` 生成目录时同时填充 `base_instructions` 和 `model_messages.instructions_template`，兼容不同 Codex 客户端字段，但二者来自同一文件。bundled JSON 不再保存两份 17,730 字符死数据。
 
 本地验收：Windows 全量 372 passed / 3 platform skips；Gemini/Claude/Responses、附件、checkpoint、call/result、namespace/custom tool 回归全部通过；npm dry-run 包含新模板。完整 Git 历史和当前工作树 Secret scan 均为 no leaks found。未修改本机安装目录、未重启 18789、未发布版本。
+
+## 待修复：Windows 新旧启动项并存兼容（记录于 2026-09-17）
+
+状态：**已确认，待实现；建议随下一正常补丁版本处理，不作为 v0.13.28 紧急回滚项。**
+
+### 问题与影响范围
+
+- 旧托盘启动项为 `momoapi-proxy-tray.lnk`，当前启动项为 `MOMO API Proxy Tray.lnk`；旧服务启动项为 `momo-codex-bridge.cmd`，当前启动项为 `MOMO API Proxy Service.cmd`。
+- 正常升级时如果只有旧项，安装器会将其迁移为当前名称，不会失败。
+- 只有同一组旧项和当前项同时存在时，`migrateWindowsAutostart()` 才会报告 conflict；`installAutostart()` 或 `installWindowsDesktop()` 随后抛出 `Both legacy and current MOMO startup entries exist` 并中断安装。
+- 该状态通常来自曾经升级失败、重复安装、手工复制或历史脚本残留；不是所有旧版本升级都会触发。已手工删除旧项且只保留当前项的用户不受影响。
+- 中断发生在桌面快捷方式创建之前，因此可能表现为代理主体已配置、但安装命令报错且桌面/开始菜单入口缺失。
+
+### 预定修复边界
+
+1. 只处理代码中明确列出的 MOMO 历史文件名，不删除或覆盖其他未知启动项。
+2. 当同组新旧项同时存在时，以当前命名项为准，删除已知旧项，而不是中断整个安装。
+3. 同步清理该旧文件名在 Windows `StartupApproved\StartupFolder` 中的历史记录；不得修改当前项或其他程序的注册表值。
+4. 保持仅有旧项时现有的重命名与启用状态迁移行为；保持重复执行幂等。
+5. 删除失败、权限不足或注册表操作失败时返回明确且可诊断的错误，不伪装为安装成功。
+
+### 必需回归测试
+
+- 仅旧服务项、仅旧托盘项：成功迁移，内容和启用状态保持。
+- 新旧服务项并存：保留并刷新当前项，安全移除旧项，安装继续完成。
+- 新旧托盘项并存：保留并刷新当前项，安全移除旧项，桌面、开始菜单和开机启动快捷方式均成功创建。
+- 新旧两组同时并存：一次安装完成收敛，第二次安装无额外变化。
+- `--no-autostart`：新旧托盘开机项均移除，不影响桌面与开始菜单入口。
+- 未知文件与未知注册表值：完全不变。
+- 删除/注册表权限失败：安装结果明确失败，现有当前项不被破坏。
+
+发布前仍需通过 Windows 全量、Windows tray、Node 24 Alpine、release package 与 Secret Scan；本项不要求单独紧急发布，也不要求正常运行 v0.13.28 的用户重装。
