@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.6 - 2026-09-23
+
+- Normalize invalid historical `function_call.name` and `custom_tool_call.name` values before Responses forwarding so upstream tool-name validation accepts long-lived sessions.
+
 ## Unreleased
 
 ## 0.14.5 - 2026-09-21
