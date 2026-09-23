@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.8 - 2026-09-23
+
+- Remove `additional_tools` history items before Muse/Mimo Responses forwarding while retaining their tool definitions at the top level, preventing unsupported `input[0]` errors when continuing old sessions.
+
 ## 0.14.7 - 2026-09-23
 
 - Deduplicate repeated `function_call_output` and `custom_tool_call_output` entries by `call_id` before Responses forwarding, retaining the latest polling result so Muse/Mimo receives exactly one output per tool call.
