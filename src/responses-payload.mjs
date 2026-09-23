@@ -25,6 +25,28 @@ export function normalizeResponsesPayload(payload) {
   const rawInput = Array.isArray(normalized.input) ? normalized.input : [];
   const cleanInput = [];
   const loadedToolSpecs = [];
+  const toolOutputIndexes = new Map();
+
+  const pushCleanInput = (item) => {
+    if (item?.type !== "function_call_output" && item?.type !== "custom_tool_call_output") {
+      cleanInput.push(item);
+      return;
+    }
+
+    const output = {
+      type: item.type,
+      call_id: item.call_id || "call_unknown",
+      output: responsesToolOutput(item.output),
+    };
+    const existingIndex = toolOutputIndexes.get(output.call_id);
+    if (existingIndex !== undefined) {
+      cleanInput[existingIndex] = output;
+      return;
+    }
+
+    toolOutputIndexes.set(output.call_id, cleanInput.length);
+    cleanInput.push(output);
+  };
 
   if (Array.isArray(payload.tools)) {
     loadedToolSpecs.push(...payload.tools);
@@ -44,7 +66,7 @@ export function normalizeResponsesPayload(payload) {
 
     if (item.type === "compaction" && typeof item.encrypted_content === "string") {
       const recovered = decodeLocalCompaction(item.encrypted_content);
-      if (recovered) cleanInput.push(...recovered);
+      if (recovered) recovered.forEach(pushCleanInput);
       else cleanInput.push(item);
       continue;
     }
@@ -82,20 +104,12 @@ export function normalizeResponsesPayload(payload) {
     }
 
     if (item.type === "function_call_output") {
-      cleanInput.push({
-        type: "function_call_output",
-        call_id: item.call_id || "call_unknown",
-        output: responsesToolOutput(item.output),
-      });
+      pushCleanInput(item);
       continue;
     }
 
     if (item.type === "custom_tool_call_output") {
-      cleanInput.push({
-        type: "custom_tool_call_output",
-        call_id: item.call_id || "call_unknown",
-        output: responsesToolOutput(item.output),
-      });
+      pushCleanInput(item);
       continue;
     }
 

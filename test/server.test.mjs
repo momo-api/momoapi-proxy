@@ -928,6 +928,46 @@ test("normalizes invalid historical tool names before Responses forwarding", () 
   assert.equal(normalized.tools[0].name, "...");
 });
 
+test("keeps only the latest tool output for each Responses call id", () => {
+  const normalized = normalizeResponsesPayload({
+    model: "muse-spark-1.3-contributor-free",
+    input: [
+      { type: "function_call", call_id: "call_function", name: "poll", arguments: "{}" },
+      { type: "function_call_output", call_id: "call_function", output: "poll 0" },
+      { role: "assistant", content: "still working" },
+      { type: "function_call_output", call_id: "call_function", output: "complete" },
+      { type: "custom_tool_call", call_id: "call_custom", name: "exec", input: "poll" },
+      { type: "custom_tool_call_output", call_id: "call_custom", output: "Script running" },
+      { type: "custom_tool_call_output", call_id: "call_custom", output: "done" },
+      { type: "function_call_output", call_id: "call_unique", output: "unchanged" },
+    ],
+  });
+
+  const outputs = normalized.input.filter((item) => item.type === "function_call_output" || item.type === "custom_tool_call_output");
+  assert.deepEqual(outputs, [
+    { type: "function_call_output", call_id: "call_function", output: "complete" },
+    { type: "custom_tool_call_output", call_id: "call_custom", output: "done" },
+    { type: "function_call_output", call_id: "call_unique", output: "unchanged" },
+  ]);
+  assert.equal(normalized.input[0].call_id, "call_function");
+  assert.equal(normalized.input[1].output, "complete");
+  assert.equal(normalized.input[3].call_id, "call_custom");
+});
+
+test("deduplicates mixed Responses output types by call id", () => {
+  const normalized = normalizeResponsesPayload({
+    model: "muse-spark-1.3-contributor-free",
+    input: [
+      { type: "function_call_output", call_id: "call_mixed", output: "intermediate" },
+      { type: "custom_tool_call_output", call_id: "call_mixed", output: "final" },
+    ],
+  });
+
+  assert.deepEqual(normalized.input, [
+    { type: "custom_tool_call_output", call_id: "call_mixed", output: "final" },
+  ]);
+});
+
 test("promotes a signed current-turn MOMO asset reference to a compact HTTPS vision input", async () => {
   const home = mkdtempSync(join(tmpdir(), "momo-vision-url-"));
   const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mYQAAAAASUVORK5CYII=";
