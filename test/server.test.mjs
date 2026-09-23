@@ -914,6 +914,20 @@ test("keeps tool-result images out of text in Responses and Chat bridges", () =>
   assert.doesNotMatch(JSON.stringify(claude[1].content[0].content[0]), /data:image/);
 });
 
+test("normalizes invalid historical tool names before Responses forwarding", () => {
+  const normalized = normalizeResponsesPayload({
+    model: "gpt-5.6-sol",
+    tools: [{ type: "custom", name: "..." }],
+    input: [
+      { type: "function_call", call_id: "call_bad_name", name: "...", arguments: "{}" },
+      { type: "custom_tool_call", call_id: "call_bad_custom_name", name: "bad tool", input: "{}" },
+    ],
+  });
+  assert.equal(normalized.input[0].name, "_");
+  assert.equal(normalized.input[1].name, "bad_tool");
+  assert.equal(normalized.tools[0].name, "...");
+});
+
 test("promotes a signed current-turn MOMO asset reference to a compact HTTPS vision input", async () => {
   const home = mkdtempSync(join(tmpdir(), "momo-vision-url-"));
   const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mYQAAAAASUVORK5CYII=";
