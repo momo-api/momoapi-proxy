@@ -930,7 +930,7 @@ test("normalizes invalid historical tool names before Responses forwarding", () 
 
 test("keeps only the latest tool output for each Responses call id", () => {
   const normalized = normalizeResponsesPayload({
-    model: "muse-spark-1.3-contributor-free",
+    model: "gpt-5.6-sol",
     input: [
       { type: "function_call", call_id: "call_function", name: "poll", arguments: "{}" },
       { type: "function_call_output", call_id: "call_function", output: "poll 0" },
@@ -956,7 +956,7 @@ test("keeps only the latest tool output for each Responses call id", () => {
 
 test("deduplicates mixed Responses output types by call id", () => {
   const normalized = normalizeResponsesPayload({
-    model: "muse-spark-1.3-contributor-free",
+    model: "gpt-5.6-sol",
     input: [
       { type: "function_call_output", call_id: "call_mixed", output: "intermediate" },
       { type: "custom_tool_call_output", call_id: "call_mixed", output: "final" },
@@ -968,23 +968,20 @@ test("deduplicates mixed Responses output types by call id", () => {
   ]);
 });
 
-test("removes internal additional_tools items before forwarding Muse/Mimo history", () => {
+test("removes internal additional_tools items before forwarding Mimo history", () => {
   const input = [
     { type: "additional_tools", tools: [{ type: "function", name: "canvas_open", parameters: { type: "object" } }] },
     { type: "message", role: "user", content: [{ type: "input_text", text: "continue" }] },
   ];
 
-  const muse = normalizeResponsesPayload({ model: "muse-spark-1.3-contributor-free", input });
-  assert.deepEqual(muse.input, [input[1]]);
-  assert.deepEqual(muse.tools, [{
+  const mimo = normalizeResponsesPayload({ model: "mimo-v2.6-flash-free", input });
+  assert.deepEqual(mimo.input, [input[1]]);
+  assert.deepEqual(mimo.tools, [{
     type: "function",
     name: "canvas_open",
     description: "",
     parameters: { type: "object" },
   }]);
-
-  const mimo = normalizeResponsesPayload({ model: "mimo-spark-1.0", input });
-  assert.equal(mimo.input[0].type, "message");
 
   const gpt = normalizeResponsesPayload({ model: "gpt-5.6-sol", input });
   assert.equal(gpt.input[0].type, "additional_tools");
@@ -1251,10 +1248,10 @@ test("routes models cleanly: Claude to /v1/messages, Gemini to gemini endpoint, 
     assert.equal(captured[1].url, "https://gateway.example/v1/responses");
     assert.equal(captured[1].body.model, "gpt-5.6-luna");
 
-    // 3. Muse -> native Responses (verified to support native input_file)
-    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "muse-spark-1.3-contributor-free", input: [] }) });
+    // 3. Mimo -> native Responses
+    await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "mimo-v2.6-flash-free", input: [] }) });
     assert.equal(captured[2].url, "https://gateway.example/v1/responses");
-    assert.equal(captured[2].body.model, "muse-spark-1.3-contributor-free");
+    assert.equal(captured[2].body.model, "mimo-v2.6-flash-free");
 
     // 4. Claude Thinking -> Claude Messages
     await fetch(base + "/v1/responses", { method: "POST", headers, body: JSON.stringify({ model: "claude-opus-4-6-thinking", input: [] }) });
@@ -1555,7 +1552,7 @@ test("preserves additional_tools in input for native Responses models without st
   assert.equal(capturedBody.tools[0].name, "canvas_open");
 });
 
-test("strips additional_tools history items for Muse while retaining top-level tools", async () => {
+test("strips additional_tools history items for Mimo while retaining top-level tools", async () => {
   let capturedBody;
   const fakeFetch = async (url, init) => {
     capturedBody = JSON.parse(init.body);
@@ -1566,7 +1563,7 @@ test("strips additional_tools history items for Muse while retaining top-level t
       method: "POST",
       headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
       body: JSON.stringify({
-        model: "muse-spark-1.3-contributor-free",
+        model: "mimo-v2.6-flash-free",
         input: [
           { type: "additional_tools", tools: [{ type: "function", name: "canvas_open", parameters: { type: "object" } }] },
           { type: "message", role: "user", content: [{ type: "input_text", text: "continue" }] },

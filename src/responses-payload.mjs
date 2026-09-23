@@ -3,10 +3,10 @@ import { responsesToolOutput, safeTextValue } from "./protocol-content.mjs";
 
 const ALLOWED_CONTENT_TYPES = new Set(["input_text", "output_text", "input_image", "input_file"]);
 const VALID_TOOL_NAME = /^[a-zA-Z0-9_-]+$/;
-const MUSE_OR_MIMO_MODEL = /^(?:muse|mimo)-/i;
+const MIMO_MODEL = /^mimo-/i;
 
 function stripsAdditionalToolsFromInput(model) {
-  return typeof model === "string" && MUSE_OR_MIMO_MODEL.test(model);
+  return typeof model === "string" && MIMO_MODEL.test(model);
 }
 
 function safeToolName(value, fallback = "unknown") {

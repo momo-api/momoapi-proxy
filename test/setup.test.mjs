@@ -221,7 +221,7 @@ test("migrateHistory unifies previous session provider to targetProvider", async
 test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other", async () => {
   const { buildCatalog } = await import("../src/catalog.mjs");
   const mockModels = [
-    { id: "muse-spark-1.3-contributor-free", agent_status: "stable" },
+    { id: "mimo-v2.6-flash-free", agent_status: "stable" },
     { id: "deepseek-v4-pro", agent_status: "stable" },
     { id: "gemini-3.7-flash", agent_status: "stable" },
     { id: "claude-opus-4-6-thinking", agent_status: "stable" },
@@ -238,7 +238,7 @@ test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other",
     "claude-opus-4-6-thinking",
     "gemini-3.7-flash",
     "deepseek-v4-pro",
-    "muse-spark-1.3-contributor-free",
+    "mimo-v2.6-flash-free",
   ]);
 });
 

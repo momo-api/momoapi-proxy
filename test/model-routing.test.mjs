@@ -6,7 +6,7 @@ test("model routing preserves provider protocol families", () => {
   const cases = [
     ["gemini-3.8-flash", "gemini"],
     ["claude-opus-4-6-thinking", "claude"],
-    ["muse-creative", "responses"],
+    ["mimo-v2.6-flash-free", "responses"],
     ["gpt-5.6-sol", "responses"],
     ["gpt-5.6-luna", "responses"],
     ["custom-responses", "responses"],

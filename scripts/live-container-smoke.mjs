@@ -41,11 +41,11 @@ async function runCodexPrompt(model, prompt) {
 }
 
 try {
-  console.log("[3/6] Testing live Muse model (muse-spark-1.2-contributor-free)...");
-  const out0 = await runCodexPrompt("muse-spark-1.2-contributor-free", "Reply with exactly: MOMO_MUSE_LIVE_OK");
+  console.log("[3/6] Testing live Mimo model (mimo-v2.6-flash-free)...");
+  const out0 = await runCodexPrompt("mimo-v2.6-flash-free", "Reply with exactly: MOMO_MIMO_LIVE_OK");
   console.log("  Output 0 snippet:", out0.slice(0, 150).replace(/\n/g, " "));
-  if (!out0.includes("MOMO_MUSE_LIVE_OK")) throw new Error("Muse response missing expected text");
-  console.log("  -> Muse Spark 1.2: PASS");
+  if (!out0.includes("MOMO_MIMO_LIVE_OK")) throw new Error("Mimo response missing expected text");
+  console.log("  -> Mimo 2.6: PASS");
 
   console.log("[4/6] Testing live Responses model (deepseek-v4-pro)...");
   const out1 = await runCodexPrompt("deepseek-v4-pro", "Reply with exactly: MOMO_DEEPSEEK_LIVE_OK");
