@@ -968,6 +968,28 @@ test("deduplicates mixed Responses output types by call id", () => {
   ]);
 });
 
+test("removes internal additional_tools items before forwarding Muse/Mimo history", () => {
+  const input = [
+    { type: "additional_tools", tools: [{ type: "function", name: "canvas_open", parameters: { type: "object" } }] },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "continue" }] },
+  ];
+
+  const muse = normalizeResponsesPayload({ model: "muse-spark-1.3-contributor-free", input });
+  assert.deepEqual(muse.input, [input[1]]);
+  assert.deepEqual(muse.tools, [{
+    type: "function",
+    name: "canvas_open",
+    description: "",
+    parameters: { type: "object" },
+  }]);
+
+  const mimo = normalizeResponsesPayload({ model: "mimo-spark-1.0", input });
+  assert.equal(mimo.input[0].type, "message");
+
+  const gpt = normalizeResponsesPayload({ model: "gpt-5.6-sol", input });
+  assert.equal(gpt.input[0].type, "additional_tools");
+});
+
 test("promotes a signed current-turn MOMO asset reference to a compact HTTPS vision input", async () => {
   const home = mkdtempSync(join(tmpdir(), "momo-vision-url-"));
   const pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2mYQAAAAASUVORK5CYII=";
@@ -1530,6 +1552,32 @@ test("preserves additional_tools in input for native Responses models without st
 
   assert.equal(capturedBody.input[0].type, "additional_tools");
   assert.equal(capturedBody.input[0].tools[0].name, "canvas_open");
+  assert.equal(capturedBody.tools[0].name, "canvas_open");
+});
+
+test("strips additional_tools history items for Muse while retaining top-level tools", async () => {
+  let capturedBody;
+  const fakeFetch = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return new Response("event: response.completed\ndata: {}\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer local-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "muse-spark-1.3-contributor-free",
+        input: [
+          { type: "additional_tools", tools: [{ type: "function", name: "canvas_open", parameters: { type: "object" } }] },
+          { type: "message", role: "user", content: [{ type: "input_text", text: "continue" }] },
+        ],
+      }),
+    });
+    assert.equal(response.status, 200);
+  });
+
+  assert.equal(capturedBody.input[0].type, "message");
+  assert.equal(capturedBody.input[0].content[0].text, "continue");
   assert.equal(capturedBody.tools[0].name, "canvas_open");
 });
 
