@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.7 - 2026-09-23
+
+- Deduplicate repeated `function_call_output` and `custom_tool_call_output` entries by `call_id` before Responses forwarding, retaining the latest polling result so Muse/Mimo receives exactly one output per tool call.
+
 ## 0.14.6 - 2026-09-23
 
 - Normalize invalid historical `function_call.name` and `custom_tool_call.name` values before Responses forwarding so upstream tool-name validation accepts long-lived sessions.
