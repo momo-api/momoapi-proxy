@@ -12,7 +12,7 @@ const collect = async (source) => { const values = []; for await (const value of
 
 test("output policy defaults and invalid fields cannot remove safety bounds", () => {
   const defaults = resolveOutputPolicy();
-  assert.equal(defaults.maxStreamMb, 64); assert.equal(defaults.maxRetainedMb, 16);
+  assert.deepEqual(defaults, { maxStreamMb: 256, maxRetainedMb: 64, maxEvents: 262144, maxItems: 65536, maxCallCacheMb: 256 });
   assert.deepEqual(resolveOutputPolicy({ outputPolicy: { maxStreamMb: 0, maxRetainedMb: Infinity, maxEvents: -1, maxItems: "unlimited" } }), defaults);
 });
 
