@@ -15,6 +15,11 @@ test("model routing preserves provider protocol families", () => {
   for (const [model, protocol] of cases) assert.deepEqual(resolveTargetModel(model), { targetModel: model, protocol });
 });
 
+test("muse routing is restricted to muse-auto", () => {
+  assert.deepEqual(resolveTargetModel("muse-auto"), { targetModel: "muse-auto", protocol: "muse" });
+  assert.deepEqual(resolveTargetModel("muse-avocado-5.14"), { targetModel: "muse-avocado-5.14", protocol: "chat" });
+});
+
 test("model routing preserves the empty-string fallback", () => {
   assert.deepEqual(resolveTargetModel(""), { targetModel: "", protocol: "chat" });
 });
