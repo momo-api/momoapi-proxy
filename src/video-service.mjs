@@ -3,6 +3,7 @@ import { resolveImageReferenceDataUrls } from "./image-service.mjs";
 
 const VIDEO_MODEL_IDS = new Set([
   "momoapi-gemini-omni-flash",
+  "momoapi-veo-3-1-fast",
   "momoapi-veo-3-1-lite",
   "momoapi-kling-3-standard",
 ]);
@@ -11,6 +12,7 @@ export const VIDEO_CAPABILITIES = {
   version: 1,
   models: [
     { id: "momoapi-gemini-omni-flash", display_name: "MOMO Gemini Omni Flash", modality: "video", available: false },
+    { id: "momoapi-veo-3-1-fast", display_name: "MOMO Veo 3.1 Fast", modality: "video", available: false },
     { id: "momoapi-veo-3-1-lite", display_name: "MOMO Veo 3.1 Lite", modality: "video", available: false },
     { id: "momoapi-kling-3-standard", display_name: "MOMO Kling 3 Standard", modality: "video", available: false },
   ],
@@ -77,7 +79,7 @@ export async function resolveVideoCapabilities({ settings, fetchImpl = fetch, si
       .filter((model) => model?.modality === "video" && VIDEO_MODEL_IDS.has(model.id))
       .map(publicCapability);
     if (models.length) capabilities.models = models;
-    const preferred = ["momoapi-gemini-omni-flash", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"];
+    const preferred = ["momoapi-gemini-omni-flash", "momoapi-veo-3-1-fast", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"];
     capabilities.defaults.model = preferred.find((id) => models.some((model) => model.id === id && model.available !== false)) || models[0]?.id || capabilities.defaults.model;
     capabilities.catalog_status = "available";
   } catch {

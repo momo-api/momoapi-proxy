@@ -9,7 +9,7 @@ function text(value) {
   return { type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) };
 }
 
-const LEGACY_MODELS = ["momoapi-gemini-omni-flash", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"];
+const LEGACY_MODELS = ["momoapi-gemini-omni-flash", "momoapi-veo-3-1-fast", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"];
 
 function unions(capabilities, key) {
   return [...new Set((capabilities?.models || []).filter((model) => model.available !== false).flatMap((model) => model?.limits?.[key] || []))];
@@ -68,7 +68,7 @@ export async function runVideoMcp() {
     try { request = JSON.parse(line); } catch { continue; }
     if (request.method === "notifications/initialized" || request.method === "notifications/cancelled") continue;
     if (request.method === "initialize") {
-      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-video", version: "0.1.1" } } }) + "\n");
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: request.params?.protocolVersion || "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "momo-video", version: "0.1.2" } } }) + "\n");
       continue;
     }
     try {

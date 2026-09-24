@@ -5,6 +5,8 @@ description: Generate text-to-video or image-to-video tasks with MOMO video mode
 
 # MOMO Video
 
+The production catalog includes `momoapi-veo-3-1-fast` as a video route. Select it only when `video_capabilities` reports it as available; the catalog remains authoritative for exact controls.
+
 Use the MCP tools from this plugin. The local proxy keeps the MOMO credential out of tool arguments.
 
 1. Call `video_capabilities` before choosing model-specific controls. Treat its returned duration, aspect ratio, resolution, audio, reference-image, availability, and operation fields as authoritative.
