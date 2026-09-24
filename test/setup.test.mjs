@@ -249,6 +249,7 @@ test("catalog excludes known media models even when upstream omits modality", as
     { id: "momoapi-gemini-nano-banana-3", agent_status: "stable" },
     { id: "momoapi-gemini-omni-flash", agent_status: "stable" },
     { id: "momoapi-kling-3-standard", agent_status: "stable" },
+    { id: "momoapi-veo-3-1-fast", agent_status: "stable" },
     { id: "momoapi-veo-3-1-lite", agent_status: "stable" },
     { id: "provider-image-model", agent_status: "stable" },
     { id: "provider-video-model", modality: "video", agent_status: "stable" },
