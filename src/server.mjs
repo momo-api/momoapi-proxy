@@ -51,6 +51,7 @@ import { resolveTargetModel as resolveModelRoute } from "./model-routing.mjs";
 import { contextLogFields, recordContextTrace as applyContextTrace } from "./context-trace.mjs";
 import { isAuthorizedLoopbackRequest, isLoopbackAddress, localRequestToken } from "./internal-auth.mjs";
 import { commitProviderRoute, observeProviderRoute } from "./provider-switch-state.mjs";
+import { bridgeMuseResponses } from "./muse-adapter.mjs";
 
 export const metricsState = {
   startedAt: Date.now(),
@@ -1171,6 +1172,7 @@ export function createMomoSwitch(settings, options = {}) {
           handlerPromise = forwardCompactionTrigger(request, response, settings, routedPayload, fetchImpl, abortController.signal, compactLocks);
         } else if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal, replay, imageAssetStore);
         else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal);
+        else if (protocol === "muse") handlerPromise = bridgeMuseResponses(request, response, settings, routedPayload, fetchImpl, abortController.signal);
         else if (protocol === "gemini") handlerPromise = bridgeGemini(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
         else handlerPromise = bridgeClaude(response, settings, routedPayload, calls, fetchImpl, abortController.signal);
 
