@@ -12,6 +12,9 @@ function capabilityPayload() {
     { id: "momoapi-gemini-omni-flash", modality: "video", role: "primary", available: true, operations: ["generate", "image_to_video", "style_reference"], parameters: {
       duration: { allowed: [3, 4, 5, 6, 7, 8, 9, 10], default: 4 }, generate_audio: { allowed: [false], default: false }, max_reference_images: { maximum: 2 },
     } },
+    { id: "momoapi-veo-3-1-fast", modality: "video", role: "primary", available: true, operations: ["generate"], parameters: {
+      duration: { allowed: [4, 6, 8], default: 4 }, aspect_ratio: { allowed: ["16:9", "9:16"], default: "16:9" }, resolution: { allowed: ["720p", "1080p"], default: "720p" }, generate_audio: { allowed: [true, false], default: true }, max_reference_images: { maximum: 0 },
+    } },
     { id: "momoapi-veo-3-1-lite", modality: "video", role: "primary", available: true, operations: ["generate", "image_to_video", "style_reference"], parameters: {
       duration: { allowed: [4, 6, 8], default: 4 }, aspect_ratio: { allowed: ["16:9", "9:16"], default: "16:9" }, resolution: { allowed: ["720p", "1080p"], default: "720p" }, generate_audio: { allowed: [true, false], default: true }, max_reference_images: { maximum: 2 },
     } },
@@ -25,6 +28,7 @@ test("uses authenticated video capabilities and exposes exact parameter schemas"
   const capabilities = await resolveVideoCapabilities({ settings, fetchImpl: async () => new Response(JSON.stringify(capabilityPayload()), { status: 200 }) });
   const byId = Object.fromEntries(capabilities.models.map((model) => [model.id, model]));
   assert.equal(capabilities.defaults.model, "momoapi-gemini-omni-flash");
+  assert.equal(byId["momoapi-veo-3-1-fast"].modality, "video");
   assert.deepEqual(byId["momoapi-veo-3-1-lite"].limits.durations, [4, 6, 8]);
   assert.deepEqual(byId["momoapi-veo-3-1-lite"].parameter_schema.resolution.allowed, ["720p", "1080p"]);
   assert.deepEqual(byId["momoapi-gemini-omni-flash"].limits.generate_audio, [false]);
@@ -85,7 +89,7 @@ test("polls video status and returns the Adobe remote URL without fetching it", 
 test("builds MCP enums from the live video capability response", async () => {
   const capabilities = await resolveVideoCapabilities({ settings, fetchImpl: async () => new Response(JSON.stringify(capabilityPayload()), { status: 200 }) });
   const generate = videoToolDefs(capabilities).find((tool) => tool.name === "video_generate");
-  assert.deepEqual(generate.inputSchema.properties.model.enum, ["momoapi-gemini-omni-flash", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"]);
+  assert.deepEqual(generate.inputSchema.properties.model.enum, ["momoapi-gemini-omni-flash", "momoapi-veo-3-1-fast", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"]);
   assert.deepEqual(generate.inputSchema.properties.duration.enum, [3, 4, 5, 6, 7, 8, 9, 10, 15]);
   assert.deepEqual(generate.inputSchema.properties.resolution.enum, ["720p", "1080p"]);
   assert.equal(generate.inputSchema.properties.reference_images.maxItems, 2);

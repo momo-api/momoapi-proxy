@@ -1,6 +1,6 @@
 {
   "name": "momo-video",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Generate videos through the local MOMO API Proxy with dynamic model capabilities and remote output URLs.",
   "author": {
     "name": "MOMO API"
