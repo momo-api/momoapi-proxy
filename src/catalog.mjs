@@ -170,6 +170,7 @@ const MEDIA_ONLY_MODEL_IDS = new Set([
   "momoapi-gemini-nano-banana-3",
   "momoapi-gemini-omni-flash",
   "grok-imagine-image-lite",
+  "momoapi-veo-3-1-fast",
   "momoapi-veo-3-1-lite",
   "momoapi-kling-3-standard",
 ]);
