@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.13 - 2026-09-25
+
+- Preserve native Responses compaction for Codex models: forward `/v1/responses/compact` and `compaction_trigger` unchanged instead of replacing them with local checkpoints.
+- Keep local checkpoint and compact fallback behavior for third-party protocol adapters.
+
 ## 0.14.9 - 2026-09-23
 
 - Remove retired Muse routing and live-test coverage while routing Mimo 2.6 through its native Responses path.
