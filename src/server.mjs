@@ -176,7 +176,14 @@ function compactJson(response, status, body, headers = {}) {
   return json(response, status, body, headers);
 }
 
-async function forwardCompact(request, response, settings, payload, fetchImpl, signal, compactLocks) {
+/**
+ * Forward a standalone compact request.
+ *
+ * Native Responses clients (including Codex) own their compaction state
+ * machine.  Do not replace their compact request with a local checkpoint;
+ * local compaction remains a compatibility path for third-party adapters.
+ */
+async function forwardCompact(request, response, settings, payload, fetchImpl, signal, compactLocks, { nativeResponses = false } = {}) {
   const key = compactLockKey(request, payload);
   if (key && compactLocks.has(key)) {
     return compactJson(response, 409, { error: { message: "A compaction is already active for this session.", type: "conflict_error", code: "compaction_in_progress" } }, { "retry-after": "1" });
@@ -186,6 +193,22 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
   metricsState.compactRequests += 1;
   metricsState.activeCompactions += 1;
   try {
+    if (nativeResponses) {
+      const upstream = await fetchImpl(settings.endpoint + "/v1/responses/compact", {
+        method: "POST",
+        headers: upstreamHeaders(settings),
+        body: JSON.stringify(payload),
+        signal,
+      });
+      if (upstream.ok) {
+        const text = await readCompactResponseText(upstream);
+        return compactJson(response, upstream.status, parseCompactResponseText(text));
+      }
+      const message = await upstreamErrorMessage(upstream);
+      metricsState.compactFailures += 1;
+      return compactJson(response, upstream.status, { error: { message, type: "compact_error", code: `http_${upstream.status}` } });
+    }
+
     if (prefersLocalCompaction(settings)) {
       const checkpoint = buildLocalCompactResponse(payload.model, payload.input);
       response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
@@ -1129,7 +1152,10 @@ export function createMomoSwitch(settings, options = {}) {
         if (!payload.model) {
           return json(response, 400, { error: { message: "model is required", type: "invalid_request_error" } });
         }
-        await forwardCompact(request, response, settings, payload, fetchImpl, abortController.signal, compactLocks);
+        const { protocol } = resolveTargetModel(payload.model);
+        await forwardCompact(request, response, settings, payload, fetchImpl, abortController.signal, compactLocks, {
+          nativeResponses: protocol === "responses",
+        });
         const compactTrace = response.momoCompactTrace;
         logRequest({ method: "POST", url: pathname, model: requestedModel, status: response.statusCode || 200, elapsedMs: Date.now() - t0, ip: remoteIp, requestBytes: request.momoRequestBodyBytes, outboundBytes: compactTrace?.compactBytes, policyAction: compactTrace?.policyAction });
         return;
@@ -1168,7 +1194,7 @@ export function createMomoSwitch(settings, options = {}) {
         response.on("close", () => activeSseEmitters.delete(sseHandle));
 
         let handlerPromise;
-        if (asArray(routedPayload.input).some((item) => item?.type === "compaction_trigger")) {
+        if (asArray(routedPayload.input).some((item) => item?.type === "compaction_trigger") && protocol !== "responses") {
           handlerPromise = forwardCompactionTrigger(request, response, settings, routedPayload, fetchImpl, abortController.signal, compactLocks);
         } else if (protocol === "responses") handlerPromise = forwardResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal, replay, imageAssetStore);
         else if (protocol === "chat") handlerPromise = bridgeChatCompletionsToResponses(request, response, settings, routedPayload, calls, fetchImpl, abortController.signal);

@@ -359,17 +359,33 @@ test("a tool-result-only continuation is current data and is never checkpointed 
   assert.equal(result.payload.input[0], toolResult);
 });
 
-test("compact endpoint defaults to local checkpoint without an upstream model call", async () => {
+test("third-party compact endpoint defaults to local checkpoint without an upstream model call", async () => {
   let fetchCalls = 0;
   await withServer(async () => { fetchCalls++; return new Response("unexpected", { status: 500 }); }, async (base) => {
     const response = await fetch(`${base}/v1/responses/compact`, {
       method: "POST", headers: authHeaders(),
-      body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "keep this task" }] }),
+      body: JSON.stringify({ model: "gpt-5.5", input: [{ role: "user", content: "keep this task" }] }),
     });
     assert.equal(response.status, 200);
     assert.match(JSON.stringify(await response.json()), /keep this task/);
   }, { compactionMode: "local" });
   assert.equal(fetchCalls, 0);
+});
+
+test("native Responses compact endpoint forwards the exact Codex request upstream", async () => {
+  let captured;
+  const fakeFetch = async (url, init) => {
+    captured = { url: String(url), body: JSON.parse(init.body) };
+    return Response.json({ id: "cmp_native", object: "response.compaction", output: [] });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const payload = { model: "gpt-5.6-sol", stream: true, previous_response_id: "resp_native", input: [{ role: "user", content: "keep exact native payload" }] };
+    const response = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders({ "thread-id": "native-compact" }), body: JSON.stringify(payload) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, "cmp_native");
+    assert.equal(captured.url, "https://gateway.example/v1/responses/compact");
+    assert.deepEqual(captured.body, payload);
+  });
 });
 
 test("repeated local compaction keeps only the latest user request as the active task", () => {
@@ -497,12 +513,12 @@ test("compact rejects an oversized upstream response without buffering it unboun
   });
 });
 
-test("compact endpoint returns a recoverable local checkpoint when upstream lacks compact", async () => {
+test("third-party compact endpoint returns a recoverable local checkpoint when upstream lacks compact", async () => {
   const fakeFetch = async () => Response.json({ error: { message: "unknown compact endpoint" } }, { status: 404 });
   await withServer(fakeFetch, async (base) => {
     const response = await fetch(`${base}/v1/responses/compact`, {
       method: "POST", headers: authHeaders(),
-      body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "repair the proxy" }] }),
+      body: JSON.stringify({ model: "gpt-5.5", input: [{ role: "user", content: "repair the proxy" }] }),
     });
     assert.equal(response.status, 200);
     const body = await response.json();
@@ -549,7 +565,7 @@ test("same-session compactions are mutually exclusive", async () => {
   assert.equal(calls, 1);
 });
 
-test("compaction_trigger emits one replayable compaction item", async () => {
+test("third-party compaction_trigger emits one replayable compaction item", async () => {
   const compactOutput = [{ type: "message", role: "user", content: [{ type: "input_text", text: "canonical checkpoint" }] }];
   const upstreamBodies = [];
   const fakeFetch = async (url, init) => {
@@ -561,7 +577,7 @@ test("compaction_trigger emits one replayable compaction item", async () => {
   await withServer(fakeFetch, async (base) => {
     const compact = await fetch(`${base}/v1/responses`, {
       method: "POST", headers: authHeaders({ "thread-id": "thread-v2" }),
-      body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input: [{ role: "user", content: "old context" }, { type: "compaction_trigger" }] }),
+      body: JSON.stringify({ model: "gpt-5.5", stream: true, input: [{ role: "user", content: "old context" }, { type: "compaction_trigger" }] }),
     });
     const events = (await compact.text()).split("\n").filter((line) => line.startsWith("data: "))
       .map((line) => JSON.parse(line.slice(6)));
@@ -583,11 +599,29 @@ test("compaction_trigger emits one replayable compaction item", async () => {
   assert.doesNotMatch(JSON.stringify(upstreamBodies[1].body.input), /momo1:/);
 });
 
-test("compaction_trigger falls back to a bounded checkpoint when upstream compact output is huge", async () => {
+test("native Responses compaction_trigger stays on the native Responses route", async () => {
+  let captured;
+  const fakeFetch = async (url, init) => {
+    captured = { url: String(url), body: JSON.parse(init.body) };
+    return new Response(responseSse("resp_native_trigger", []), { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await withServer(fakeFetch, async (base) => {
+    const response = await fetch(`${base}/v1/responses`, {
+      method: "POST", headers: authHeaders({ "thread-id": "native-trigger" }),
+      body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input: [{ role: "user", content: "continue" }, { type: "compaction_trigger" }] }),
+    });
+    assert.equal(response.status, 200);
+    await response.text();
+  });
+  assert.equal(captured.url, "https://gateway.example/v1/responses");
+  assert.ok(captured.body.input.some((item) => item.type === "compaction_trigger"));
+});
+
+test("third-party compaction_trigger falls back to a bounded checkpoint when upstream compact output is huge", async () => {
   const hugeOutput = [{ id: "msg_huge", type: "message", role: "user", content: [{ type: "input_text", text: "A".repeat(2 * 1024 * 1024) }] }];
   const fakeFetch = async () => Response.json({ id: "cmp_huge", object: "response.compaction", output: hugeOutput });
   await withServer(fakeFetch, async (base) => {
-    const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "retain this request" }, { type: "compaction_trigger" }] }) });
+    const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.5", input: [{ role: "user", content: "retain this request" }, { type: "compaction_trigger" }] }) });
     assert.equal(response.status, 200);
     const events = (await response.text()).split("\n").filter((line) => line.startsWith("data: "))
       .map((line) => JSON.parse(line.slice(6)));
