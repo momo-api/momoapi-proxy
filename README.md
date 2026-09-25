@@ -339,15 +339,20 @@ calls. Final parsing, output budgets and existing tolerant partial-input semanti
 are unchanged. See npm run benchmark:incremental-stream -- --baseline-root=...
 for an explicit clean-baseline, sequential A/B comparison.
 When one Codex thread switches protocol families (Responses, Chat, Gemini, or
-Claude), histories above 192 KiB use the same continuity-safe local checkpoint
-before conversion. This avoids replaying a large provider-specific transcript
-that cannot reuse the previous provider's response state or prompt cache. The
-checkpoint retains constraints, the active task, pending calls, complete call/result
-pairs, recent execution evidence, and dynamically loaded tools. Ordinary requests
-still use the 512 KiB historical replay threshold. Optional non-secret overrides
-are `contextPolicy.providerSwitchReplayMb` (0.0625-2) or
-`MOMO_PROVIDER_SWITCH_REPLAY_MB`; restart is required. Local metrics and bounded
-request logs expose only aggregate byte savings and a 16-hex anonymous thread hash.
+Claude), the proxy converts the request to the target protocol. It does not
+checkpoint or byte-trim that history by default; Codex owns normal conversation
+compaction. An opt-in emergency replay guard can replace older history with a
+lossy local checkpoint before conversion when the serialized request exceeds an
+explicit limit. Set `contextPolicy.providerSwitchReplayMb` (0.0625-2) or
+`MOMO_PROVIDER_SWITCH_REPLAY_MB` to guard provider switches. The ordinary replay
+guard is also opt-in: `contextPolicy.maxHistoricalReplayMb` (0.0625-8) or
+`MOMO_MAX_HISTORICAL_REPLAY_MB`. The ordinary guard also applies on provider
+switches unless a more specific switch limit is set. A restart is required for
+configuration changes. Checkpoints retain constraints, the current task, pending
+calls, complete call/result pairs, recent execution evidence, and dynamically
+loaded tools, but are not a lossless replacement for provider-native state.
+Local metrics and bounded request logs expose only aggregate byte savings and
+a 16-hex anonymous thread hash.
 Chat/Gemini/Claude
 custom-input normalization recognizes unified-exec host helper calls such as
 text(...), image(...), and store(...) as JavaScript rather than wrapping them as
@@ -385,7 +390,19 @@ Long-running Responses clients may use either official compact mode:
 }
 ```
 
-or `POST /v1/responses/compact`. Compaction defaults to a local recoverable checkpoint, so old history is not sent to or billed by an upstream model. Set `MOMO_COMPACTION_MODE=upstream` only when upstream semantic compaction is explicitly wanted. The upstream mode has an independent 32 MiB default budget (`MOMO_COMPACT_BODY_LIMIT_MB`, capped at 64 MiB), validates the returned `response.compaction`, caps the upstream response at 32 MiB, and safely markerizes old binary history before dispatch. Codex v2 local compaction envelopes are capped at 1 MiB and fall back to the fixed checkpoint when needed. Ordinary model-switch replays larger than 512 KiB are also replaced with a local history checkpoint while the current user turn is preserved; customize that ceiling with `MOMO_MAX_HISTORICAL_REPLAY_MB`. Model, authentication, quota and server errors are never converted into a fake compact success.
+or `POST /v1/responses/compact`. For native Responses routes, both explicit
+compact requests and `compaction_trigger` are forwarded to the upstream native
+route; the proxy does not substitute its own checkpoint or turn an upstream
+failure into fake success. For third-party protocol adapters only, explicit
+compact defaults to a local recoverable checkpoint. Set
+`MOMO_COMPACTION_MODE=upstream` to request upstream semantic compaction on those
+routes. This mode has an independent 32 MiB default budget
+(`MOMO_COMPACT_BODY_LIMIT_MB`, capped at 64 MiB), validates the returned
+`response.compaction`, caps the upstream response at 32 MiB, and markerizes old
+binary history before dispatch. Third-party local compaction envelopes are
+capped at 1 MiB and fall back to a fixed checkpoint when needed. Authentication,
+quota and server errors are never converted into a fake compact success. The
+optional historical replay guards above are separate from explicit compaction.
 
 `previous_response_id` continuation is conservative: for native Responses routes, the proxy drops a repeated transcript only after an exact complete-prefix match crosses a recorded provider-output boundary containing a provider-issued item id. Partial or ambiguous matches, model changes, `store:false`, and non-Responses routes fail open and remain untouched. Continuation fingerprints are SHA-256 hashes, bounded, and memory-only.
 
