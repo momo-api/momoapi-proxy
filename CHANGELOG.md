@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.13 - 2026-09-26
+
+- Normalize bare shell commands emitted by Mimo 2.6 for the Codex unified
+  `exec` tool, allowing local commands to execute instead of being rejected as
+  invalid JavaScript.
+- Restrict the normalization to `mimo-*` Responses traffic so other model
+  routes retain their existing tool-input behavior.
+
 ## 0.14.9 - 2026-09-23
 
 - Remove retired Muse routing and live-test coverage while routing Mimo 2.6 through its native Responses path.
