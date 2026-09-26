@@ -470,7 +470,10 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   const responseState = collectResponsesState(response, replay, settings);
 
   const allCustomNames = new Set(["exec", "apply_patch", ...customNames, ...searchNames]);
-  const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames, settings);
+  const customToolBlockRewrite = createRoutedCustomToolRestoreBlockRewrite(allCustomNames, {
+    ...settings,
+    normalizeExecInput: /^mimo-/i.test(cleanPayload.model || ""),
+  });
   const functions = extractFunctions(payload);
   let hasDsml = false;
   const dsmlDetector = new DsmlMarkerDetector();

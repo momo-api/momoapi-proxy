@@ -3,6 +3,7 @@
 import { sseDataPayload, replaceSseDataPayload } from "./stream-transport.mjs";
 import { RetainedOutputBudget } from "./output-budget.mjs";
 import { PartialCustomInputDecoder, PendingToolArguments } from "./incremental-stream-state.mjs";
+import { customInput } from "./tool-call-state.mjs";
 
 export const BUILTIN_FUNCTIONS_NAMESPACE = "functions";
 export const ROUTED_CUSTOM_TOOL_PASSTHROUGH = new Set(["apply_patch"]);
@@ -384,11 +385,11 @@ export function rewriteRoutedCustomToolsForUpstream(body) {
   return { body: { ...rewriteCustomForUpstream(rest, conversionNames, callIds), ...(choice !== undefined ? { tool_choice: rewriteSelector(choice) } : {}) }, names: conversionNames };
 }
 
-export function restoreRoutedCustomCalls(value, names) {
+export function restoreRoutedCustomCalls(value, names, options = {}) {
   if (Array.isArray(value)) {
     let changed = false;
     const restored = value.map((entry) => {
-      const result = restoreRoutedCustomCalls(entry, names);
+      const result = restoreRoutedCustomCalls(entry, names, options);
       changed ||= result.changed;
       return result.value;
     });
@@ -399,7 +400,7 @@ export function restoreRoutedCustomCalls(value, names) {
   let changed = false;
   const restored = {};
   for (const [key, entry] of Object.entries(value)) {
-    const result = restoreRoutedCustomCalls(entry, names);
+    const result = restoreRoutedCustomCalls(entry, names, options);
     restored[key] = result.value;
     changed ||= result.changed;
   }
@@ -407,7 +408,8 @@ export function restoreRoutedCustomCalls(value, names) {
   if (value.type === "function_call" && typeof value.name === "string" && names.has(value.name)) {
     restored.type = "custom_tool_call";
     restored.id = customToolItemId(value.id);
-    restored.input = customToolInput(value.arguments);
+    const input = customToolInput(value.arguments);
+    restored.input = options.normalizeExecInput && value.name === "exec" ? customInput(input) : input;
     delete restored.arguments;
     changed = true;
   }
@@ -538,7 +540,7 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
       if (upstreamItemId && pending.length > 0 && !openCalls.has(upstreamItemId)) {
         openCalls.set(upstreamItemId, newOpenCall());
       }
-      const restored = restoreRoutedCustomCalls(parsed, names);
+      const restored = restoreRoutedCustomCalls(parsed, names, settings);
       const restoredBlock = restored.changed
         ? replaceSseDataPayload(block, JSON.stringify(restored.value))
         : block;
@@ -593,12 +595,14 @@ export function createRoutedCustomToolRestoreBlockRewrite(names, settings = {}) 
         ...rest,
         type: nextType,
         item_id: customToolItemId(upstreamItemId),
-        input: unwrapRoutedCustomToolArguments(source),
+        input: settings.normalizeExecInput && itemNames.get(upstreamItemId) === "exec"
+          ? customInput(unwrapRoutedCustomToolArguments(source))
+          : unwrapRoutedCustomToolArguments(source),
       };
       return [replaceSseDataPayload(replaceSseEventName(block, nextType), JSON.stringify(next))];
     }
 
-    const restored = restoreRoutedCustomCalls(parsed, names);
+    const restored = restoreRoutedCustomCalls(parsed, names, settings);
     const terminal = type === "response.completed" || type === "response.failed" || type === "response.incomplete";
     const terminalPending = [];
     if (type === "response.completed" && pendingArguments.size && Array.isArray(parsed.response?.output)) {

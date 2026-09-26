@@ -150,6 +150,20 @@ test("responses-compat: custom tool lowering and restoration (exec)", () => {
   assert.equal(parsed.item.arguments, undefined);
 });
 
+test("responses-compat: normalizes bare shell input from routed exec calls", () => {
+  const restored = restoreRoutedCustomCalls({
+    type: "function_call",
+    id: "fc_exec",
+    call_id: "call_exec",
+    name: "exec",
+    arguments: JSON.stringify({ input: "echo mimo-ok" }),
+  }, new Set(["exec"]), { normalizeExecInput: true });
+
+  assert.equal(restored.changed, true);
+  assert.equal(restored.value.type, "custom_tool_call");
+  assert.equal(restored.value.input, 'await tools.exec_command({ cmd: "echo mimo-ok" });');
+});
+
 test("responses-compat: createRoutedCustomToolRestoreBlockRewrite stream events", () => {
   const customNames = new Set(["exec"]);
   const rewrite = createRoutedCustomToolRestoreBlockRewrite(customNames);
@@ -201,4 +215,22 @@ test("responses-compat: createRoutedCustomToolRestoreBlockRewrite stream events"
   assert.equal(parsed3.type, "response.custom_tool_call_input.done");
   assert.equal(parsed3.item_id, "ctc_1");
   assert.equal(parsed3.input, "tools.exec_command({cmd:'ls'})");
+});
+
+test("responses-compat: normalizes bare shell input in routed exec done events", () => {
+  const rewrite = createRoutedCustomToolRestoreBlockRewrite(new Set(["exec"]), { normalizeExecInput: true });
+  rewrite('event: response.output_item.added\ndata: ' + JSON.stringify({
+    type: "response.output_item.added",
+    output_index: 0,
+    item: { type: "function_call", id: "fc_shell", name: "exec", arguments: "" },
+  }));
+  const output = rewrite('event: response.function_call_arguments.done\ndata: ' + JSON.stringify({
+    type: "response.function_call_arguments.done",
+    item_id: "fc_shell",
+    output_index: 0,
+    arguments: JSON.stringify({ input: "echo mimo-ok" }),
+  }));
+
+  const parsed = JSON.parse(output[0].split("\ndata: " )[1]);
+  assert.equal(parsed.input, 'await tools.exec_command({ cmd: "echo mimo-ok" });');
 });
