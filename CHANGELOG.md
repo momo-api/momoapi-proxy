@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.15 - 2026-09-27
+
+- Add fail-closed native compaction capability gating and opt-in routed text/tool-history pilots; no model is enabled for native compaction by default.
+- Preserve developer constraints and paired tool evidence in the routed pilot, and protect its persistent signing key with verified Windows ACLs.
+- Fix repeated local checkpoint handling so completed historical requests are not reactivated.
+- Experimental limitation: Codex CLI 0.156.0's observed manual compaction uses ordinary `/v1/responses` summary turns, not `/v1/responses/compact`. Isolated continuity tests do not establish a fix for existing long production sessions; keep routed pilots disabled unless separately evaluated.
+
 ## 0.14.14 - 2026-09-27
 
 - Remove synthetic desktop model slots from proxy catalog setup and sync; list only upstream-returned model IDs.
