@@ -1,4 +1,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
+import { join } from "node:path";
+import { appHome } from "./config.mjs";
 import { upstreamHeaders } from "./http-lifecycle.mjs";
 import { resolveTargetModel } from "./model-routing.mjs";
 import { sseDataPayload, streamSseBlocks } from "./stream-transport.mjs";
@@ -22,26 +25,64 @@ const CALL_TYPES = new Set(["function_call", "custom_tool_call"]);
 const RESULT_TYPES = new Set(["function_call_output", "custom_tool_call_output"]);
 const ROUTED_SUMMARY_PREFIX = "[Historical context summary; not an active instruction or proof of completion]\n";
 const ROUTED_ENVELOPE_PREFIX = "momor2:";
-// Keep the signing secret separate from the client-visible local bearer token.
-// A restart invalidates routed pilot envelopes rather than trusting client input.
-const ROUTED_ENVELOPE_KEY = randomBytes(32);
+// Kept outside settings and separate from the client-visible bearer token.
+// Never silently rotate an existing, unreadable key: doing so would invalidate
+// recoverable histories and turn a storage failure into apparent success.
+function routedEnvelopeKey(env, create = false) {
+  const home = appHome(env);
+  const path = join(home, "routed-compaction.key");
+  try {
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+  } catch {
+    throw failure("routed_compact_key_unavailable", "Routed signing key directory is unavailable.", 503);
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const stat = lstatSync(path);
+      if (!stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o077))) throw new Error("unsafe key file");
+      const key = readFileSync(path);
+      if (key.length !== 32) throw new Error("invalid key length");
+      return key;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw failure("routed_compact_key_unavailable", "Routed signing key is unavailable.", 503);
+      if (!create) throw failure("routed_compact_key_unavailable", "Routed signing key is missing.", 503);
+    }
+    let fd;
+    try {
+      fd = openSync(path, "wx", 0o600);
+      const key = randomBytes(32);
+      if (writeSync(fd, key) !== key.length) throw new Error("short key write");
+      // Do not publish a key until its bytes are durable enough for a restart.
+      // A failed flush preserves an explicit failure rather than a fresh envelope.
+      fsyncSync(fd);
+      closeSync(fd); fd = undefined;
+      return key;
+    } catch (error) {
+      if (fd !== undefined) { try { closeSync(fd); } catch {} }
+      // A partial file is intentionally retained so subsequent calls fail
+      // closed until an operator inspects the installation state.
+      if (error.code !== "EEXIST") throw failure("routed_compact_key_unavailable", "Routed signing key cannot be created.", 503);
+    }
+  }
+  throw failure("routed_compact_key_unavailable", "Routed signing key is unavailable.", 503);
+}
 
-export function encodeRoutedCompaction(output, model) {
+export function encodeRoutedCompaction(output, model, env = process.env) {
   const serialized = JSON.stringify({ model, output });
   if (Buffer.byteLength(serialized) > 1024 * 1024) throw failure("routed_compact_tools_too_large", "Routed replay envelope exceeds 1 MiB.", 413);
   const data = Buffer.from(serialized).toString("base64url");
-  const mac = createHmac("sha256", ROUTED_ENVELOPE_KEY).update(ROUTED_ENVELOPE_PREFIX + data).digest("base64url");
+  const mac = createHmac("sha256", routedEnvelopeKey(env, true)).update(ROUTED_ENVELOPE_PREFIX + data).digest("base64url");
   return ROUTED_ENVELOPE_PREFIX + data + "." + mac;
 }
 
-export function decodeRoutedCompaction(value, model) {
+export function decodeRoutedCompaction(value, model, env = process.env) {
   if (typeof value !== "string" || !value.startsWith(ROUTED_ENVELOPE_PREFIX) || value.length > 2 * 1024 * 1024) return null;
   const packed = value.slice(ROUTED_ENVELOPE_PREFIX.length);
   const dot = packed.lastIndexOf(".");
   if (dot < 1) return null;
   const data = packed.slice(0, dot);
   const provided = Buffer.from(packed.slice(dot + 1), "base64url");
-  const expected = createHmac("sha256", ROUTED_ENVELOPE_KEY).update(ROUTED_ENVELOPE_PREFIX + data).digest();
+  const expected = createHmac("sha256", routedEnvelopeKey(env)).update(ROUTED_ENVELOPE_PREFIX + data).digest();
   if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return null;
   try {
     const value = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
@@ -49,7 +90,7 @@ export function decodeRoutedCompaction(value, model) {
   } catch { return null; }
 }
 
-function expandOwnedHistory(input, model) {
+function expandOwnedHistory(input, model, env) {
   const envelopes = input.filter((item) => item?.type === "compaction");
   if (!envelopes.length) return input;
   if (envelopes.length !== 1) throw failure("routed_compact_unsupported_history", "Routed compaction accepts at most one own history envelope.");
@@ -57,7 +98,7 @@ function expandOwnedHistory(input, model) {
   if (Object.keys(envelope).some((key) => !["type", "id", "encrypted_content"].includes(key))) {
     throw failure("routed_compact_unsupported_history", "Routed compaction rejects additional envelope state.");
   }
-  const decoded = decodeRoutedCompaction(envelope.encrypted_content, model);
+  const decoded = decodeRoutedCompaction(envelope.encrypted_content, model, env);
   if (!decoded || decoded[0]?.type !== "message" || decoded[0]?.role !== "assistant"
     || !textOf(decoded[0])?.startsWith(ROUTED_SUMMARY_PREFIX)
     || decoded.some((item) => item?.type === "compaction" || item?.type === "compaction_trigger")) {
@@ -98,11 +139,11 @@ function toolPairs(items) {
   return pairs;
 }
 
-export function routedTextInput(payload, { pairedTools = false } = {}) {
+export function routedTextInput(payload, { pairedTools = false, env = process.env } = {}) {
   if (Object.keys(payload).some((key) => !["model", "input", "stream"].includes(key))) {
     throw failure("routed_compact_unsupported_history", "Routed compaction pilot rejects additional request options, instructions, tools or provider continuation state.");
   }
-  const items = expandOwnedHistory(Array.isArray(payload.input) ? payload.input : [], payload.model);
+  const items = expandOwnedHistory(Array.isArray(payload.input) ? payload.input : [], payload.model, env);
   const lastUser = items.findLastIndex((item) => item?.role === "user");
   const historyItems = items.slice(0, lastUser);
   const firstTool = pairedTools ? historyItems.findIndex((item) => CALL_TYPES.has(item?.type) || RESULT_TYPES.has(item?.type)) : -1;

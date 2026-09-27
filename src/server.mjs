@@ -194,7 +194,7 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
     }
     if (["routed", "routed-tools"].includes(compactionPolicy(settings))) {
       try {
-        const compacted = await routedTextCompaction(settings, payload, fetchImpl, signal, { pairedTools: compactionPolicy(settings) === "routed-tools" });
+        const compacted = await routedTextCompaction(settings, payload, fetchImpl, signal, { pairedTools: compactionPolicy(settings) === "routed-tools", env: settings.routedEnvelopeEnv });
         response.momoCompactTrace = { policyAction: "routed_text_compact" };
         return compactJson(response, 200, compacted);
       } catch (error) {
@@ -280,17 +280,17 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
     if (["routed", "routed-tools"].includes(compactionPolicy(settings))) {
       let compacted;
       try {
-        compacted = await routedTextCompaction(settings, compactPayload, fetchImpl, signal, { pairedTools: compactionPolicy(settings) === "routed-tools" });
+        compacted = await routedTextCompaction(settings, compactPayload, fetchImpl, signal, { pairedTools: compactionPolicy(settings) === "routed-tools", env: settings.routedEnvelopeEnv });
       } catch (error) {
         metricsState.compactFailures += 1;
         response.momoCompactTrace = { policyAction: error.code || "routed_compact_failed" };
         return writeResponsesFailure(response, payload.model, error.statusCode || 502, error.message, error.code || "routed_compact_failed");
       }
       let encryptedContent;
-      try { encryptedContent = encodeRoutedCompaction(compacted.output, payload.model); }
+      try { encryptedContent = encodeRoutedCompaction(compacted.output, payload.model, settings.routedEnvelopeEnv); }
       catch (error) {
         metricsState.compactFailures += 1;
-        return writeResponsesFailure(response, payload.model, 413, "Routed compaction output exceeds replay envelope limit.", error.code);
+        return writeResponsesFailure(response, payload.model, error.statusCode || 502, error.message, error.code);
       }
       response.momoCompactTrace = { policyAction: "routed_text_compact" };
       initSseResponse(response);
@@ -493,7 +493,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   // Restore local envelopes before lowering: recovered calls need the same
   // custom/namespace conversion as ordinary client history.
   payload = { ...payload, input: asArray(payload.input).flatMap((item) =>
-    item?.type === "compaction" ? (decodeRoutedCompaction(item.encrypted_content, payload.model)
+    item?.type === "compaction" ? (decodeRoutedCompaction(item.encrypted_content, payload.model, settings.routedEnvelopeEnv || process.env)
       || decodeLocalCompaction(item.encrypted_content) || [item]) : [item]) };
   // 1. Lower tool_search to standard function
   const { body: searchBody, names: searchNames } = rewriteRoutedToolSearchForUpstream(payload);
@@ -757,6 +757,8 @@ async function forwardChatCompletions(request, response, settings, payload, fetc
 export function createMomoSwitch(settings, options = {}) {
   const { fetchImpl = fetch, exitImpl = process.exit, assetStore, attachmentAssetStore: suppliedAttachmentAssetStore } = options;
   const runtimeEnv = options.env || process.env;
+  settings = { ...settings };
+  Object.defineProperty(settings, "routedEnvelopeEnv", { value: runtimeEnv });
   const ownsLoggingRuntime = !options.loggingRuntime;
   const loggingRuntime = options.loggingRuntime || (options.loggingRuntimeFactory || createLoggingRuntime)({
     env: runtimeEnv, diagnosticsEnabled: settings.diagnosticsEnabled, consoleMirror: false,
@@ -1234,14 +1236,14 @@ export function createMomoSwitch(settings, options = {}) {
         }
         const routedPayload = replay.payload;
 
-        // A routed pilot envelope cannot be replayed by another model or after
-        // its process-only signing key changes. Never forward it as unknown
+        // A routed pilot envelope cannot be replayed by another model or when
+        // its signing key is unavailable. Never forward it as unknown
         // provider state (or decode it as legacy momo1).
         if (asArray(routedPayload.input).some((item) => item?.type === "compaction"
           && typeof item.encrypted_content === "string" && item.encrypted_content.startsWith("momor2:")
-          && !decodeRoutedCompaction(item.encrypted_content, routedPayload.model))) {
+          && !decodeRoutedCompaction(item.encrypted_content, routedPayload.model, runtimeEnv))) {
           return writeResponsesFailure(response, routedPayload.model, 409,
-            "Routed compact history cannot be verified for this model and proxy process. Start a new task with an explicit handoff.",
+            "Routed compact history cannot be verified for this model and proxy installation. Start a new task with an explicit handoff.",
             "routed_compact_envelope_unavailable");
         }
 
@@ -1329,6 +1331,15 @@ export function createMomoSwitch(settings, options = {}) {
 
       if (error.code === "tool_continuation_unavailable") {
         return json(response, 409, { error: { message: error.message, type: "invalid_request_error", code: error.code } });
+      }
+
+      if (error.code === "routed_compact_key_unavailable") {
+        const status = 503;
+        logRequest({ method: request.method, url: pathname, model: requestedModel, status, elapsedMs: Date.now() - t0, error: error.message, errorCode: error.code, ip: remoteIp });
+        if (pathname === "/v1/responses" || pathname === "/responses") {
+          return writeResponsesFailure(response, requestedModel || "unknown", status, error.message, error.code);
+        }
+        return json(response, status, { error: { message: error.message, type: "server_error", code: error.code } });
       }
 
       if (error.statusCode === 400) {
