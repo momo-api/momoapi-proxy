@@ -134,7 +134,6 @@ export async function setup({
   endpoint,
   port = 18789,
   autostart = true,
-  desktopAliases = true,
   imagePlugin = true,
   imagePluginInstaller = installBundledImagePlugin,
   autostartInstaller = installAutostart,
@@ -151,7 +150,6 @@ export async function setup({
     port,
     localToken,
     autostart: Boolean(autostart),
-    desktopAliases: Boolean(desktopAliases),
     updateCheckEnabled: true,
     updateMode: "automatic",
     autoUpdateEnabled: true,
@@ -187,7 +185,7 @@ export async function setup({
     candidates.find((m) => (m.agent_status || m.agentStatus) === "stable")?.id ||
     candidates[0]?.id;
   if (!defaultModel) throw new Error("MOMO returned no Codex-compatible models.");
-  writeCatalog(models, env, { includeDesktopAliases: desktopAliases });
+  writeCatalog(models, env);
   const finalConfig = managedConfig(catalog, port, defaultModel, cleanedOther) + "\n";
   writeFileSync(config, finalConfig);
   writeFileSync(auth, JSON.stringify({

@@ -140,9 +140,7 @@ test("setup exposes the verified Ox model when the agent catalog falls back to /
     const oxModel = catalog.models.find((m) => m.slug === "ox-alpha-free");
     assert.ok(oxModel);
     assert.equal(oxModel.visibility, "list");
-    assert.ok(catalog.models.some((m) => m.slug === "gpt-5.6-sol"));
-    assert.ok(catalog.models.some((m) => m.slug === "gpt-5.6-terra"));
-    assert.ok(catalog.models.some((m) => m.slug === "gpt-5.6-luna"));
+    assert.deepEqual(catalog.models.map((m) => m.slug), ["ox-alpha-free"]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -218,6 +216,16 @@ test("migrateHistory unifies previous session provider to targetProvider", async
   rmSync(root, { recursive: true, force: true });
 });
 
+test("catalog only lists upstream models, never synthetic desktop compatibility slots", async () => {
+  const { buildCatalog } = await import("../src/catalog.mjs");
+  const catalog = buildCatalog([
+    { id: "gpt-5.5", agent_status: "stable" },
+    { id: "deepseek-v4-pro", agent_status: "stable" },
+  ]);
+  assert.deepEqual(catalog.models.map((model) => model.slug), ["gpt-5.5", "deepseek-v4-pro"]);
+  assert.ok(catalog.models.every((model) => !model.description.includes("Desktop Compatibility Slot")));
+});
+
 test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other", async () => {
   const { buildCatalog } = await import("../src/catalog.mjs");
   const mockModels = [
@@ -229,7 +237,7 @@ test("catalog sorting prioritizes gpt -> claude -> gemini -> deepseek -> other",
     { id: "codex-auto-review", agent_status: "stable" },
     { id: "gpt-5.4", agent_status: "stable" },
   ];
-  const catalog = buildCatalog(mockModels, { includeDesktopAliases: false });
+  const catalog = buildCatalog(mockModels);
   const slugs = catalog.models.map((m) => m.slug);
   assert.deepEqual(slugs, [
     "codex-auto-review",
@@ -253,7 +261,7 @@ test("catalog excludes known media models even when upstream omits modality", as
     { id: "momoapi-veo-3-1-lite", agent_status: "stable" },
     { id: "provider-image-model", agent_status: "stable" },
     { id: "provider-video-model", modality: "video", agent_status: "stable" },
-  ], { includeDesktopAliases: false });
+  ]);
   assert.deepEqual(catalog.models.map((model) => model.slug), ["gpt-5.5"]);
 });
 
@@ -264,7 +272,7 @@ test("catalog uses one compact cross-provider instruction source", async () => {
     { id: "claude-opus-4-6-thinking", agent_status: "stable" },
     { id: "gemini-3.7-flash", agent_status: "stable" },
     { id: "deepseek-v4-pro", agent_status: "stable" },
-  ], { includeDesktopAliases: false });
+  ]);
 
   for (const model of catalog.models) {
     const instructions = model.base_instructions;
@@ -286,7 +294,7 @@ test("catalog leaves compaction to Codex unless the upstream model declares a li
     { id: "gpt-default", agent_status: "stable" },
     { id: "gpt-explicit", agent_status: "stable", auto_compact_token_limit: 234567 },
     { id: "gpt-explicit-camel", agent_status: "stable", autoCompactTokenLimit: 210000 },
-  ], { includeDesktopAliases: false });
+  ]);
 
   const bySlug = new Map(catalog.models.map((model) => [model.slug, model]));
   assert.equal("auto_compact_token_limit" in bySlug.get("gpt-default"), false);

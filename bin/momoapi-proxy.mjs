@@ -182,7 +182,7 @@ async function main() {
         process.exit(1);
       }
       console.log("\n正在为您自动配置 Codex 与模型目录...");
-      const result = await setup({ apiKey: enteredKey, endpoint: "https://momoapi.us", port, autostart: true, desktopAliases: true, imagePlugin: true });
+      const result = await setup({ apiKey: enteredKey, endpoint: "https://momoapi.us", port, autostart: true, imagePlugin: true });
       console.log("✅ [1/4] 已写入 Codex 配置: ~/.codex/config.toml (Provider: momoapi-proxy)");
       console.log("✅ [2/4] 已同步模型目录: " + result.models + " 个模型 (默认: " + result.defaultModel + ")");
       imagePluginResult = result.imagePlugin;
@@ -244,11 +244,10 @@ async function main() {
     const endpoint = value("--endpoint");
     const port = Number(value("--port") || 18789);
     const autostart = !hasFlag("--no-autostart");
-    const desktopAliases = !hasFlag("--no-desktop-aliases");
     const imagePlugin = !hasFlag("--no-image-plugin");
 
     console.log("正在配置 MOMO API Proxy...");
-    const result = await setup({ apiKey, endpoint, port, autostart, desktopAliases, imagePlugin });
+    const result = await setup({ apiKey, endpoint, port, autostart, imagePlugin });
     const desktop = installWindowsDesktop({ port, autostart });
     console.log("MOMO API Proxy 配置成功！");
     console.log("  - 上游端点: " + (endpoint || "https://momoapi.us"));
@@ -536,7 +535,6 @@ async function main() {
     const res = await syncCatalog({
       apiKey: settings.apiKey,
       endpoint: settings.endpoint,
-      desktopAliases: settings.desktopAliases,
     });
     console.log("Sync completed. Total models: " + res.count + " (catalog " + (res.changed ? "updated" : "unchanged") + ").");
   } else if (command === "doctor") {
@@ -637,7 +635,7 @@ async function main() {
       const currentCliPath = fileURLToPath(import.meta.url);
       const settings = resolveSettings();
       if (action === "proxy" && !existsSync(catalogPath())) {
-        await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint, desktopAliases: settings.desktopAliases });
+        await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint });
       }
       const result = switchCodexRoute(action, { cliPath: resolveInstalledCliPath(currentCliPath), settings });
       console.log("Codex route switched to " + action + ": " + result.baseUrl);
@@ -664,7 +662,7 @@ async function main() {
     if (res.updated) {
       console.log(res.message);
       console.log("Syncing model catalogs...");
-      try { await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint, desktopAliases: settings.desktopAliases }); } catch {}
+      try { await syncCatalog({ apiKey: settings.apiKey, endpoint: settings.endpoint }); } catch {}
       console.log("Update package verified. The proxy will restart in the background; the previous version will be restored automatically if startup fails.");
       try {
         const supervisor = res.supervisorPath || join(res.rootDir, "src", "update-supervisor.mjs");
