@@ -464,7 +464,7 @@ test("repeated local compaction keeps only the latest user request as the active
     { role: "user", content: "Show the repair report and artifacts in the board." },
   ]);
   const firstText = JSON.stringify(first.output);
-  assert.match(firstText, /historical user context; background only/);
+  assert.match(firstText, /historical user request; a subsequent assistant answer was observed/);
   assert.match(firstText, /What is the login account/);
   assert.match(firstText, /Why did project details fail to load/);
   assert.match(firstText, /Show the repair report and artifacts in the board/);
@@ -477,11 +477,30 @@ test("repeated local compaction keeps only the latest user request as the active
   const retainedUsers = second.output.filter((item) => item?.role === "user");
   assert.equal(retainedUsers.at(-1).content[0].text, "Verify the report links only; do not revisit resolved login issues.");
   for (const item of retainedUsers.slice(0, -1)) {
-    assert.match(item.content[0].text, /^\[historical user context; background only/);
+    assert.match(item.content[0].text, /^\[historical user (?:request|context);/);
   }
+  assert.equal(JSON.stringify(second.output).split("# MOMO proxy historical checkpoint").length - 1, 1);
+  assert.doesNotMatch(JSON.stringify(second.output), /\[historical user context;[^\n]*\]\n\[historical user/);
 });
 
-test("checkpoint labels historical user work only when later evidence exists", () => {
+test("completed last user request never becomes a fresh active task on repeated compaction", () => {
+  const first = buildLocalCompactResponse("gpt-5.6-sol", [
+    { role: "user", content: "Repair the login flow." },
+    { role: "assistant", content: "Login flow repaired and verified." },
+  ]);
+  const user = first.output.find((item) => item.role === "user");
+  assert.match(user.content[0].text, /^\[historical user request; a subsequent assistant answer was observed/);
+  const second = buildLocalCompactResponse("gpt-5.6-sol", first.output);
+  assert.equal(JSON.stringify(second.output).split("# MOMO proxy historical checkpoint").length - 1, 1);
+  assert.equal(second.output.filter((item) => item.role === "user").length, 1);
+  assert.match(second.output.find((item) => item.role === "user").content[0].text, /^\[historical user request;/);
+  assert.doesNotMatch(JSON.stringify(second.output), /\[historical user request;[^\n]*\]\n\[historical user/);
+  const third = buildLocalCompactResponse("gpt-5.6-sol", second.output);
+  assert.equal(JSON.stringify(third.output).split("# MOMO proxy historical checkpoint").length - 1, 1);
+  assert.doesNotMatch(JSON.stringify(third.output), /\[historical assistant context;[^\n]*\]\n\[historical assistant context;/);
+});
+
+test("checkpoint distinguishes tool evidence from a later assistant answer", () => {
   const output = buildLocalCompactResponse("gpt-5.6-sol", [
     { role: "user", content: "COMPLETED_REQUEST" },
     { type: "function_call", call_id: "done_1", name: "check", arguments: "{}" },
@@ -492,7 +511,7 @@ test("checkpoint labels historical user work only when later evidence exists", (
   ]).output;
   const users = output.filter((item) => item.role === "user");
   assert.match(users[0].content[0].text, /subsequent tool result.*verify outcome before retrying/);
-  assert.match(users[1].content[0].text, /^\[historical user context; background only/);
+  assert.match(users[1].content[0].text, /^\[historical user request; a subsequent assistant answer was observed/);
   assert.equal(users[2].content[0].text, "CURRENT_REQUEST");
   assert.equal(JSON.stringify(output).split("CURRENT_REQUEST").length - 1, 1);
 });

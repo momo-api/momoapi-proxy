@@ -270,7 +270,7 @@ function fixedCheckpoint(input, { currentTurnAuthoritative = false } = {}) {
     `- Prior assistant/tool-call items: ${completed}`,
     `- Prior tool-output items: ${toolOutputs}`,
     "- This block is historical context only. It does not define the active task.",
-    "- The active task is the last real user message retained after this checkpoint.",
+    "- A retained user request is active only if it has not already received a subsequent assistant answer; otherwise await the next user turn.",
     "- Historical binary attachments and oversized tool outputs were intentionally omitted.",
     "- This lossy history index is not a user request or evidence that a tool executed.",
     "- Follow retained system/developer constraints and the active task. Retained tool results are execution evidence.",
@@ -286,10 +286,11 @@ function compactHistoricalAssistant(item, { currentTurnAuthoritative = false } =
   const prefix = currentTurnAuthoritative
     ? "[historical completed assistant answer; supporting context only; do not repeat unless the active task asks]\n"
     : "[historical assistant context; not the active task]\n";
+  const stripExistingPrefix = (text) => text.replace(/^(?:\[historical (?:completed assistant answer|assistant context);[^\n]*\]\n)+/, "");
   if (typeof compacted?.content === "string") {
     const text = currentTurnAuthoritative
-      ? trimMiddleText(compacted.content, GEMINI_HISTORICAL_ASSISTANT_CHARS)
-      : compacted.content;
+      ? trimMiddleText(stripExistingPrefix(compacted.content), GEMINI_HISTORICAL_ASSISTANT_CHARS)
+      : stripExistingPrefix(compacted.content);
     compacted.content = prefix + text;
     return compacted;
   }
@@ -297,8 +298,8 @@ function compactHistoricalAssistant(item, { currentTurnAuthoritative = false } =
     const textPart = compacted.content.find((part) => part && typeof part === "object" && typeof part.text === "string");
     if (textPart) {
       const text = currentTurnAuthoritative
-        ? trimMiddleText(textPart.text, GEMINI_HISTORICAL_ASSISTANT_CHARS)
-        : textPart.text;
+        ? trimMiddleText(stripExistingPrefix(textPart.text), GEMINI_HISTORICAL_ASSISTANT_CHARS)
+        : stripExistingPrefix(textPart.text);
       textPart.text = prefix + text;
     }
     else compacted.content.unshift({ type: "output_text", text: prefix.trimEnd() });
@@ -316,8 +317,28 @@ function hasFollowingCompletionEvidence(items, index) {
   return false;
 }
 
-function compactHistoricalUser(item, { currentTurnAuthoritative = false, completionEvidence = false } = {}) {
-  const original = itemText(item);
+function isLocalCheckpoint(item) {
+  return item?.role === "assistant" && itemText(item).startsWith("# MOMO proxy historical checkpoint\n");
+}
+
+function isHistoricalUser(item) {
+  return /^\[historical user (?:request|context);/.test(itemText(item));
+}
+
+function hasRecordedCompletion(item) {
+  return itemText(item).startsWith("[historical user request;");
+}
+
+function hasFollowingAssistantResponse(items, index) {
+  for (let next = index + 1; next < items.length; next++) {
+    if (isUserItem(items[next])) return false;
+    if (items[next]?.role === "assistant" && !isLocalCheckpoint(items[next]) && itemText(items[next]).trim()) return true;
+  }
+  return false;
+}
+
+function compactHistoricalUser(item, { currentTurnAuthoritative = false, completionEvidence = false, assistantResponse = false } = {}) {
+  const original = itemText(item).replace(/^\[historical user (?:request|context);[^\n]*\]\n/, "");
   const text = currentTurnAuthoritative
     ? trimMiddleText(original, GEMINI_HISTORICAL_USER_CHARS)
     : original;
@@ -328,6 +349,8 @@ function compactHistoricalUser(item, { currentTurnAuthoritative = false, complet
       type: "input_text",
       text: (completionEvidence
         ? "[historical user request; subsequent tool result or completed assistant turn was observed; this is not a pending instruction; verify outcome before retrying]\n"
+        : assistantResponse
+          ? "[historical user request; a subsequent assistant answer was observed; this is not a pending instruction; verify outcome before retrying]\n"
         : "[historical user context; background only unless the current active task explicitly reopens it]\n") + text,
     }],
   };
@@ -345,7 +368,9 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
   }
   // In the Gemini replay profile the real current turn is appended outside this
   // historical slice, so every user message here is supporting history.
-  const activeUserIndex = currentTurnAuthoritative ? -1 : latestUserIndex;
+  const activeUserIndex = currentTurnAuthoritative || (latestUserIndex >= 0
+    && (isHistoricalUser(items[latestUserIndex]) || hasFollowingAssistantResponse(items, latestUserIndex)))
+    ? -1 : latestUserIndex;
   const selected = new Map();
   const groups = new Map();
   const historicalUserIndices = items
@@ -375,12 +400,19 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
   // Keep instruction roles and task text intact; never silently tail-slice them.
   for (let index = 0; index < items.length; index++) {
     const item = items[index];
+    // Regenerate this index from the current input rather than nesting prior
+    // proxy checkpoints on every client-initiated compaction.
+    if (isLocalCheckpoint(item)) continue;
     if (item?.type === "additional_tools") add([[index, item]], true);
     if (isUserItem(item) || item?.role === "developer" || item?.role === "system") {
       const text = item?.type === "input_text" ? item.text : itemText(item);
       if (text && (!isUserItem(item) || index === activeUserIndex || retainedHistoricalUsers.has(index))) {
         const retained = isUserItem(item) && index !== activeUserIndex
-          ? compactHistoricalUser(item, { currentTurnAuthoritative, completionEvidence: hasFollowingCompletionEvidence(items, index) })
+          ? compactHistoricalUser(item, {
+            currentTurnAuthoritative,
+            completionEvidence: hasFollowingCompletionEvidence(items, index) || hasRecordedCompletion(item),
+            assistantResponse: hasFollowingAssistantResponse(items, index),
+          })
           : { type: "message", role: item?.role || "user", content: [{ type: "input_text", text }] };
         add([[index, retained]], true);
       }
@@ -413,7 +445,7 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
   }
   let retainedAssistant = 0;
   for (let index = items.length - 1; index >= 0 && retainedAssistant < 1; index--) {
-    if (items[index]?.role !== "assistant") continue;
+    if (items[index]?.role !== "assistant" || isLocalCheckpoint(items[index])) continue;
     add([[index, compactHistoricalAssistant(items[index], { currentTurnAuthoritative })]], false);
     retainedAssistant++;
   }
