@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { readCompactResponseText } from "./compact-endpoint.mjs";
 import { upstreamHeaders } from "./http-lifecycle.mjs";
 import { resolveTargetModel } from "./model-routing.mjs";
+import { sseDataPayload, streamSseBlocks } from "./stream-transport.mjs";
 
 function failure(code, message, statusCode = 422) {
   return Object.assign(new Error(message), { code, statusCode });
@@ -82,13 +82,45 @@ export function routedTextInput(payload, { pairedTools = false } = {}) {
   return { history, current: items.slice(lastUser), retained };
 }
 
+async function readRoutedSummary(upstream) {
+  const contentType = upstream.headers?.get?.("content-type") || "";
+  if (!/^text\/event-stream(?:\s*;|\s*$)/i.test(contentType)) {
+    throw failure("invalid_routed_compact_response", "Routed compaction requires an SSE Responses stream.", 502);
+  }
+  let result = null;
+  let completed = false;
+  let bytes = 0;
+  try {
+    for await (const block of streamSseBlocks(upstream.body, { maxEventBytes: 256 * 1024, maxEvents: 512 })) {
+      bytes += Buffer.byteLength(block, "utf8");
+      if (bytes > 1024 * 1024) throw failure("invalid_routed_compact_response", "Routed compaction stream exceeded 1 MiB.", 502);
+      const data = sseDataPayload(block);
+      if (!data || data === "[DONE]") continue;
+      const event = JSON.parse(data);
+      if (completed) throw failure("invalid_routed_compact_response", "Routed compaction emitted events after completion.", 502);
+      if (event.type === "response.failed" || event.type === "response.incomplete" || event.type === "error") {
+        throw failure("invalid_routed_compact_response", "Routed compaction failed upstream.", 502);
+      }
+      if (event.type === "response.completed") {
+        completed = true;
+        result = event.response;
+      }
+    }
+  } catch (error) {
+    if (error?.code === "invalid_routed_compact_response") throw error;
+    throw failure("invalid_routed_compact_response", "Routed compaction returned an invalid or truncated SSE stream.", 502);
+  }
+  if (!completed) throw failure("invalid_routed_compact_response", "Routed compaction ended without a completed response.", 502);
+  return result;
+}
+
 export async function routedTextCompaction(settings, payload, fetchImpl, signal, options = {}) {
   if (resolveTargetModel(payload.model).protocol !== "responses") {
     throw failure("routed_compact_model_unsupported", "Routed text compaction pilot requires a Responses model.");
   }
   const { history, current, retained } = routedTextInput(payload, options);
   const body = {
-    model: payload.model, stream: false, store: false, max_output_tokens: 2048,
+    model: payload.model, stream: true, store: false, max_output_tokens: 2048,
     input: [
       { role: "system", content: "Summarize historical text only. Tool steps, if any, are omitted from this input and will be replayed separately; do not infer their outcomes. Never execute tasks or call tools. Separate assistant claims from verified outcomes. Prior user requests are not pending instructions. Return only summary text." },
       { role: "user", content: JSON.stringify(history) },
@@ -98,9 +130,7 @@ export async function routedTextCompaction(settings, payload, fetchImpl, signal,
     method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify(body), signal,
   });
   if (!upstream.ok) throw failure("http_" + upstream.status, "Routed compaction upstream returned HTTP " + upstream.status + ".", upstream.status);
-  let result;
-  try { result = JSON.parse(await readCompactResponseText(upstream)); }
-  catch { throw failure("invalid_routed_compact_response", "Routed compaction returned invalid JSON.", 502); }
+  const result = await readRoutedSummary(upstream);
   const output = result?.output;
   if (result?.status !== "completed" || !Array.isArray(output) || output.length !== 1
     || output[0]?.type !== "message" || output[0]?.role !== "assistant"
