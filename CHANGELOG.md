@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.14 - 2026-09-27
+
+- Remove synthetic desktop model slots from proxy catalog setup and sync; list only upstream-returned model IDs.
+- Fail closed with structured error when Muse patch-only bridge cannot execute ordinary agent tools.
+- Mark historical requests with later execution or explicit completion evidence as non-pending in local compaction checkpoints.
+
 ## 0.14.13 - 2026-09-26
 
 - Normalize bare shell commands emitted by Mimo 2.6 for the Codex unified
