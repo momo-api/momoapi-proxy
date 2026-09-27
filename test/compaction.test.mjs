@@ -397,6 +397,85 @@ test("unconfigured compaction fails closed while ordinary requests still reach u
   assert.equal(calls, 1);
 });
 
+test("explicit routed text pilot summarizes history with no tools and preserves the current turn on v1/v2 replay", async () => {
+  const sent = [];
+  const fakeFetch = async (url, init) => {
+    sent.push({ url, body: JSON.parse(init.body) });
+    if (sent.length <= 2) return Response.json({ status: "completed", output: [
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Prior answer was observed; completion not independently verified." }] },
+    ] });
+    return new Response(responseSse("resp_after_routed", []), { headers: { "content-type": "text/event-stream" } });
+  };
+  const input = [
+    { role: "user", content: "Old task" }, { role: "assistant", content: "I finished the old task" },
+    { role: "user", content: "Only audit the new task" },
+  ];
+  await withServer(fakeFetch, async (base) => {
+    const v1 = await fetch(base + "/v1/responses/compact", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input }) });
+    assert.equal(v1.status, 200);
+    const output = (await v1.json()).output;
+    assert.match(JSON.stringify(output[0]), /not an active instruction/);
+    assert.deepEqual(output[1], input.at(-1));
+    const v2 = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [...input, { type: "compaction_trigger" }] }) });
+    const events = (await v2.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
+    const item = events.find((event) => event.type === "response.output_item.done")?.item;
+    assert.equal(item.type, "compaction");
+    assert.deepEqual(decodeLocalCompaction(item.encrypted_content), output);
+    const followup = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [item, { role: "user", content: "New followup" }] }) });
+    assert.equal(followup.status, 200);
+    await followup.text();
+    assert.match(JSON.stringify(sent[2].body.input), /Prior answer was observed/);
+  }, { compactionMode: "routed" });
+  assert.equal(sent.length, 3);
+  for (const request of sent.slice(0, 2)) {
+    assert.equal(request.url, "https://gateway.example/v1/responses");
+    assert.equal(request.body.stream, false);
+    assert.equal(request.body.store, false);
+    assert.equal(request.body.tools, undefined);
+    assert.doesNotMatch(JSON.stringify(request.body), /Only audit the new task/);
+  }
+});
+
+test("routed text pilot rejects tools and invalid summaries rather than fabricating success", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; return Response.json({ status: "completed", output: [] }); }, async (base) => {
+    const send = (input) => fetch(base + "/v1/responses/compact", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input }) });
+    const unsupported = await send([{ role: "user", content: "Old" }, { type: "function_call", call_id: "call_1", name: "exec", arguments: "{}" }, { role: "user", content: "New" }]);
+    assert.equal(unsupported.status, 422);
+    assert.equal((await unsupported.json()).error.code, "routed_compact_unsupported_history");
+    assert.equal(calls, 0);
+    const configuredTools = await fetch(base + "/v1/responses/compact", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", tools: [{ type: "function", name: "exec" }], input: [{ role: "user", content: "Old" }, { role: "user", content: "New" }] }),
+    });
+    assert.equal(configuredTools.status, 422);
+    assert.equal(calls, 0);
+    const invalid = await send([{ role: "user", content: "Old" }, { role: "user", content: "New" }]);
+    assert.equal(invalid.status, 502);
+    assert.equal((await invalid.json()).error.code, "invalid_routed_compact_response");
+    assert.equal(calls, 1);
+  }, { compactionMode: "routed" });
+});
+
+test("routed pilot propagates upstream throttling once and rejects managed auto-compaction", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; return Response.json({ error: { message: "rate limited" } }, { status: 429 }); }, async (base) => {
+    const input = [{ role: "user", content: "Old" }, { role: "user", content: "New" }];
+    const compact = await fetch(base + "/v1/responses/compact", {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input }),
+    });
+    assert.equal(compact.status, 429);
+    assert.equal((await compact.json()).error.code, "http_429");
+    assert.equal(calls, 1);
+    const managed = await fetch(base + "/v1/responses", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input, context_management: [{ type: "compaction" }] }),
+    });
+    assert.match(await managed.text(), /compact_capability_unverified/);
+    assert.equal(calls, 1);
+  }, { compactionMode: "routed" });
+});
+
 test("native compact refuses unverified capability without contacting upstream", async () => {
   let calls = 0;
   await withServer(async () => { calls++; throw new Error("unexpected upstream"); }, async (base) => {

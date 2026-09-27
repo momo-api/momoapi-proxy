@@ -23,6 +23,7 @@ import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
 import { buildLocalCompactResponse, compactLockKey, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "./compaction.mjs";
 import { compactUnsupportedError, encodeRecoverableCompaction, isReplayableNativeCompactOutput, nativeCompactCapability, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
+import { routedTextCompaction } from "./routed-compaction.mjs";
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { generateVideo, getVideoTask, resolveVideoCapabilities } from "./video-service.mjs";
@@ -191,6 +192,17 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
       response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
       return compactJson(response, 200, checkpoint);
     }
+    if (compactionPolicy(settings) === "routed") {
+      try {
+        const compacted = await routedTextCompaction(settings, payload, fetchImpl, signal);
+        response.momoCompactTrace = { policyAction: "routed_text_compact" };
+        return compactJson(response, 200, compacted);
+      } catch (error) {
+        metricsState.compactFailures += 1;
+        response.momoCompactTrace = { policyAction: error.code || "routed_compact_failed" };
+        return compactJson(response, error.statusCode || 502, { error: { message: error.message, type: "compact_error", code: error.code || "routed_compact_failed" } });
+      }
+    }
     const strict = compactionPolicy(settings) !== "upstream";
     if (strict && !nativeCompactCapability(settings, payload.model)) {
       metricsState.compactFailures += 1;
@@ -262,6 +274,32 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
       const index = emitter.outputIndex++;
       emitter.outputItems.push(item);
       response.write(`event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item })}\n\n`);
+      emitter.complete();
+      return;
+    }
+    if (compactionPolicy(settings) === "routed") {
+      let compacted;
+      try {
+        compacted = await routedTextCompaction(settings, compactPayload, fetchImpl, signal);
+      } catch (error) {
+        metricsState.compactFailures += 1;
+        response.momoCompactTrace = { policyAction: error.code || "routed_compact_failed" };
+        return writeResponsesFailure(response, payload.model, error.statusCode || 502, error.message, error.code || "routed_compact_failed");
+      }
+      let encryptedContent;
+      try { encryptedContent = encodeLocalCompaction(compacted.output); }
+      catch (error) {
+        metricsState.compactFailures += 1;
+        return writeResponsesFailure(response, payload.model, 413, "Routed compaction output exceeds replay envelope limit.", error.code);
+      }
+      response.momoCompactTrace = { policyAction: "routed_text_compact" };
+      initSseResponse(response);
+      const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
+      emitter.start();
+      const item = { type: "compaction", id: "cmp_" + randomUUID(), encrypted_content: encryptedContent };
+      const index = emitter.outputIndex++;
+      emitter.outputItems.push(item);
+      response.write("event: response.output_item.done\ndata: " + JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item }) + "\n\n");
       emitter.complete();
       return;
     }
@@ -470,7 +508,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   response.momoToolAudit.normalized = summarizeToolRequest(cleanPayload);
   const historyReplay = prepareRoutedHistoryReplay(cleanPayload, settings, response);
   const replayPayload = historyReplay.payload;
-  const managedPayload = compactionPolicy(settings) !== "native" && Array.isArray(replayPayload.context_management)
+  const managedPayload = ["local", "upstream"].includes(compactionPolicy(settings)) && Array.isArray(replayPayload.context_management)
     && replayPayload.context_management.some((item) => item?.type === "compaction")
     ? prepareContextManagedPayload(replayPayload)
     : replayPayload;
@@ -1195,10 +1233,10 @@ export function createMomoSwitch(settings, options = {}) {
         }
         const routedPayload = replay.payload;
 
-        if (compactionPolicy(settings) === "native"
+        if (["native", "routed"].includes(compactionPolicy(settings))
           && Array.isArray(routedPayload.context_management)
           && routedPayload.context_management.some((item) => item?.type === "compaction")
-          && !nativeCompactCapability(settings, routedPayload.model)) {
+          && (compactionPolicy(settings) === "routed" || !nativeCompactCapability(settings, routedPayload.model))) {
           metricsState.compactFailures += 1;
           response.momoCompactTrace = { policyAction: "compact_capability_unverified" };
           return writeResponsesFailure(response, routedPayload.model, 422,
