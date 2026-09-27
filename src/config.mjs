@@ -116,7 +116,6 @@ export function resolveSettings(env = process.env) {
     updateMode,
     autoUpdateEnabled: updateMode === "automatic" && saved.autoUpdateEnabled !== false,
     updateCheckIntervalHours: Math.max(1, Number(saved.updateCheckIntervalHours || 12)),
-    desktopAliases: saved.desktopAliases !== false,
     autostart: saved.autostart !== false,
     lastSyncTime: saved.lastSyncTime || null,
     lastSyncStatus: saved.lastSyncStatus || null,

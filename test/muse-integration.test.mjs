@@ -94,4 +94,18 @@ test("Muse upstream failure returns standard Responses failure SSE", async () =>
   });
 });
 
-
+test("Muse function tools fail before upstream instead of silently becoming text", async () => {
+  let upstreamCalls = 0;
+  await withServer(async () => { upstreamCalls++; throw new Error("should not send"); }, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST", headers: { authorization: "Bearer local-key", "content-type": "application/json" },
+      body: JSON.stringify({ ...requestBody(), tools: [{ type: "function", name: "probe_task", parameters: { type: "object" } }] }),
+    });
+    const body = await response.text();
+    assert.equal(response.status, 422);
+    assert.match(body, /response\.failed/);
+    assert.match(body, /muse_tools_unsupported/);
+    assert.doesNotMatch(body, /response\.completed/);
+  });
+  assert.equal(upstreamCalls, 0);
+});

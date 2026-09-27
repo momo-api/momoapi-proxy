@@ -29,36 +29,6 @@ function withCrossProviderInstructions(template) {
   };
 }
 
-export const DESKTOP_COMPATIBILITY_ALIASES = [
-  {
-    slug: "gpt-5.6-sol",
-    targetModel: "deepseek-v4-pro",
-    display_name: "MOMO DeepSeek V4 Pro",
-    description: "MOMO DeepSeek V4 Pro (Desktop Compatibility Slot)",
-    default_reasoning_level: "high",
-    supported_reasoning_levels: [{ effort: "low", description: "Fast" }, { effort: "medium", description: "Balanced" }, { effort: "high", description: "Deep" }],
-    visibility: "list",
-  },
-  {
-    slug: "gpt-5.6-terra",
-    targetModel: "claude-opus-4-6-thinking",
-    display_name: "MOMO Claude Opus 4.6 Thinking",
-    description: "MOMO Claude Opus 4.6 Thinking (Desktop Compatibility Slot)",
-    default_reasoning_level: "high",
-    supported_reasoning_levels: [{ effort: "low", description: "Fast" }, { effort: "medium", description: "Balanced" }, { effort: "high", description: "Deep" }, { effort: "max", description: "Maximum thinking" }],
-    visibility: "list",
-  },
-  {
-    slug: "gpt-5.6-luna",
-    targetModel: "gemini-3.7-flash",
-    display_name: "MOMO Gemini 3.7 Flash",
-    description: "MOMO Gemini 3.7 Flash (Desktop Compatibility Slot)",
-    default_reasoning_level: "high",
-    supported_reasoning_levels: [{ effort: "low", description: "Fast" }, { effort: "medium", description: "Balanced" }, { effort: "high", description: "Deep" }],
-    visibility: "list",
-  },
-];
-
 const EFFORT_DESCRIPTIONS = {
   none: "None",
   minimal: "Minimal",
@@ -246,7 +216,7 @@ export function sortModels(models) {
   });
 }
 
-export function buildCatalog(models, { includeDesktopAliases = true } = {}) {
+export function buildCatalog(models) {
   const template = withCrossProviderInstructions(getBundledTemplate());
   const filtered = (models || [])
     .filter((model) => model?.id && status(model) !== "hidden" && status(model) !== "image" && status(model) !== "video" && !isImageOrNonText(model));
@@ -275,39 +245,6 @@ export function buildCatalog(models, { includeDesktopAliases = true } = {}) {
       supported_reasoning_levels: reasoning.supported_reasoning_levels,
     };
   });
-
-  if (includeDesktopAliases) {
-    const existingSlugs = new Set(items.map((i) => i.slug));
-    for (const alias of DESKTOP_COMPATIBILITY_ALIASES) {
-      if (!existingSlugs.has(alias.slug)) {
-        items.push({
-          ...structuredClone(template),
-          slug: alias.slug,
-          display_name: alias.display_name,
-          description: alias.description,
-          visibility: alias.visibility,
-          priority: 120,
-          tool_mode: "code_mode_only",
-          supported_in_api: true,
-          support_verbosity: true,
-          default_verbosity: "low",
-          default_reasoning_level: alias.default_reasoning_level,
-          supported_reasoning_levels: alias.supported_reasoning_levels,
-        });
-      }
-    }
-    // Re-sort to maintain gpt -> claude -> gemini -> deepseek -> other
-    items.sort((a, b) => {
-      const famA = getModelFamily(a.slug);
-      const famB = getModelFamily(b.slug);
-      if (famA !== famB) return famA - famB;
-      return a.slug.localeCompare(b.slug, undefined, { numeric: true, sensitivity: "base" });
-    });
-    // Reassign sequential priorities
-    items.forEach((item, idx) => {
-      item.priority = 100 + idx * 10;
-    });
-  }
 
   if (!items.length) throw new Error("MOMO returned no Codex-compatible models.");
   return { models: items };

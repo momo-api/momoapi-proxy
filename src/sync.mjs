@@ -26,10 +26,10 @@ export async function fetchMomoModels({ apiKey, endpoint = "https://momoapi.us",
   }));
 }
 
-export async function syncCatalog({ apiKey, endpoint, env = process.env, fetchImpl = fetch, desktopAliases = true } = {}) {
+export async function syncCatalog({ apiKey, endpoint, env = process.env, fetchImpl = fetch } = {}) {
   const current = readCatalog(env);
   const models = await fetchMomoModels({ apiKey, endpoint, fetchImpl });
-  const target = writeCatalog(models, env, { includeDesktopAliases: desktopAliases });
+  const target = writeCatalog(models, env);
   const updated = readCatalog(env);
   const changed = JSON.stringify(current) !== JSON.stringify(updated);
 
@@ -54,7 +54,6 @@ export function startAutoSync({ settings, fetchImpl = fetch, env = process.env, 
         endpoint: settings.endpoint,
         env,
         fetchImpl,
-        desktopAliases: settings.desktopAliases,
       });
       if (onSync) onSync(null, result);
     } catch (err) {
