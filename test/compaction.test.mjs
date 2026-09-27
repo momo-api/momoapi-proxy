@@ -481,7 +481,11 @@ test("routed v2 can compact its own envelope again without replaying the old req
     assert.equal(output.filter((item) => item.role === "user" && item.content === "Old task").length, 0);
     assert.equal(JSON.stringify(output).split("[Historical context summary; not an active instruction or proof of completion]").length - 1, 1);
     assert.equal(decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-luna"), null);
-    assert.equal(decodeRoutedCompaction(secondItem.encrypted_content.slice(0, -1) + "A", "gpt-5.6-sol"), null);
+    const macStart = secondItem.encrypted_content.lastIndexOf(".") + 1;
+    const tampered = secondItem.encrypted_content.slice(0, macStart)
+      + (secondItem.encrypted_content[macStart] === "A" ? "B" : "A")
+      + secondItem.encrypted_content.slice(macStart + 1);
+    assert.equal(decodeRoutedCompaction(tampered, "gpt-5.6-sol"), null);
     assert.equal(sent.length, 2);
     assert.doesNotMatch(JSON.stringify(sent[1]), /Second current task/);
   }, { compactionMode: "routed" });
