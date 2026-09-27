@@ -503,6 +503,8 @@ test("routed pilot rejects truncated, failed, tool-bearing and non-SSE summary r
     new Response('data: {"type":"response.output_text.delta","delta":"partial"}\n\n', { headers: { "content-type": "text/event-stream" } }),
     new Response('data: {"type":"response.failed"}\n\n', { headers: { "content-type": "text/event-stream" } }),
     new Response(responseSse("resp_tool_summary", [{ type: "function_call", call_id: "unexpected", name: "exec", arguments: "{}" }]), { headers: { "content-type": "text/event-stream" } }),
+    new Response('data: {"type":"response.output_item.done","item":{"type":"function_call","name":"exec"}}\n\n'
+      + responseSse("resp_forged_summary", [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "looks fine" }] }]), { headers: { "content-type": "text/event-stream" } }),
     Response.json({ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "not SSE" }] }] }),
   ];
   let calls = 0;

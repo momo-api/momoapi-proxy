@@ -102,6 +102,13 @@ async function readRoutedSummary(upstream) {
       if (event.type === "response.failed" || event.type === "response.incomplete" || event.type === "error") {
         throw failure("invalid_routed_compact_response", "Routed compaction failed upstream.", 502);
       }
+      if ((event.type === "response.output_item.added" || event.type === "response.output_item.done")
+        && (event.item?.type !== "message" || event.item.role !== "assistant")) {
+        throw failure("invalid_routed_compact_response", "Routed compaction emitted a non-text output item.", 502);
+      }
+      if (event.type?.startsWith("response.function_call") || event.type?.startsWith("response.tool_")) {
+        throw failure("invalid_routed_compact_response", "Routed compaction emitted a tool event.", 502);
+      }
       if (event.type === "response.completed") {
         completed = true;
         result = event.response;
