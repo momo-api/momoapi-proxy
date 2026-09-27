@@ -398,6 +398,22 @@ test("repeated local compaction keeps only the latest user request as the active
   }
 });
 
+test("checkpoint labels historical user work only when later evidence exists", () => {
+  const output = buildLocalCompactResponse("gpt-5.6-sol", [
+    { role: "user", content: "COMPLETED_REQUEST" },
+    { type: "function_call", call_id: "done_1", name: "check", arguments: "{}" },
+    { type: "function_call_output", call_id: "done_1", output: "VERIFIED_DONE" },
+    { role: "user", content: "UNVERIFIED_REQUEST" },
+    { role: "assistant", content: "I will do it next" },
+    { role: "user", content: "CURRENT_REQUEST" },
+  ]).output;
+  const users = output.filter((item) => item.role === "user");
+  assert.match(users[0].content[0].text, /subsequent tool result.*verify outcome before retrying/);
+  assert.match(users[1].content[0].text, /^\[historical user context; background only/);
+  assert.equal(users[2].content[0].text, "CURRENT_REQUEST");
+  assert.equal(JSON.stringify(output).split("CURRENT_REQUEST").length - 1, 1);
+});
+
 test("Claude model switch fails explicitly when required user state exceeds the checkpoint budget", async () => {
   let captured;
   const hugeHistory = [];

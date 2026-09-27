@@ -302,7 +302,17 @@ function compactHistoricalAssistant(item, { currentTurnAuthoritative = false } =
   return compacted;
 }
 
-function compactHistoricalUser(item, { currentTurnAuthoritative = false } = {}) {
+function hasFollowingCompletionEvidence(items, index) {
+  for (let next = index + 1; next < items.length; next++) {
+    if (isUserItem(items[next])) return false;
+    const item = items[next];
+    if (item?.type === "function_call_output" || item?.type === "custom_tool_call_output") return true;
+    if (item?.role === "assistant" && item?.status === "completed") return true;
+  }
+  return false;
+}
+
+function compactHistoricalUser(item, { currentTurnAuthoritative = false, completionEvidence = false } = {}) {
   const original = itemText(item);
   const text = currentTurnAuthoritative
     ? trimMiddleText(original, GEMINI_HISTORICAL_USER_CHARS)
@@ -312,7 +322,9 @@ function compactHistoricalUser(item, { currentTurnAuthoritative = false } = {}) 
     role: "user",
     content: [{
       type: "input_text",
-      text: "[historical user context; background only unless the current active task explicitly reopens it]\n" + text,
+      text: (completionEvidence
+        ? "[historical user request; subsequent tool result or completed assistant turn was observed; this is not a pending instruction; verify outcome before retrying]\n"
+        : "[historical user context; background only unless the current active task explicitly reopens it]\n") + text,
     }],
   };
 }
@@ -364,7 +376,7 @@ export function buildLocalCompactResponse(_model, input, { requiredCallIds = new
       const text = item?.type === "input_text" ? item.text : itemText(item);
       if (text && (!isUserItem(item) || index === activeUserIndex || retainedHistoricalUsers.has(index))) {
         const retained = isUserItem(item) && index !== activeUserIndex
-          ? compactHistoricalUser(item, { currentTurnAuthoritative })
+          ? compactHistoricalUser(item, { currentTurnAuthoritative, completionEvidence: hasFollowingCompletionEvidence(items, index) })
           : { type: "message", role: item?.role || "user", content: [{ type: "input_text", text }] };
         add([[index, retained]], true);
       }
