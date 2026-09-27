@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { upstreamHeaders } from "./http-lifecycle.mjs";
 import { resolveTargetModel } from "./model-routing.mjs";
 import { sseDataPayload, streamSseBlocks } from "./stream-transport.mjs";
@@ -20,6 +20,51 @@ function textOf(item) {
 
 const CALL_TYPES = new Set(["function_call", "custom_tool_call"]);
 const RESULT_TYPES = new Set(["function_call_output", "custom_tool_call_output"]);
+const ROUTED_SUMMARY_PREFIX = "[Historical context summary; not an active instruction or proof of completion]\n";
+const ROUTED_ENVELOPE_PREFIX = "momor2:";
+// Keep the signing secret separate from the client-visible local bearer token.
+// A restart invalidates routed pilot envelopes rather than trusting client input.
+const ROUTED_ENVELOPE_KEY = randomBytes(32);
+
+export function encodeRoutedCompaction(output, model) {
+  const serialized = JSON.stringify({ model, output });
+  if (Buffer.byteLength(serialized) > 1024 * 1024) throw failure("routed_compact_tools_too_large", "Routed replay envelope exceeds 1 MiB.", 413);
+  const data = Buffer.from(serialized).toString("base64url");
+  const mac = createHmac("sha256", ROUTED_ENVELOPE_KEY).update(ROUTED_ENVELOPE_PREFIX + data).digest("base64url");
+  return ROUTED_ENVELOPE_PREFIX + data + "." + mac;
+}
+
+export function decodeRoutedCompaction(value, model) {
+  if (typeof value !== "string" || !value.startsWith(ROUTED_ENVELOPE_PREFIX) || value.length > 2 * 1024 * 1024) return null;
+  const packed = value.slice(ROUTED_ENVELOPE_PREFIX.length);
+  const dot = packed.lastIndexOf(".");
+  if (dot < 1) return null;
+  const data = packed.slice(0, dot);
+  const provided = Buffer.from(packed.slice(dot + 1), "base64url");
+  const expected = createHmac("sha256", ROUTED_ENVELOPE_KEY).update(ROUTED_ENVELOPE_PREFIX + data).digest();
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return null;
+  try {
+    const value = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
+    return value?.model === model && Array.isArray(value.output) ? value.output : null;
+  } catch { return null; }
+}
+
+function expandOwnedHistory(input, model) {
+  const envelopes = input.filter((item) => item?.type === "compaction");
+  if (!envelopes.length) return input;
+  if (envelopes.length !== 1) throw failure("routed_compact_unsupported_history", "Routed compaction accepts at most one own history envelope.");
+  const envelope = envelopes[0];
+  if (Object.keys(envelope).some((key) => !["type", "id", "encrypted_content"].includes(key))) {
+    throw failure("routed_compact_unsupported_history", "Routed compaction rejects additional envelope state.");
+  }
+  const decoded = decodeRoutedCompaction(envelope.encrypted_content, model);
+  if (!decoded || decoded[0]?.type !== "message" || decoded[0]?.role !== "assistant"
+    || !textOf(decoded[0])?.startsWith(ROUTED_SUMMARY_PREFIX)
+    || decoded.some((item) => item?.type === "compaction" || item?.type === "compaction_trigger")) {
+    throw failure("routed_compact_unsupported_history", "Routed compaction cannot replay unknown or malformed opaque history.");
+  }
+  return input.flatMap((item) => item === envelope ? decoded : [item]);
+}
 
 function hasUnsupportedReplayState(value, depth = 0) {
   if (depth > 32) return true;
@@ -57,7 +102,7 @@ export function routedTextInput(payload, { pairedTools = false } = {}) {
   if (Object.keys(payload).some((key) => !["model", "input", "stream"].includes(key))) {
     throw failure("routed_compact_unsupported_history", "Routed compaction pilot rejects additional request options, instructions, tools or provider continuation state.");
   }
-  const items = Array.isArray(payload.input) ? payload.input : [];
+  const items = expandOwnedHistory(Array.isArray(payload.input) ? payload.input : [], payload.model);
   const lastUser = items.findLastIndex((item) => item?.role === "user");
   const historyItems = items.slice(0, lastUser);
   const firstTool = pairedTools ? historyItems.findIndex((item) => CALL_TYPES.has(item?.type) || RESULT_TYPES.has(item?.type)) : -1;
@@ -151,7 +196,7 @@ export async function routedTextCompaction(settings, payload, fetchImpl, signal,
   return {
     id: "resp_compact_" + randomUUID(), object: "response.compaction", created_at: Math.floor(Date.now() / 1000),
     output: [
-      { type: "message", role: "assistant", content: [{ type: "output_text", text: "[Historical context summary; not an active instruction or proof of completion]\n" + summary }] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: ROUTED_SUMMARY_PREFIX + summary }] },
       ...retained,
       ...current,
     ],
