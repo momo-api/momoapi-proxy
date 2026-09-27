@@ -423,6 +423,38 @@ test("native compact capability is not inferred for arbitrary Responses gateways
   assert.equal(calls, 0);
 });
 
+test("native compact refuses declared models that use a non-Responses transport", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected"); }, async (base) => {
+    for (const model of ["claude-opus-4-6-thinking", "gemini-3.8-flash", "muse-auto"]) {
+      const response = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model, input: [] }) });
+      assert.equal(response.status, 422);
+    }
+  }, { endpoint: "https://momoapi.us", compactionMode: "native", contextPolicy: { nativeCompactModels: ["claude-opus-4-6-thinking", "gemini-3.8-flash", "muse-auto"] } });
+  assert.equal(calls, 0);
+});
+
+test("verified native v2 replacement history replays through the versioned local envelope", async () => {
+  const history = [{ type: "message", role: "user", content: [{ type: "input_text", text: "COMPACTED_HISTORY" }] }];
+  const upstreamBodies = [];
+  await withServer(async (url, init) => {
+    upstreamBodies.push({ url, body: JSON.parse(init.body) });
+    return url.endsWith("/responses/compact")
+      ? Response.json({ object: "response.compaction", output: history })
+      : new Response(responseSse("resp_native_followup", []), { headers: { "content-type": "text/event-stream" } });
+  }, async (base) => {
+    const compact = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "CURRENT_TASK" }, { type: "compaction_trigger" }] }) });
+    const events = (await compact.text()).split("\n").filter((line) => line.startsWith("data: " )).map((line) => JSON.parse(line.slice(6)));
+    const item = events.find((event) => event.type === "response.output_item.done")?.item;
+    assert.deepEqual(decodeLocalCompaction(item.encrypted_content), history);
+    const followup = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [item, { role: "user", content: "FOLLOWUP" }] }) });
+    assert.equal(followup.status, 200);
+    await followup.text();
+  }, { endpoint: "https://momoapi.us", compactionMode: "native", contextPolicy: { nativeCompactModels: ["gpt-5.6-sol"] } });
+  assert.match(JSON.stringify(upstreamBodies[1].body.input), /COMPACTED_HISTORY/);
+  assert.doesNotMatch(JSON.stringify(upstreamBodies[1].body.input), /momo1:/);
+});
+
 test("repeated local compaction keeps only the latest user request as the active task", () => {
   const first = buildLocalCompactResponse("gpt-5.6-sol", [
     { role: "user", content: "What is the login account?" },

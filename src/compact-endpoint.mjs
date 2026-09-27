@@ -1,4 +1,5 @@
 import { buildLocalCompactResponse, encodeLocalCompaction } from "./compaction.mjs";
+import { resolveTargetModel } from "./model-routing.mjs";
 
 const MIB = 1024 * 1024;
 const COMPACT_RESPONSE_MAX_BYTES = 32 * MIB;
@@ -8,6 +9,7 @@ const COMPACT_RESPONSE_MAX_BYTES = 32 * MIB;
 export function nativeCompactCapability(settings, model) {
   const declared = settings?.contextPolicy?.nativeCompactModels;
   if (!Array.isArray(declared) || !declared.includes(model)) return false;
+  if (resolveTargetModel(model).protocol !== "responses") return false;
   try {
     const url = new URL(settings.endpoint);
     return url.protocol === "https:" && ["momoapi.us", "api.openai.com"].includes(url.hostname) && (!url.port || url.port === "443");
