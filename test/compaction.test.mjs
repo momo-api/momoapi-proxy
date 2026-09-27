@@ -476,6 +476,99 @@ test("routed pilot propagates upstream throttling once and rejects managed auto-
   }, { compactionMode: "routed" });
 });
 
+test("routed-tools pilot replays exact paired function and custom tools without exposing them to the summary model", async () => {
+  const captured = [];
+  const fakeFetch = async (url, init) => {
+    captured.push({ url, body: JSON.parse(init.body) });
+    if (captured.length <= 2) return Response.json({ status: "completed", output: [
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Earlier discussion, tool outcomes not inferred." }] },
+    ] });
+    return new Response(responseSse("resp_paired_replay", []), { headers: { "content-type": "text/event-stream" } });
+  };
+  const pairs = [
+    { type: "function_call", call_id: "call_fn", name: "lookup", arguments: "{\"key\":\"value\"}" },
+    { type: "function_call_output", call_id: "call_fn", output: "lookup result" },
+    { type: "custom_tool_call", call_id: "call_custom", name: "exec", input: "text(1)" },
+    { type: "custom_tool_call_output", call_id: "call_custom", output: "exec result" },
+  ];
+  const followingAnswer = { role: "assistant", content: "I completed the old step, subject to verification." };
+  const input = [{ role: "user", content: "Earlier discussion" }, ...pairs, followingAnswer, { role: "user", content: "Audit only the current change" }];
+  await withServer(fakeFetch, async (base) => {
+    const send = (path, items) => fetch(base + path, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: items }),
+    });
+    const v1 = await send("/v1/responses/compact", input);
+    assert.equal(v1.status, 200);
+    const output = (await v1.json()).output;
+    assert.deepEqual(output.slice(1, -1), [...pairs, followingAnswer]);
+    assert.deepEqual(output.at(-1), input.at(-1));
+    const v2 = await send("/v1/responses", [...input, { type: "compaction_trigger" }]);
+    const events = (await v2.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
+    const item = events.find((event) => event.type === "response.output_item.done")?.item;
+    assert.deepEqual(decodeLocalCompaction(item.encrypted_content).slice(1, -1), [...pairs, followingAnswer]);
+    const replay = await send("/v1/responses", [item, { role: "user", content: "Continue audit" }]);
+    assert.equal(replay.status, 200);
+    await replay.text();
+  }, { compactionMode: "routed-tools" });
+  assert.equal(captured.length, 3);
+  for (const request of captured.slice(0, 2)) {
+    assert.equal(request.url, "https://gateway.example/v1/responses");
+    assert.equal(request.body.tools, undefined);
+    assert.doesNotMatch(JSON.stringify(request.body), /lookup result|exec result|call_custom|Audit only the current change/);
+    assert.doesNotMatch(JSON.stringify(request.body), /I completed the old step/);
+  }
+  for (const pair of pairs) {
+    const loweredType = pair.type.replace(/^custom_tool_/, "function_");
+    assert.ok(captured[2].body.input.some((entry) => entry.call_id === pair.call_id && entry.type === loweredType));
+  }
+  assert.match(JSON.stringify(captured[2].body.input), /I completed the old step/);
+});
+
+test("routed-tools rejects orphan, duplicate and pending pairs before model dispatch", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected summary call"); }, async (base) => {
+    const current = { role: "user", content: "Current task" };
+    const cases = [
+      [{ type: "function_call_output", call_id: "missing", output: "result" }],
+      [{ type: "function_call", call_id: "pending", name: "lookup", arguments: "{}" }],
+      [{ type: "function_call", call_id: "duplicate", name: "lookup", arguments: "{}" },
+        { type: "function_call_output", call_id: "duplicate", output: "one" },
+        { type: "function_call_output", call_id: "duplicate", output: "two" }],
+      [{ type: "custom_tool_call", call_id: "mismatch", name: "exec", input: "text(1)" },
+        { type: "function_call_output", call_id: "mismatch", output: "wrong type" }],
+      [{ type: "function_call", call_id: "opaque", name: "lookup", arguments: "{}" },
+        { type: "function_call_output", call_id: "opaque", output: "ok", encrypted_content: "opaque-state" }],
+    ];
+    for (const entries of cases) {
+      const response = await fetch(base + "/v1/responses/compact", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "Prior" }, ...entries, current] }),
+      });
+      assert.equal(response.status, 422);
+      assert.equal((await response.json()).error.code,
+        entries.at(-1).encrypted_content ? "routed_compact_unsupported_history" : "routed_compact_unpaired_tools");
+    }
+  }, { compactionMode: "routed-tools" });
+  assert.equal(calls, 0);
+});
+
+test("routed-tools refuses causal history beyond its replay ceiling without calling the summary model", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected summary call"); }, async (base) => {
+    const response = await fetch(base + "/v1/responses/compact", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [
+        { role: "user", content: "Old" },
+        { type: "function_call", call_id: "large", name: "lookup", arguments: "{}" },
+        { type: "function_call_output", call_id: "large", output: "x".repeat(600 * 1024) },
+        { role: "user", content: "New" },
+      ] }),
+    });
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).error.code, "routed_compact_tools_too_large");
+  }, { compactionMode: "routed-tools" });
+  assert.equal(calls, 0);
+});
+
 test("native compact refuses unverified capability without contacting upstream", async () => {
   let calls = 0;
   await withServer(async () => { calls++; throw new Error("unexpected upstream"); }, async (base) => {

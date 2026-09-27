@@ -192,9 +192,9 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
       response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
       return compactJson(response, 200, checkpoint);
     }
-    if (compactionPolicy(settings) === "routed") {
+    if (["routed", "routed-tools"].includes(compactionPolicy(settings))) {
       try {
-        const compacted = await routedTextCompaction(settings, payload, fetchImpl, signal);
+        const compacted = await routedTextCompaction(settings, payload, fetchImpl, signal, { pairedTools: compactionPolicy(settings) === "routed-tools" });
         response.momoCompactTrace = { policyAction: "routed_text_compact" };
         return compactJson(response, 200, compacted);
       } catch (error) {
@@ -277,10 +277,10 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
       emitter.complete();
       return;
     }
-    if (compactionPolicy(settings) === "routed") {
+    if (["routed", "routed-tools"].includes(compactionPolicy(settings))) {
       let compacted;
       try {
-        compacted = await routedTextCompaction(settings, compactPayload, fetchImpl, signal);
+        compacted = await routedTextCompaction(settings, compactPayload, fetchImpl, signal, { pairedTools: compactionPolicy(settings) === "routed-tools" });
       } catch (error) {
         metricsState.compactFailures += 1;
         response.momoCompactTrace = { policyAction: error.code || "routed_compact_failed" };
@@ -1233,10 +1233,10 @@ export function createMomoSwitch(settings, options = {}) {
         }
         const routedPayload = replay.payload;
 
-        if (["native", "routed"].includes(compactionPolicy(settings))
+        if (["native", "routed", "routed-tools"].includes(compactionPolicy(settings))
           && Array.isArray(routedPayload.context_management)
           && routedPayload.context_management.some((item) => item?.type === "compaction")
-          && (compactionPolicy(settings) === "routed" || !nativeCompactCapability(settings, routedPayload.model))) {
+          && (compactionPolicy(settings) !== "native" || !nativeCompactCapability(settings, routedPayload.model))) {
           metricsState.compactFailures += 1;
           response.momoCompactTrace = { policyAction: "compact_capability_unverified" };
           return writeResponsesFailure(response, routedPayload.model, 422,
