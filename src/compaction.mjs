@@ -70,7 +70,7 @@ function configuredProviderSwitchReplayLimit(settings = {}) {
 export function compactionPolicy(settings = {}) {
   const policy = settings?.contextPolicy && typeof settings.contextPolicy === "object" ? settings.contextPolicy : {};
   const mode = String(process.env.MOMO_COMPACTION_MODE ?? settings?.compactionMode ?? policy.compactionMode ?? "native").toLowerCase();
-  return new Set(["local", "upstream", "native"]).has(mode) ? mode : "native";
+  return new Set(["local", "upstream", "native", "routed"]).has(mode) ? mode : "native";
 }
 
 export function prefersLocalCompaction(settings = {}) {
