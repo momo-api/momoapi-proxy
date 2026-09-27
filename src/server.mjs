@@ -23,7 +23,7 @@ import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
 import { buildLocalCompactResponse, compactLockKey, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "./compaction.mjs";
 import { compactUnsupportedError, encodeRecoverableCompaction, isReplayableNativeCompactOutput, nativeCompactCapability, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
-import { routedTextCompaction } from "./routed-compaction.mjs";
+import { decodeRoutedCompaction, encodeRoutedCompaction, routedTextCompaction } from "./routed-compaction.mjs";
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { generateVideo, getVideoTask, resolveVideoCapabilities } from "./video-service.mjs";
@@ -287,7 +287,7 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
         return writeResponsesFailure(response, payload.model, error.statusCode || 502, error.message, error.code || "routed_compact_failed");
       }
       let encryptedContent;
-      try { encryptedContent = encodeLocalCompaction(compacted.output); }
+      try { encryptedContent = encodeRoutedCompaction(compacted.output, payload.model); }
       catch (error) {
         metricsState.compactFailures += 1;
         return writeResponsesFailure(response, payload.model, 413, "Routed compaction output exceeds replay envelope limit.", error.code);
@@ -493,7 +493,8 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   // Restore local envelopes before lowering: recovered calls need the same
   // custom/namespace conversion as ordinary client history.
   payload = { ...payload, input: asArray(payload.input).flatMap((item) =>
-    item?.type === "compaction" ? (decodeLocalCompaction(item.encrypted_content) || [item]) : [item]) };
+    item?.type === "compaction" ? (decodeRoutedCompaction(item.encrypted_content, payload.model)
+      || decodeLocalCompaction(item.encrypted_content) || [item]) : [item]) };
   // 1. Lower tool_search to standard function
   const { body: searchBody, names: searchNames } = rewriteRoutedToolSearchForUpstream(payload);
   // 2. Lower custom tools (exec, etc.) to standard functions
@@ -1232,6 +1233,17 @@ export function createMomoSwitch(settings, options = {}) {
           metricsState.replayBytesSkipped += replay.skippedBytes;
         }
         const routedPayload = replay.payload;
+
+        // A routed pilot envelope cannot be replayed by another model or after
+        // its process-only signing key changes. Never forward it as unknown
+        // provider state (or decode it as legacy momo1).
+        if (asArray(routedPayload.input).some((item) => item?.type === "compaction"
+          && typeof item.encrypted_content === "string" && item.encrypted_content.startsWith("momor2:")
+          && !decodeRoutedCompaction(item.encrypted_content, routedPayload.model))) {
+          return writeResponsesFailure(response, routedPayload.model, 409,
+            "Routed compact history cannot be verified for this model and proxy process. Start a new task with an explicit handoff.",
+            "routed_compact_envelope_unavailable");
+        }
 
         if (["native", "routed", "routed-tools"].includes(compactionPolicy(settings))
           && Array.isArray(routedPayload.context_management)

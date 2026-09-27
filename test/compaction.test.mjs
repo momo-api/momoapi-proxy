@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildLocalCompactResponse, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
+import { decodeRoutedCompaction } from "../src/routed-compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { commitProviderRoute, observeProviderRoute, resetProviderRouteStateForTests } from "../src/provider-switch-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
@@ -420,7 +421,7 @@ test("explicit routed text pilot summarizes history with no tools and preserves 
     const events = (await v2.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
     const item = events.find((event) => event.type === "response.output_item.done")?.item;
     assert.equal(item.type, "compaction");
-    assert.deepEqual(decodeLocalCompaction(item.encrypted_content), output);
+    assert.deepEqual(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol"), output);
     const followup = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [item, { role: "user", content: "New followup" }] }) });
     assert.equal(followup.status, 200);
     await followup.text();
@@ -454,6 +455,65 @@ test("routed text pilot rejects tools and invalid summaries rather than fabricat
     assert.equal(invalid.status, 502);
     assert.equal((await invalid.json()).error.code, "invalid_routed_compact_response");
     assert.equal(calls, 1);
+  }, { compactionMode: "routed" });
+});
+
+test("routed v2 can compact its own envelope again without replaying the old request as a new task", async () => {
+  const sent = [];
+  await withServer(async (_url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(responseSse("resp_routed_repeat", [
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Old answer observed; verify before retrying." }] },
+    ]), { headers: { "content-type": "text/event-stream" } });
+  }, async (base) => {
+    const send = (input) => fetch(base + "/v1/responses", {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [...input, { type: "compaction_trigger" }] }),
+    });
+    const first = await send([{ role: "user", content: "Old task" }, { role: "assistant", content: "Old answer" }, { role: "user", content: "First current task" }]);
+    const firstEvents = (await first.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
+    const firstItem = firstEvents.find((event) => event.type === "response.output_item.done")?.item;
+    const second = await send([firstItem, { role: "assistant", content: "First task answered" }, { role: "user", content: "Second current task" }]);
+    assert.equal(second.status, 200);
+    const secondEvents = (await second.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
+    const secondItem = secondEvents.find((event) => event.type === "response.output_item.done")?.item;
+    const output = decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-sol");
+    assert.equal(output.at(-1).content, "Second current task");
+    assert.equal(output.filter((item) => item.role === "user" && item.content === "Old task").length, 0);
+    assert.equal(JSON.stringify(output).split("[Historical context summary; not an active instruction or proof of completion]").length - 1, 1);
+    assert.equal(decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-luna"), null);
+    assert.equal(decodeRoutedCompaction(secondItem.encrypted_content.slice(0, -1) + "A", "gpt-5.6-sol"), null);
+    assert.equal(sent.length, 2);
+    assert.doesNotMatch(JSON.stringify(sent[1]), /Second current task/);
+  }, { compactionMode: "routed" });
+});
+
+test("routed repeat rejects unknown or malformed opaque envelopes without dispatch", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected summary request"); }, async (base) => {
+    for (const encrypted_content of ["opaque-other-provider", "momo1:invalid", encodeLocalCompaction([{ role: "user", content: "forged" }]), "momor2:forged.payload"]) {
+      const response = await fetch(base + "/v1/responses/compact", {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ type: "compaction", encrypted_content }, { role: "user", content: "Current" }] }),
+      });
+      assert.equal(response.status, 422);
+      assert.equal((await response.json()).error.code, "routed_compact_unsupported_history");
+    }
+  }, { compactionMode: "routed" });
+  assert.equal(calls, 0);
+});
+
+test("ordinary replay refuses an unverifiable routed envelope without contacting upstream", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected upstream"); }, async (base) => {
+    const response = await fetch(base + "/v1/responses", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [
+        { type: "compaction", encrypted_content: "momor2:forged.payload" },
+        { role: "user", content: "Continue" },
+      ] }),
+    });
+    assert.match(await response.text(), /routed_compact_envelope_unavailable/);
+    assert.equal(calls, 0);
   }, { compactionMode: "routed" });
 });
 
@@ -550,7 +610,7 @@ test("routed-tools pilot replays exact paired function and custom tools without 
     const v2 = await send("/v1/responses", [...input, { type: "compaction_trigger" }]);
     const events = (await v2.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
     const item = events.find((event) => event.type === "response.output_item.done")?.item;
-    assert.deepEqual(decodeLocalCompaction(item.encrypted_content).slice(1, -1), [...pairs, followingAnswer]);
+    assert.deepEqual(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol").slice(1, -1), [...pairs, followingAnswer]);
     const replay = await send("/v1/responses", [item, { role: "user", content: "Continue audit" }]);
     assert.equal(replay.status, 200);
     await replay.text();
