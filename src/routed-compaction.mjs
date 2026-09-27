@@ -148,7 +148,7 @@ async function readRoutedSummary(upstream) {
         throw failure("invalid_routed_compact_response", "Routed compaction failed upstream.", 502);
       }
       if ((event.type === "response.output_item.added" || event.type === "response.output_item.done")
-        && (event.item?.type !== "message" || event.item.role !== "assistant")) {
+        && !(event.item?.type === "reasoning" || (event.item?.type === "message" && event.item.role === "assistant"))) {
         throw failure("invalid_routed_compact_response", "Routed compaction emitted a non-text output item.", 502);
       }
       if (event.type?.startsWith("response.function_call") || event.type?.startsWith("response.tool_")) {
@@ -185,13 +185,16 @@ export async function routedTextCompaction(settings, payload, fetchImpl, signal,
   if (!upstream.ok) throw failure("http_" + upstream.status, "Routed compaction upstream returned HTTP " + upstream.status + ".", upstream.status);
   const result = await readRoutedSummary(upstream);
   const output = result?.output;
-  if (result?.status !== "completed" || !Array.isArray(output) || output.length !== 1
-    || output[0]?.type !== "message" || output[0]?.role !== "assistant"
-    || !Array.isArray(output[0].content) || output[0].content.length !== 1
-    || output[0].content[0]?.type !== "output_text") {
+  const messages = output?.filter((item) => item?.type === "message");
+  if (result?.status !== "completed" || !Array.isArray(output)
+    || output.some((item) => item?.type !== "reasoning" && item?.type !== "message")
+    || output.some((item) => item?.type === "reasoning" && item.status && item.status !== "completed")
+    || messages.length !== 1 || messages[0]?.role !== "assistant"
+    || !Array.isArray(messages[0].content) || messages[0].content.length !== 1
+    || messages[0].content[0]?.type !== "output_text") {
     throw failure("invalid_routed_compact_response", "Routed compaction did not return one completed text message.", 502);
   }
-  const summary = output[0].content[0].text?.trim();
+  const summary = messages[0].content[0].text?.trim();
   if (!summary || summary.length > 16000) throw failure("invalid_routed_compact_response", "Routed compaction summary is empty or too large.", 502);
   return {
     id: "resp_compact_" + randomUUID(), object: "response.compaction", created_at: Math.floor(Date.now() / 1000),

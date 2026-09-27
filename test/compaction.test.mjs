@@ -481,7 +481,11 @@ test("routed v2 can compact its own envelope again without replaying the old req
     assert.equal(output.filter((item) => item.role === "user" && item.content === "Old task").length, 0);
     assert.equal(JSON.stringify(output).split("[Historical context summary; not an active instruction or proof of completion]").length - 1, 1);
     assert.equal(decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-luna"), null);
-    assert.equal(decodeRoutedCompaction(secondItem.encrypted_content.slice(0, -1) + "A", "gpt-5.6-sol"), null);
+    const macStart = secondItem.encrypted_content.lastIndexOf(".") + 1;
+    const tampered = secondItem.encrypted_content.slice(0, macStart)
+      + (secondItem.encrypted_content[macStart] === "A" ? "B" : "A")
+      + secondItem.encrypted_content.slice(macStart + 1);
+    assert.equal(decodeRoutedCompaction(tampered, "gpt-5.6-sol"), null);
     assert.equal(sent.length, 2);
     assert.doesNotMatch(JSON.stringify(sent[1]), /Second current task/);
   }, { compactionMode: "routed" });
@@ -581,6 +585,26 @@ test("routed pilot rejects truncated, failed, tool-bearing and non-SSE summary r
   assert.equal(calls, variants.length);
 });
 
+test("routed summary accepts upstream reasoning items but replays only the text message", async () => {
+  await withServer(async () => new Response(responseSse("resp_reasoning_summary", [
+    { type: "reasoning", id: "rs_1", status: "completed", summary: [] },
+    { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Earlier task was answered; do not restart it." }] },
+  ]), { headers: { "content-type": "text/event-stream" } }), async (base) => {
+    const response = await fetch(base + "/v1/responses/compact", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [
+        { role: "user", content: "Old task" }, { role: "assistant", content: "Old answer" },
+        { role: "user", content: "Current task" },
+      ] }),
+    });
+    assert.equal(response.status, 200);
+    const output = (await response.json()).output;
+    assert.deepEqual(output.map((item) => item.role), ["assistant", "user"]);
+    assert.match(output[0].content[0].text, /do not restart it/);
+    assert.doesNotMatch(JSON.stringify(output), /rs_1/);
+  }, { compactionMode: "routed" });
+});
+
 test("routed-tools pilot replays exact paired function and custom tools without exposing them to the summary model", async () => {
   const captured = [];
   const fakeFetch = async (url, init) => {
@@ -627,6 +651,47 @@ test("routed-tools pilot replays exact paired function and custom tools without 
     assert.ok(captured[2].body.input.some((entry) => entry.call_id === pair.call_id && entry.type === loweredType));
   }
   assert.match(JSON.stringify(captured[2].body.input), /I completed the old step/);
+});
+
+test("routed-tools repeat compaction retains paired evidence without reopening completed requests", async () => {
+  const sent = [];
+  await withServer(async (_url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(responseSse("resp_tool_repeat", [
+      { type: "reasoning", status: "completed", summary: [] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Prior answer recorded; do not restart it." }] },
+    ]), { headers: { "content-type": "text/event-stream" } });
+  }, async (base) => {
+    const send = (input) => fetch(base + "/v1/responses", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [...input, { type: "compaction_trigger" }] }),
+    });
+    const compactItem = async (response) => {
+      assert.equal(response.status, 200);
+      const events = (await response.text()).split("\n").filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)));
+      return events.find((event) => event.type === "response.output_item.done")?.item;
+    };
+    const pair = [
+      { type: "function_call", call_id: "paired_repeat", name: "lookup", arguments: "{}" },
+      { type: "function_call_output", call_id: "paired_repeat", output: "verified result" },
+    ];
+    const first = await compactItem(await send([
+      { role: "user", content: "Old completed task" }, { role: "assistant", content: "Old answer" },
+      ...pair, { role: "assistant", content: "Lookup answered" }, { role: "user", content: "Current task" },
+    ]));
+    const second = await compactItem(await send([first, { role: "assistant", content: "Current task answered" },
+      { role: "user", content: "Latest task" }]));
+    const output = decodeRoutedCompaction(second.encrypted_content, "gpt-5.6-sol");
+    assert.deepEqual(output.filter((entry) => entry.call_id === "paired_repeat"), pair);
+    assert.equal(output.at(-1).content, "Latest task");
+    assert.equal(output.some((entry) => entry.role === "user" && entry.content === "Old completed task"), false);
+    assert.equal(output.filter((entry) => entry.role === "assistant"
+      && JSON.stringify(entry.content).includes("[Historical context summary;")).length, 1);
+    assert.equal(sent.length, 2);
+    assert.equal(sent.some((request) => JSON.stringify(request.input).includes("Latest task")), false);
+    assert.equal(sent.some((request) => JSON.stringify(request.input).includes("verified result")), false);
+  }, { compactionMode: "routed-tools" });
 });
 
 test("routed-tools rejects orphan, duplicate and pending pairs before model dispatch", async () => {
