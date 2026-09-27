@@ -1,6 +1,7 @@
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { appHome } from "./config.mjs";
 import { upstreamHeaders } from "./http-lifecycle.mjs";
 import { resolveTargetModel } from "./model-routing.mjs";
@@ -25,6 +26,31 @@ const CALL_TYPES = new Set(["function_call", "custom_tool_call"]);
 const RESULT_TYPES = new Set(["function_call_output", "custom_tool_call_output"]);
 const ROUTED_SUMMARY_PREFIX = "[Historical context summary; not an active instruction or proof of completion]\n";
 const ROUTED_ENVELOPE_PREFIX = "momor2:";
+const WINDOWS_KEY_ACL = [
+  "$ErrorActionPreference = 'Stop'",
+  "$p = [Environment]::GetEnvironmentVariable('MOMO_ROUTED_KEY_PATH')",
+  "$a = Get-Acl -LiteralPath $p",
+  "$a.SetAccessRuleProtection($true, $false)",
+  "foreach ($r in @($a.Access)) { [void]$a.RemoveAccessRuleAll($r) }",
+  "$ids = @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))",
+  "foreach ($id in $ids) { $a.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($id, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)) }",
+  "[System.IO.File]::SetAccessControl($p, $a)",
+  "$check = Get-Acl -LiteralPath $p",
+  "if (-not $check.AreAccessRulesProtected -or $check.Access.Count -ne 3) { throw 'key ACL verification failed' }",
+  "foreach ($r in $check.Access) { $ruleSid = $r.IdentityReference.Translate([Security.Principal.SecurityIdentifier]); if ($r.IsInherited -or $r.AccessControlType -ne 'Allow' -or -not (@($ids | Where-Object { $_.Equals($ruleSid) }).Count -eq 1)) { throw 'key ACL verification failed' } }",
+].join("\n");
+
+function protectWindowsKey(path) {
+  try {
+    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand",
+      Buffer.from(WINDOWS_KEY_ACL, "utf16le").toString("base64")], {
+      windowsHide: true, timeout: 10000, stdio: "pipe", env: { ...process.env, MOMO_ROUTED_KEY_PATH: path,
+        PSModulePath: undefined },
+    });
+  } catch (error) {
+    throw new Error("Windows key ACL could not be verified.", { cause: error });
+  }
+}
 // Kept outside settings and separate from the client-visible bearer token.
 // Never silently rotate an existing, unreadable key: doing so would invalidate
 // recoverable histories and turn a storage failure into apparent success.
@@ -40,6 +66,7 @@ function routedEnvelopeKey(env, create = false) {
     try {
       const stat = lstatSync(path);
       if (!stat.isFile() || (process.platform !== "win32" && (stat.mode & 0o077))) throw new Error("unsafe key file");
+      if (process.platform === "win32") protectWindowsKey(path);
       const key = readFileSync(path);
       if (key.length !== 32) throw new Error("invalid key length");
       return key;
@@ -56,6 +83,7 @@ function routedEnvelopeKey(env, create = false) {
       // A failed flush preserves an explicit failure rather than a fresh envelope.
       fsyncSync(fd);
       closeSync(fd); fd = undefined;
+      if (process.platform === "win32") protectWindowsKey(path);
       return key;
     } catch (error) {
       if (fd !== undefined) { try { closeSync(fd); } catch {} }

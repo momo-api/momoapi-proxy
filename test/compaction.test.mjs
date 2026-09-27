@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, rmSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildLocalCompactResponse, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
@@ -724,6 +724,21 @@ test("routed signing key survives server restart and rejects missing or corrupte
     const key = readFileSync(keyPath);
     assert.equal(key.length, 32);
     assert.ok(!key.equals(Buffer.from(settings.localToken)));
+    if (process.platform === "win32") {
+      const { execFileSync } = await import("node:child_process");
+      const encoded = Buffer.from([
+        "$p = [Environment]::GetEnvironmentVariable('MOMO_ROUTED_KEY_PATH')",
+        "$a = Get-Acl -LiteralPath $p",
+        "if (-not $a.AreAccessRulesProtected -or $a.Access.Count -ne 3) { exit 1 }",
+        "$ids = @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))",
+        "foreach ($r in $a.Access) { $s = $r.IdentityReference.Translate([Security.Principal.SecurityIdentifier]); if ($r.IsInherited -or $r.AccessControlType -ne 'Allow' -or -not (@($ids | Where-Object { $_.Equals($s) }).Count -eq 1)) { exit 1 } }",
+      ].join("\n"), "utf16le").toString("base64");
+      execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded], {
+        windowsHide: true, stdio: "ignore", env: { ...process.env, PSModulePath: undefined, MOMO_ROUTED_KEY_PATH: keyPath },
+      });
+    }
+    const backup = join(home, "offline-private-backup.key");
+    copyFileSync(keyPath, backup);
     await new Promise((resolve) => server.close(resolve));
     server = await start();
     assert.ok(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol", env));
@@ -740,6 +755,9 @@ test("routed signing key survives server restart and rejects missing or corrupte
     assert.equal(missing.status, 503);
     assert.match(await missing.text(), /routed_compact_key_unavailable/);
     assert.throws(() => readFileSync(keyPath), { code: "ENOENT" });
+    copyFileSync(backup, keyPath);
+    assert.ok(existsSync(keyPath));
+    assert.ok(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol", env));
   } finally {
     if (server?.listening) await new Promise((resolve) => server.close(resolve));
     rmSync(home, { recursive: true, force: true });
