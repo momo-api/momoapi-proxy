@@ -401,9 +401,9 @@ test("explicit routed text pilot summarizes history with no tools and preserves 
   const sent = [];
   const fakeFetch = async (url, init) => {
     sent.push({ url, body: JSON.parse(init.body) });
-    if (sent.length <= 2) return Response.json({ status: "completed", output: [
+    if (sent.length <= 2) return new Response(responseSse("resp_summary", [
       { type: "message", role: "assistant", content: [{ type: "output_text", text: "Prior answer was observed; completion not independently verified." }] },
-    ] });
+    ]), { headers: { "content-type": "text/event-stream" } });
     return new Response(responseSse("resp_after_routed", []), { headers: { "content-type": "text/event-stream" } });
   };
   const input = [
@@ -429,7 +429,7 @@ test("explicit routed text pilot summarizes history with no tools and preserves 
   assert.equal(sent.length, 3);
   for (const request of sent.slice(0, 2)) {
     assert.equal(request.url, "https://gateway.example/v1/responses");
-    assert.equal(request.body.stream, false);
+    assert.equal(request.body.stream, true);
     assert.equal(request.body.store, false);
     assert.equal(request.body.tools, undefined);
     assert.doesNotMatch(JSON.stringify(request.body), /Only audit the new task/);
@@ -438,7 +438,7 @@ test("explicit routed text pilot summarizes history with no tools and preserves 
 
 test("routed text pilot rejects tools and invalid summaries rather than fabricating success", async () => {
   let calls = 0;
-  await withServer(async () => { calls++; return Response.json({ status: "completed", output: [] }); }, async (base) => {
+  await withServer(async () => { calls++; return new Response(responseSse("resp_empty_summary", []), { headers: { "content-type": "text/event-stream" } }); }, async (base) => {
     const send = (input) => fetch(base + "/v1/responses/compact", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input }) });
     const unsupported = await send([{ role: "user", content: "Old" }, { type: "function_call", call_id: "call_1", name: "exec", arguments: "{}" }, { role: "user", content: "New" }]);
     assert.equal(unsupported.status, 422);
@@ -476,13 +476,34 @@ test("routed pilot propagates upstream throttling once and rejects managed auto-
   }, { compactionMode: "routed" });
 });
 
+test("routed pilot rejects truncated, failed, tool-bearing and non-SSE summary responses", async () => {
+  const variants = [
+    new Response('data: {"type":"response.output_text.delta","delta":"partial"}\n\n', { headers: { "content-type": "text/event-stream" } }),
+    new Response('data: {"type":"response.failed"}\n\n', { headers: { "content-type": "text/event-stream" } }),
+    new Response(responseSse("resp_tool_summary", [{ type: "function_call", call_id: "unexpected", name: "exec", arguments: "{}" }]), { headers: { "content-type": "text/event-stream" } }),
+    Response.json({ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "not SSE" }] }] }),
+  ];
+  let calls = 0;
+  await withServer(async () => variants[calls++], async (base) => {
+    for (const _ of variants) {
+      const response = await fetch(base + "/v1/responses/compact", {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "Old" }, { role: "user", content: "New" }] }),
+      });
+      assert.equal(response.status, 502);
+      assert.equal((await response.json()).error.code, "invalid_routed_compact_response");
+    }
+  }, { compactionMode: "routed" });
+  assert.equal(calls, variants.length);
+});
+
 test("routed-tools pilot replays exact paired function and custom tools without exposing them to the summary model", async () => {
   const captured = [];
   const fakeFetch = async (url, init) => {
     captured.push({ url, body: JSON.parse(init.body) });
-    if (captured.length <= 2) return Response.json({ status: "completed", output: [
+    if (captured.length <= 2) return new Response(responseSse("resp_tool_summary", [
       { type: "message", role: "assistant", content: [{ type: "output_text", text: "Earlier discussion, tool outcomes not inferred." }] },
-    ] });
+    ]), { headers: { "content-type": "text/event-stream" } });
     return new Response(responseSse("resp_paired_replay", []), { headers: { "content-type": "text/event-stream" } });
   };
   const pairs = [
