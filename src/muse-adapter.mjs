@@ -32,6 +32,19 @@ export function hasApplyPatchTool(payload) {
     && hasExactApplyPatchDeclaration(payload.tools);
 }
 
+// This patch-only adapter strips the incoming tool contract. Reject other
+// agent tools instead of presenting a text-only plan as completed work.
+export function hasUnsupportedMuseTools(payload) {
+  const tools = [
+    ...(Array.isArray(payload?.tools) ? payload.tools : []),
+    ...(Array.isArray(payload?.input) ? payload.input.flatMap((item) =>
+      item?.type === "additional_tools" && Array.isArray(item.tools) ? item.tools : []) : []),
+  ];
+  return tools.some((tool) => tool?.type !== "custom" || tool?.name !== "apply_patch")
+    || (Array.isArray(payload?.input) && payload.input.some((item) =>
+      item?.type === "additional_tools" && Array.isArray(item.tools) && item.tools.length > 0));
+}
+
 function containsForbiddenCharacter(text) {
   for (const character of text) {
     const code = character.codePointAt(0);
@@ -177,6 +190,12 @@ export { LIMITS as MUSE_PATCH_LIMITS };
 export async function bridgeMuseResponses(request, response, settings, payload, fetchImpl, signal) {
   if (payload?.model !== "muse-auto") {
     return writeResponsesFailure(response, payload?.model || "unknown", 400, "Muse adapter only accepts muse-auto", "invalid_model");
+  }
+
+  if (hasUnsupportedMuseTools(payload)) {
+    return writeResponsesFailure(response, payload.model, 422,
+      "muse-auto patch adapter cannot execute requested function or custom tools; select a tool-capable model.",
+      "muse_tools_unsupported");
   }
 
   const body = buildMuseChatBody(payload);

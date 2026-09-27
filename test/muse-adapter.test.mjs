@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMuseChatBody, extractStrictCodexPatch, hasApplyPatchTool, latestMuseUserTask, MUSE_PATCH_LIMITS } from "../src/muse-adapter.mjs";
+import { buildMuseChatBody, extractStrictCodexPatch, hasApplyPatchTool, hasUnsupportedMuseTools, latestMuseUserTask, MUSE_PATCH_LIMITS } from "../src/muse-adapter.mjs";
 
 const validAdd = "*** Begin Patch\n*** Add File: notes/ok.txt\n+hello\n+world\n*** End Patch";
 
@@ -75,4 +75,11 @@ test("builds a stripped chat request with a strict system contract", () => {
   assert.equal("tools" in body, false);
 });
 
-
+test("Muse patch bridge rejects non-patch agent tool declarations", () => {
+  assert.equal(hasUnsupportedMuseTools({ tools: [{ type: "function", name: "shell" }] }), true);
+  assert.equal(hasUnsupportedMuseTools({ tools: [{ type: "namespace", name: "functions", tools: [] }] }), true);
+  assert.equal(hasUnsupportedMuseTools({ input: [{ type: "additional_tools", tools: [{ type: "custom", name: "exec" }] }] }), true);
+  assert.equal(hasUnsupportedMuseTools({ input: [{ type: "additional_tools", tools: [{ type: "custom", name: "apply_patch" }] }] }), true);
+  assert.equal(hasUnsupportedMuseTools({ tools: [{ type: "custom", name: "apply_patch" }] }), false);
+  assert.equal(hasUnsupportedMuseTools({ tools: [] }), false);
+});
