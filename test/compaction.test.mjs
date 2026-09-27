@@ -372,6 +372,89 @@ test("compact endpoint defaults to local checkpoint without an upstream model ca
   assert.equal(fetchCalls, 0);
 });
 
+test("native compact refuses unverified capability without contacting upstream", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected upstream"); }, async (base) => {
+    const input = [{ role: "user", content: "CURRENT_TASK" }];
+    const v1 = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input }) });
+    assert.equal(v1.status, 422);
+    assert.equal((await v1.json()).error.code, "compact_capability_unverified");
+    const v2 = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [...input, { type: "compaction_trigger" }] }) });
+    assert.match(await v2.text(), /compact_capability_unverified/);
+  }, { compactionMode: "native" });
+  assert.equal(calls, 0);
+});
+
+test("native compact preserves original v1 request and upstream failure without checkpoint", async () => {
+  const input = [{ role: "user", content: "CURRENT_TASK" }];
+  let sent;
+  await withServer(async (url, init) => { sent = { url, body: JSON.parse(init.body) }; return Response.json({ error: { message: "not found" } }, { status: 404 }); }, async (base) => {
+    const response = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input }) });
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error.code, "http_404");
+  }, { endpoint: "https://momoapi.us", compactionMode: "native", contextPolicy: { nativeCompactModels: ["gpt-5.6-sol"] } });
+  assert.equal(sent.url, "https://momoapi.us/v1/responses/compact");
+  assert.deepEqual(sent.body.input, input);
+});
+
+test("native v2 compact fails rather than truncating oversized replacement history", async () => {
+  const huge = [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "A".repeat(2 * 1024 * 1024) }] }];
+  let calls = 0;
+  await withServer(async () => { calls++; return Response.json({ object: "response.compaction", output: huge }); }, async (base) => {
+    const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "CURRENT_TASK" }, { type: "compaction_trigger" }] }) });
+    assert.match(await response.text(), /local_compaction_envelope_too_large/);
+  }, { endpoint: "https://momoapi.us", compactionMode: "native", contextPolicy: { nativeCompactModels: ["gpt-5.6-sol"] } });
+  assert.equal(calls, 1);
+});
+
+test("native v2 rejects opaque compact output rather than wrapping cross-provider state", async () => {
+  await withServer(async () => Response.json({ object: "response.compaction", output: [{ type: "compaction", encrypted_content: "opaque-provider-state" }] }), async (base) => {
+    const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "CURRENT_TASK" }, { type: "compaction_trigger" }] }) });
+    assert.match(await response.text(), /invalid_compact_response/);
+  }, { endpoint: "https://momoapi.us", compactionMode: "native", contextPolicy: { nativeCompactModels: ["gpt-5.6-sol"] } });
+});
+
+test("native compact capability is not inferred for arbitrary Responses gateways", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected"); }, async (base) => {
+    const response = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [] }) });
+    assert.equal(response.status, 422);
+  }, { endpoint: "https://gateway.example", compactionMode: "native", contextPolicy: { nativeCompactModels: ["gpt-5.6-sol"] } });
+  assert.equal(calls, 0);
+});
+
+test("native compact refuses declared models that use a non-Responses transport", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected"); }, async (base) => {
+    for (const model of ["claude-opus-4-6-thinking", "gemini-3.8-flash", "muse-auto"]) {
+      const response = await fetch(`${base}/v1/responses/compact`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model, input: [] }) });
+      assert.equal(response.status, 422);
+    }
+  }, { endpoint: "https://momoapi.us", compactionMode: "native", contextPolicy: { nativeCompactModels: ["claude-opus-4-6-thinking", "gemini-3.8-flash", "muse-auto"] } });
+  assert.equal(calls, 0);
+});
+
+test("verified native v2 replacement history replays through the versioned local envelope", async () => {
+  const history = [{ type: "message", role: "user", content: [{ type: "input_text", text: "COMPACTED_HISTORY" }] }];
+  const upstreamBodies = [];
+  await withServer(async (url, init) => {
+    upstreamBodies.push({ url, body: JSON.parse(init.body) });
+    return url.endsWith("/responses/compact")
+      ? Response.json({ object: "response.compaction", output: history })
+      : new Response(responseSse("resp_native_followup", []), { headers: { "content-type": "text/event-stream" } });
+  }, async (base) => {
+    const compact = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [{ role: "user", content: "CURRENT_TASK" }, { type: "compaction_trigger" }] }) });
+    const events = (await compact.text()).split("\n").filter((line) => line.startsWith("data: " )).map((line) => JSON.parse(line.slice(6)));
+    const item = events.find((event) => event.type === "response.output_item.done")?.item;
+    assert.deepEqual(decodeLocalCompaction(item.encrypted_content), history);
+    const followup = await fetch(`${base}/v1/responses`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [item, { role: "user", content: "FOLLOWUP" }] }) });
+    assert.equal(followup.status, 200);
+    await followup.text();
+  }, { endpoint: "https://momoapi.us", compactionMode: "native", contextPolicy: { nativeCompactModels: ["gpt-5.6-sol"] } });
+  assert.match(JSON.stringify(upstreamBodies[1].body.input), /COMPACTED_HISTORY/);
+  assert.doesNotMatch(JSON.stringify(upstreamBodies[1].body.input), /momo1:/);
+});
+
 test("repeated local compaction keeps only the latest user request as the active task", () => {
   const first = buildLocalCompactResponse("gpt-5.6-sol", [
     { role: "user", content: "What is the login account?" },

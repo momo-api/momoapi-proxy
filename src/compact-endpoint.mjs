@@ -1,7 +1,32 @@
 import { buildLocalCompactResponse, encodeLocalCompaction } from "./compaction.mjs";
+import { resolveTargetModel } from "./model-routing.mjs";
 
 const MIB = 1024 * 1024;
 const COMPACT_RESPONSE_MAX_BYTES = 32 * MIB;
+
+// A Responses-shaped gateway is not evidence that its compact endpoint exists.
+// Keep this allowlist empty until a backend/model is verified end to end.
+export function nativeCompactCapability(settings, model) {
+  const declared = settings?.contextPolicy?.nativeCompactModels;
+  if (!Array.isArray(declared) || !declared.includes(model)) return false;
+  if (resolveTargetModel(model).protocol !== "responses") return false;
+  try {
+    const url = new URL(settings.endpoint);
+    return url.protocol === "https:" && ["momoapi.us", "api.openai.com"].includes(url.hostname) && (!url.port || url.port === "443");
+  } catch {
+    return false;
+  }
+}
+
+export function compactUnsupportedError(model) {
+  return { error: { message: `Native compaction is not verified for model ${model}.`, type: "compact_error", code: "compact_capability_unverified" } };
+}
+
+export function isReplayableNativeCompactOutput(output) {
+  return Array.isArray(output) && output.length > 0 && output.every((item) =>
+    item && typeof item === "object" && !["compaction", "compaction_summary"].includes(item.type)
+    && !Object.hasOwn(item, "encrypted_content"));
+}
 
 export function shouldUseLocalCompact(status, message = "") {
   if (status === 413) return true;

@@ -67,10 +67,14 @@ function configuredProviderSwitchReplayLimit(settings = {}) {
   return configuredHistoryReplayLimit(settings);
 }
 
-export function prefersLocalCompaction(settings = {}) {
+export function compactionPolicy(settings = {}) {
   const policy = settings?.contextPolicy && typeof settings.contextPolicy === "object" ? settings.contextPolicy : {};
   const mode = String(process.env.MOMO_COMPACTION_MODE ?? settings?.compactionMode ?? policy.compactionMode ?? "local").toLowerCase();
-  return mode !== "upstream";
+  return new Set(["local", "upstream", "native"]).has(mode) ? mode : "local";
+}
+
+export function prefersLocalCompaction(settings = {}) {
+  return compactionPolicy(settings) === "local";
 }
 
 function inlineMarker(value) {

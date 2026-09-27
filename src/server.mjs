@@ -21,8 +21,8 @@ import { logRequest as writeRequestLog } from "./logger.mjs";
 import { summarizeToolRequest, createToolEventAudit, observeToolEvent, observeToolBlock } from "./tool-audit.mjs";
 import { getCurrentVersion } from "./updater.mjs";
 import { prepareMediaPayload, serializeOutboundBody, shouldFallbackResponses } from "./context-policy.mjs";
-import { buildLocalCompactResponse, compactLockKey, decodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "./compaction.mjs";
-import { encodeRecoverableCompaction, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
+import { buildLocalCompactResponse, compactLockKey, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prefersLocalCompaction, prepareCompactPayload, prepareContextManagedPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "./compaction.mjs";
+import { compactUnsupportedError, encodeRecoverableCompaction, isReplayableNativeCompactOutput, nativeCompactCapability, parseCompactResponseText, readCompactResponseText, shouldUseLocalCompact } from "./compact-endpoint.mjs";
 import { collectResponsesState, finalizeResponsesState, observeResponsesBlock, preparePreviousResponseReplay } from "./responses-state.mjs";
 import { generateImage, getImageTask, resolveImageCapabilities } from "./image-service.mjs";
 import { generateVideo, getVideoTask, resolveVideoCapabilities } from "./video-service.mjs";
@@ -191,7 +191,15 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
       response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
       return compactJson(response, 200, checkpoint);
     }
-    const prepared = prepareCompactPayload(payload, settings);
+    const strict = compactionPolicy(settings) !== "upstream";
+    if (strict && !nativeCompactCapability(settings, payload.model)) {
+      metricsState.compactFailures += 1;
+      response.momoCompactTrace = { policyAction: "compact_capability_unverified" };
+      return compactJson(response, 422, compactUnsupportedError(payload.model));
+    }
+    // A verified native endpoint receives the original client body, not a local
+    // history rewrite. The legacy upstream mode retains its old admission path.
+    const prepared = strict ? { payload, trace: { policyAction: "native_compact_passthrough" } } : prepareCompactPayload(payload, settings);
     response.momoCompactTrace = prepared.trace;
     const upstream = await fetchImpl(settings.endpoint + "/v1/responses/compact", {
       method: "POST",
@@ -202,11 +210,16 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
 
     if (upstream.ok) {
       const text = await readCompactResponseText(upstream);
-      return compactJson(response, upstream.status, parseCompactResponseText(text));
+      const compacted = parseCompactResponseText(text);
+      if (strict && compacted.output.length === 0) {
+        metricsState.compactFailures += 1;
+        return compactJson(response, 502, { error: { message: "Native compact returned an empty history.", type: "compact_error", code: "invalid_compact_response" } });
+      }
+      return compactJson(response, upstream.status, compacted);
     }
 
     const message = await upstreamErrorMessage(upstream);
-    if (shouldUseLocalCompact(upstream.status, message)) {
+    if (!strict && shouldUseLocalCompact(upstream.status, message)) {
       const checkpoint = buildLocalCompactResponse(payload.model, prepared.payload.input);
       response.momoCompactTrace = { ...prepared.trace, policyAction: "local_compact_checkpoint" };
       return compactJson(response, 200, checkpoint);
@@ -215,7 +228,7 @@ async function forwardCompact(request, response, settings, payload, fetchImpl, s
     metricsState.compactFailures += 1;
     return compactJson(response, upstream.status, { error: { message, type: "compact_error", code: `http_${upstream.status}` } });
   } catch (error) {
-    if (error?.code === "compact_budget_exceeded") {
+    if (compactionPolicy(settings) === "upstream" && error?.code === "compact_budget_exceeded") {
       const checkpoint = buildLocalCompactResponse(payload.model, error.localCheckpointInput || payload.input);
       response.momoCompactTrace = { compactBytes: 0, markerizedItems: 0, policyAction: "local_compact_checkpoint" };
       return compactJson(response, 200, checkpoint);
@@ -252,7 +265,13 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
       emitter.complete();
       return;
     }
-    const prepared = prepareCompactPayload(compactPayload, settings);
+    const strict = compactionPolicy(settings) !== "upstream";
+    if (strict && !nativeCompactCapability(settings, payload.model)) {
+      metricsState.compactFailures += 1;
+      response.momoCompactTrace = { policyAction: "compact_capability_unverified" };
+      return writeResponsesFailure(response, payload.model, 422, compactUnsupportedError(payload.model).error.message, "compact_capability_unverified");
+    }
+    const prepared = strict ? { payload: compactPayload, trace: { policyAction: "native_compact_v1_adapter" } } : prepareCompactPayload(compactPayload, settings);
     const upstream = await fetchImpl(settings.endpoint + "/v1/responses/compact", {
       method: "POST", headers: upstreamHeaders(settings), body: JSON.stringify(prepared.payload), signal,
     });
@@ -262,14 +281,27 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
       compacted = parseCompactResponseText(compactText);
     } else {
       const message = await upstreamErrorMessage(upstream);
-      if (!shouldUseLocalCompact(upstream.status, message)) {
+      if (strict || !shouldUseLocalCompact(upstream.status, message)) {
         metricsState.compactFailures += 1;
         return writeResponsesFailure(response, payload.model, upstream.status, message);
       }
       compacted = buildLocalCompactResponse(payload.model, prepared.payload.input);
     }
     const output = Array.isArray(compacted?.output) ? compacted.output : [];
-    const encryptedContent = encodeRecoverableCompaction(payload.model, prepared.payload.input, output);
+    if (strict && !isReplayableNativeCompactOutput(output)) {
+      metricsState.compactFailures += 1;
+      return writeResponsesFailure(response, payload.model, 502, "Native compact cannot be converted into a replayable v2 history item.", "invalid_compact_response");
+    }
+    let encryptedContent;
+    try {
+      encryptedContent = strict ? encodeLocalCompaction(output) : encodeRecoverableCompaction(payload.model, prepared.payload.input, output);
+    } catch (error) {
+      if (strict && error?.code === "local_compaction_envelope_too_large") {
+        metricsState.compactFailures += 1;
+        return writeResponsesFailure(response, payload.model, 413, "Native compact output exceeds the replay envelope limit.", error.code);
+      }
+      throw error;
+    }
     initSseResponse(response);
     const emitter = new ResponseStreamEmitter(response, payload.model, undefined, settings);
     emitter.start();
@@ -279,7 +311,7 @@ async function forwardCompactionTrigger(request, response, settings, payload, fe
     response.write(`event: response.output_item.done\ndata: ${JSON.stringify({ type: "response.output_item.done", response_id: emitter.responseId, output_index: index, item })}\n\n`);
     emitter.complete();
   } catch (error) {
-    if (error?.code === "compact_budget_exceeded") {
+    if (compactionPolicy(settings) === "upstream" && error?.code === "compact_budget_exceeded") {
       const checkpoint = buildLocalCompactResponse(payload.model, error.localCheckpointInput || compactPayload.input);
       const output = Array.isArray(checkpoint.output) ? checkpoint.output : [];
       const encryptedContent = encodeRecoverableCompaction(payload.model, compactPayload.input, output);
@@ -438,7 +470,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   response.momoToolAudit.normalized = summarizeToolRequest(cleanPayload);
   const historyReplay = prepareRoutedHistoryReplay(cleanPayload, settings, response);
   const replayPayload = historyReplay.payload;
-  const managedPayload = Array.isArray(replayPayload.context_management)
+  const managedPayload = compactionPolicy(settings) !== "native" && Array.isArray(replayPayload.context_management)
     && replayPayload.context_management.some((item) => item?.type === "compaction")
     ? prepareContextManagedPayload(replayPayload)
     : replayPayload;
