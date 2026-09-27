@@ -653,6 +653,47 @@ test("routed-tools pilot replays exact paired function and custom tools without 
   assert.match(JSON.stringify(captured[2].body.input), /I completed the old step/);
 });
 
+test("routed-tools repeat compaction retains paired evidence without reopening completed requests", async () => {
+  const sent = [];
+  await withServer(async (_url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(responseSse("resp_tool_repeat", [
+      { type: "reasoning", status: "completed", summary: [] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "Prior answer recorded; do not restart it." }] },
+    ]), { headers: { "content-type": "text/event-stream" } });
+  }, async (base) => {
+    const send = (input) => fetch(base + "/v1/responses", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [...input, { type: "compaction_trigger" }] }),
+    });
+    const compactItem = async (response) => {
+      assert.equal(response.status, 200);
+      const events = (await response.text()).split("\n").filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)));
+      return events.find((event) => event.type === "response.output_item.done")?.item;
+    };
+    const pair = [
+      { type: "function_call", call_id: "paired_repeat", name: "lookup", arguments: "{}" },
+      { type: "function_call_output", call_id: "paired_repeat", output: "verified result" },
+    ];
+    const first = await compactItem(await send([
+      { role: "user", content: "Old completed task" }, { role: "assistant", content: "Old answer" },
+      ...pair, { role: "assistant", content: "Lookup answered" }, { role: "user", content: "Current task" },
+    ]));
+    const second = await compactItem(await send([first, { role: "assistant", content: "Current task answered" },
+      { role: "user", content: "Latest task" }]));
+    const output = decodeRoutedCompaction(second.encrypted_content, "gpt-5.6-sol");
+    assert.deepEqual(output.filter((entry) => entry.call_id === "paired_repeat"), pair);
+    assert.equal(output.at(-1).content, "Latest task");
+    assert.equal(output.some((entry) => entry.role === "user" && entry.content === "Old completed task"), false);
+    assert.equal(output.filter((entry) => entry.role === "assistant"
+      && JSON.stringify(entry.content).includes("[Historical context summary;")).length, 1);
+    assert.equal(sent.length, 2);
+    assert.equal(sent.some((request) => JSON.stringify(request.input).includes("Latest task")), false);
+    assert.equal(sent.some((request) => JSON.stringify(request.input).includes("verified result")), false);
+  }, { compactionMode: "routed-tools" });
+});
+
 test("routed-tools rejects orphan, duplicate and pending pairs before model dispatch", async () => {
   let calls = 0;
   await withServer(async () => { calls++; throw new Error("unexpected summary call"); }, async (base) => {
