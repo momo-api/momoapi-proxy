@@ -457,6 +457,28 @@ test("routed text pilot rejects tools and invalid summaries rather than fabricat
   }, { compactionMode: "routed" });
 });
 
+test("routed pilot rejects extra request or message state before sending summary", async () => {
+  let calls = 0;
+  await withServer(async () => { calls++; throw new Error("unexpected upstream"); }, async (base) => {
+    const input = [{ role: "user", content: "Old" }, { role: "user", content: "New" }];
+    const bodies = [
+      { metadata: { session: "opaque" }, input },
+      { temperature: 0, input },
+      { input: [{ role: "user", content: "Old", id: "msg_original" }, input[1]] },
+      { input: [{ role: "user", content: [{ type: "input_text", text: "Old", annotations: [] }] }, input[1]] },
+      { input: [{ role: "developer", content: "Must preserve policy" }, ...input] },
+    ];
+    for (const body of bodies) {
+      const response = await fetch(base + "/v1/responses/compact", {
+        method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", ...body }),
+      });
+      assert.equal(response.status, 422);
+      assert.equal((await response.json()).error.code, "routed_compact_unsupported_history");
+    }
+  }, { compactionMode: "routed" });
+  assert.equal(calls, 0);
+});
+
 test("routed pilot propagates upstream throttling once and rejects managed auto-compaction", async () => {
   let calls = 0;
   await withServer(async () => { calls++; return Response.json({ error: { message: "rate limited" } }, { status: 429 }); }, async (base) => {
@@ -481,6 +503,8 @@ test("routed pilot rejects truncated, failed, tool-bearing and non-SSE summary r
     new Response('data: {"type":"response.output_text.delta","delta":"partial"}\n\n', { headers: { "content-type": "text/event-stream" } }),
     new Response('data: {"type":"response.failed"}\n\n', { headers: { "content-type": "text/event-stream" } }),
     new Response(responseSse("resp_tool_summary", [{ type: "function_call", call_id: "unexpected", name: "exec", arguments: "{}" }]), { headers: { "content-type": "text/event-stream" } }),
+    new Response('data: {"type":"response.output_item.done","item":{"type":"function_call","name":"exec"}}\n\n'
+      + responseSse("resp_forged_summary", [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "looks fine" }] }]), { headers: { "content-type": "text/event-stream" } }),
     Response.json({ status: "completed", output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "not SSE" }] }] }),
   ];
   let calls = 0;
