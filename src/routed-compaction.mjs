@@ -8,11 +8,13 @@ function failure(code, message, statusCode = 422) {
 }
 
 function textOf(item) {
-  if (!item || (item.type && item.type !== "message") || Object.hasOwn(item, "encrypted_content")
+  if (!item || (item.type && item.type !== "message")
+    || Object.keys(item).some((key) => !["type", "role", "content"].includes(key))
     || !["user", "assistant"].includes(item.role)) return null;
   if (typeof item.content === "string") return item.content;
   if (!Array.isArray(item.content) || !item.content.length || !item.content.every((part) =>
-    ["input_text", "output_text", "text"].includes(part?.type) && typeof part.text === "string")) return null;
+    part && Object.keys(part).every((key) => ["type", "text"].includes(key))
+    && ["input_text", "output_text", "text"].includes(part.type) && typeof part.text === "string")) return null;
   return item.content.map((part) => part.text).join("\n");
 }
 
@@ -52,9 +54,8 @@ function toolPairs(items) {
 }
 
 export function routedTextInput(payload, { pairedTools = false } = {}) {
-  if (payload.instructions != null || payload.tools != null || payload.previous_response_id != null
-    || payload.context_management != null) {
-    throw failure("routed_compact_unsupported_history", "Routed compaction pilot does not accept separate instructions, tools or provider continuation state.");
+  if (Object.keys(payload).some((key) => !["model", "input", "stream"].includes(key))) {
+    throw failure("routed_compact_unsupported_history", "Routed compaction pilot rejects additional request options, instructions, tools or provider continuation state.");
   }
   const items = Array.isArray(payload.input) ? payload.input : [];
   const lastUser = items.findLastIndex((item) => item?.role === "user");
