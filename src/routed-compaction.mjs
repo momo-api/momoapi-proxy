@@ -13,8 +13,16 @@ function failure(code, message, statusCode = 422) {
 
 function textOf(item) {
   if (!item || (item.type && item.type !== "message")
-    || Object.keys(item).some((key) => !["type", "role", "content"].includes(key))
-    || !["user", "assistant"].includes(item.role)) return null;
+    || Object.keys(item).some((key) => !["type", "role", "content", "id", "internal_chat_message_metadata_passthrough"].includes(key))
+    || !["user", "assistant", "developer"].includes(item.role)) return null;
+  if (item.id !== undefined && (typeof item.id !== "string" || item.id.length > 256)) return null;
+  const metadata = item.internal_chat_message_metadata_passthrough;
+  if (metadata !== undefined && (!metadata || typeof metadata !== "object" || Array.isArray(metadata)
+    || Object.keys(metadata).some((key) => !["turn_id", "create_time", "content_item_kinds"].includes(key))
+    || (metadata.turn_id !== undefined && typeof metadata.turn_id !== "string")
+    || (metadata.create_time !== undefined && typeof metadata.create_time !== "number")
+    || (metadata.content_item_kinds !== undefined && (!Array.isArray(metadata.content_item_kinds)
+      || !metadata.content_item_kinds.every((kind) => typeof kind === "string"))))) return null;
   if (typeof item.content === "string") return item.content;
   if (!Array.isArray(item.content) || !item.content.length || !item.content.every((part) =>
     part && Object.keys(part).every((key) => ["type", "text"].includes(key))
@@ -180,12 +188,17 @@ export function routedTextInput(payload, { pairedTools = false, env = process.en
   if (retained.some((item) => hasUnsupportedReplayState(item))) {
     throw failure("routed_compact_unsupported_history", "Routed compaction cannot replay opaque or attachment-bearing tool history.");
   }
-  if (lastUser < 0 || historyItems.slice(0, firstTool < 0 ? undefined : firstTool).some((item) => textOf(item) === null)
+  const prefix = historyItems.slice(0, firstTool < 0 ? undefined : firstTool);
+  const developers = prefix.filter((item) => item?.role === "developer");
+  if (lastUser < 0 || prefix.some((item) => textOf(item) === null)
     || retained.some((item) => textOf(item) === null && !CALL_TYPES.has(item?.type) && !RESULT_TYPES.has(item?.type))
     || items.slice(lastUser).some((item) => textOf(item) === null || item.role !== "user")) {
-    throw failure("routed_compact_unsupported_history", "Routed compaction pilot requires only plain-text user/assistant turns and a current user turn.");
+    throw failure("routed_compact_unsupported_history", "Routed compaction requires plain-text turns and a current user turn.");
   }
-  const history = historyItems.slice(0, firstTool < 0 ? undefined : firstTool)
+  if (Buffer.byteLength(JSON.stringify(developers)) > 128 * 1024) {
+    throw failure("routed_compact_constraints_too_large", "Retained developer constraints exceed 128 KiB.", 413);
+  }
+  const history = prefix.filter((item) => item.role !== "developer")
     .map((item) => ({ role: item.role, text: textOf(item) }));
   if (!history.length) throw failure("routed_compact_unsupported_history", "No history is available to compact.");
   if (Buffer.byteLength(JSON.stringify(history)) > 256 * 1024) {
@@ -194,7 +207,7 @@ export function routedTextInput(payload, { pairedTools = false, env = process.en
   if (Buffer.byteLength(JSON.stringify(retained)) > 512 * 1024) {
     throw failure("routed_compact_tools_too_large", "Retained causal tool history exceeds the pilot replay limit.", 413);
   }
-  return { history, current: items.slice(lastUser), retained };
+  return { history, developers, current: items.slice(lastUser), retained };
 }
 
 async function readRoutedSummary(upstream) {
@@ -240,7 +253,7 @@ export async function routedTextCompaction(settings, payload, fetchImpl, signal,
   if (resolveTargetModel(payload.model).protocol !== "responses") {
     throw failure("routed_compact_model_unsupported", "Routed text compaction pilot requires a Responses model.");
   }
-  const { history, current, retained } = routedTextInput(payload, options);
+  const { history, developers, current, retained } = routedTextInput(payload, options);
   const body = {
     model: payload.model, stream: true, store: false, max_output_tokens: 2048,
     input: [
@@ -269,6 +282,7 @@ export async function routedTextCompaction(settings, payload, fetchImpl, signal,
     id: "resp_compact_" + randomUUID(), object: "response.compaction", created_at: Math.floor(Date.now() / 1000),
     output: [
       { type: "message", role: "assistant", content: [{ type: "output_text", text: ROUTED_SUMMARY_PREFIX + summary }] },
+      ...developers,
       ...retained,
       ...current,
     ],

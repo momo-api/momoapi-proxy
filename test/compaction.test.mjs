@@ -440,6 +440,40 @@ test("explicit routed text pilot summarizes history with no tools and preserves 
   }
 });
 
+test("routed compaction retains developer constraints and bounded Codex message metadata verbatim", async () => {
+  const sent = [];
+  const fake = async (_url, init) => {
+    sent.push(JSON.parse(init.body));
+    return new Response(responseSse("resp_developer", [
+      { type: "message", role: "assistant", content: [{ type: "output_text", text: "The old request was answered; do not restart it." }] },
+    ]), { headers: { "content-type": "text/event-stream" } });
+  };
+  const old = { type: "message", id: "msg_older", role: "user", content: [{ type: "input_text", text: "Old request" }],
+    internal_chat_message_metadata_passthrough: { turn_id: "turn_old", content_item_kinds: ["text"] } };
+  const developer = { type: "message", id: "msg_constraint", role: "developer",
+    content: [{ type: "input_text", text: "Never execute a finished request again." }],
+    internal_chat_message_metadata_passthrough: { turn_id: "turn_current", content_item_kinds: ["text"] } };
+  const current = { type: "message", id: "msg_current", role: "user", content: [{ type: "input_text", text: "Current request" }],
+    internal_chat_message_metadata_passthrough: { turn_id: "turn_current", content_item_kinds: ["text"] } };
+  await withServer(fake, async (base) => {
+    const send = (input) => fetch(base + "/v1/responses/compact", { method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input }) });
+    const first = await send([old, developer, current]);
+    assert.equal(first.status, 200);
+    const output = (await first.json()).output;
+    assert.deepEqual(output[1], developer);
+    assert.deepEqual(output[2], current);
+    assert.doesNotMatch(JSON.stringify(sent[0]), /Never execute a finished request again|Current request/);
+    const next = await send([...output, { type: "message", role: "assistant", content: "Current answer" },
+      { role: "user", content: "Next request" }]);
+    assert.equal(next.status, 200);
+    const repeated = (await next.json()).output;
+    assert.deepEqual(repeated[1], developer);
+    assert.equal(repeated.filter((item) => item.role === "developer").length, 1);
+    assert.equal(repeated.at(-1).content, "Next request");
+  }, { compactionMode: "routed" });
+});
+
 test("routed text pilot rejects tools and invalid summaries rather than fabricating success", async () => {
   let calls = 0;
   await withServer(async () => { calls++; return new Response(responseSse("resp_empty_summary", []), { headers: { "content-type": "text/event-stream" } }); }, async (base) => {
@@ -531,9 +565,9 @@ test("routed pilot rejects extra request or message state before sending summary
     const bodies = [
       { metadata: { session: "opaque" }, input },
       { temperature: 0, input },
-      { input: [{ role: "user", content: "Old", id: "msg_original" }, input[1]] },
+      { input: [{ role: "user", content: "Old", id: 123 }, input[1]] },
       { input: [{ role: "user", content: [{ type: "input_text", text: "Old", annotations: [] }] }, input[1]] },
-      { input: [{ role: "developer", content: "Must preserve policy" }, ...input] },
+      { input: [{ role: "developer", content: "Must preserve policy", encrypted_content: "opaque" }, ...input] },
     ];
     for (const body of bodies) {
       const response = await fetch(base + "/v1/responses/compact", {
