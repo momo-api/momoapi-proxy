@@ -126,6 +126,7 @@ export function resolveSettings(env = process.env) {
     requestAdmission: saved.requestAdmission && typeof saved.requestAdmission === "object" ? saved.requestAdmission : {},
     outputPolicy: saved.outputPolicy && typeof saved.outputPolicy === "object" ? saved.outputPolicy : {},
     contextPolicy: saved.contextPolicy && typeof saved.contextPolicy === "object" ? saved.contextPolicy : {},
+    compactionMode: saved.compactionMode,
     imageAssetDirectory: join(appHome(env), "images"),
     attachmentAssetDirectory: join(appHome(env), "attachments"),
     attachmentAssets: {
