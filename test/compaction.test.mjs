@@ -581,6 +581,26 @@ test("routed pilot rejects truncated, failed, tool-bearing and non-SSE summary r
   assert.equal(calls, variants.length);
 });
 
+test("routed summary accepts upstream reasoning items but replays only the text message", async () => {
+  await withServer(async () => new Response(responseSse("resp_reasoning_summary", [
+    { type: "reasoning", id: "rs_1", status: "completed", summary: [] },
+    { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "Earlier task was answered; do not restart it." }] },
+  ]), { headers: { "content-type": "text/event-stream" } }), async (base) => {
+    const response = await fetch(base + "/v1/responses/compact", {
+      method: "POST", headers: authHeaders(),
+      body: JSON.stringify({ model: "gpt-5.6-sol", input: [
+        { role: "user", content: "Old task" }, { role: "assistant", content: "Old answer" },
+        { role: "user", content: "Current task" },
+      ] }),
+    });
+    assert.equal(response.status, 200);
+    const output = (await response.json()).output;
+    assert.deepEqual(output.map((item) => item.role), ["assistant", "user"]);
+    assert.match(output[0].content[0].text, /do not restart it/);
+    assert.doesNotMatch(JSON.stringify(output), /rs_1/);
+  }, { compactionMode: "routed" });
+});
+
 test("routed-tools pilot replays exact paired function and custom tools without exposing them to the summary model", async () => {
   const captured = [];
   const fakeFetch = async (url, init) => {
