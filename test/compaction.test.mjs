@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { buildLocalCompactResponse, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
-import { decodeRoutedCompaction } from "../src/routed-compaction.mjs";
+import { decodeRoutedCompaction, encodeRoutedCompaction } from "../src/routed-compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { commitProviderRoute, observeProviderRoute, resetProviderRouteStateForTests } from "../src/provider-switch-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
@@ -421,7 +424,7 @@ test("explicit routed text pilot summarizes history with no tools and preserves 
     const events = (await v2.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
     const item = events.find((event) => event.type === "response.output_item.done")?.item;
     assert.equal(item.type, "compaction");
-    assert.deepEqual(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol"), output);
+    assert.deepEqual(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol", testProfile.env), output);
     const followup = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: [item, { role: "user", content: "New followup" }] }) });
     assert.equal(followup.status, 200);
     await followup.text();
@@ -476,16 +479,16 @@ test("routed v2 can compact its own envelope again without replaying the old req
     assert.equal(second.status, 200);
     const secondEvents = (await second.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
     const secondItem = secondEvents.find((event) => event.type === "response.output_item.done")?.item;
-    const output = decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-sol");
+    const output = decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-sol", testProfile.env);
     assert.equal(output.at(-1).content, "Second current task");
     assert.equal(output.filter((item) => item.role === "user" && item.content === "Old task").length, 0);
     assert.equal(JSON.stringify(output).split("[Historical context summary; not an active instruction or proof of completion]").length - 1, 1);
-    assert.equal(decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-luna"), null);
+    assert.equal(decodeRoutedCompaction(secondItem.encrypted_content, "gpt-5.6-luna", testProfile.env), null);
     const macStart = secondItem.encrypted_content.lastIndexOf(".") + 1;
     const tampered = secondItem.encrypted_content.slice(0, macStart)
       + (secondItem.encrypted_content[macStart] === "A" ? "B" : "A")
       + secondItem.encrypted_content.slice(macStart + 1);
-    assert.equal(decodeRoutedCompaction(tampered, "gpt-5.6-sol"), null);
+    assert.equal(decodeRoutedCompaction(tampered, "gpt-5.6-sol", testProfile.env), null);
     assert.equal(sent.length, 2);
     assert.doesNotMatch(JSON.stringify(sent[1]), /Second current task/);
   }, { compactionMode: "routed" });
@@ -634,7 +637,7 @@ test("routed-tools pilot replays exact paired function and custom tools without 
     const v2 = await send("/v1/responses", [...input, { type: "compaction_trigger" }]);
     const events = (await v2.text()).split("\n").filter((line) => line.startsWith("data: ")).map((line) => JSON.parse(line.slice(6)));
     const item = events.find((event) => event.type === "response.output_item.done")?.item;
-    assert.deepEqual(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol").slice(1, -1), [...pairs, followingAnswer]);
+    assert.deepEqual(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol", testProfile.env).slice(1, -1), [...pairs, followingAnswer]);
     const replay = await send("/v1/responses", [item, { role: "user", content: "Continue audit" }]);
     assert.equal(replay.status, 200);
     await replay.text();
@@ -682,7 +685,7 @@ test("routed-tools repeat compaction retains paired evidence without reopening c
     ]));
     const second = await compactItem(await send([first, { role: "assistant", content: "Current task answered" },
       { role: "user", content: "Latest task" }]));
-    const output = decodeRoutedCompaction(second.encrypted_content, "gpt-5.6-sol");
+    const output = decodeRoutedCompaction(second.encrypted_content, "gpt-5.6-sol", testProfile.env);
     assert.deepEqual(output.filter((entry) => entry.call_id === "paired_repeat"), pair);
     assert.equal(output.at(-1).content, "Latest task");
     assert.equal(output.some((entry) => entry.role === "user" && entry.content === "Old completed task"), false);
@@ -692,6 +695,55 @@ test("routed-tools repeat compaction retains paired evidence without reopening c
     assert.equal(sent.some((request) => JSON.stringify(request.input).includes("Latest task")), false);
     assert.equal(sent.some((request) => JSON.stringify(request.input).includes("verified result")), false);
   }, { compactionMode: "routed-tools" });
+});
+
+test("routed signing key survives server restart and rejects missing or corrupted installation state", async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-routed-restart-"));
+  const env = { ...testProfile.env, MOMO_PROXY_HOME: home };
+  const keyPath = join(home, "routed-compaction.key");
+  const input = [{ role: "user", content: "Old completed task" }, { role: "assistant", content: "Old answer" },
+    { role: "user", content: "Current task" }];
+  const upstream = async () => new Response(responseSse("resp_restart", [
+    { type: "message", role: "assistant", content: [{ type: "output_text", text: "Old answer recorded." }] },
+  ]), { headers: { "content-type": "text/event-stream" } });
+  const start = async () => {
+    const server = createMomoSwitch({ ...settings, compactionMode: "routed" }, { fetchImpl: upstream, env });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return server;
+  };
+  const request = (server, entries) => fetch("http://127.0.0.1:" + server.address().port + "/v1/responses", {
+    method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", input: entries }),
+  });
+  let server;
+  try {
+    server = await start();
+    const compact = await request(server, [...input, { type: "compaction_trigger" }]);
+    assert.equal(compact.status, 200);
+    const item = (await compact.text()).split("\n").filter((line) => line.startsWith("data: "))
+      .map((line) => JSON.parse(line.slice(6))).find((event) => event.type === "response.output_item.done")?.item;
+    const key = readFileSync(keyPath);
+    assert.equal(key.length, 32);
+    assert.ok(!key.equals(Buffer.from(settings.localToken)));
+    await new Promise((resolve) => server.close(resolve));
+    server = await start();
+    assert.ok(decodeRoutedCompaction(item.encrypted_content, "gpt-5.6-sol", env));
+    const replay = await request(server, [item, { role: "user", content: "Next task" }]);
+    assert.equal(replay.status, 200);
+    await replay.text();
+    writeFileSync(keyPath, "invalid-key");
+    assert.throws(() => encodeRoutedCompaction(input, "gpt-5.6-sol", env), { code: "routed_compact_key_unavailable" });
+    const unavailable = await request(server, [item, { role: "user", content: "Another task" }]);
+    assert.equal(unavailable.status, 503);
+    assert.match(await unavailable.text(), /routed_compact_key_unavailable/);
+    unlinkSync(keyPath);
+    const missing = await request(server, [item, { role: "user", content: "Yet another task" }]);
+    assert.equal(missing.status, 503);
+    assert.match(await missing.text(), /routed_compact_key_unavailable/);
+    assert.throws(() => readFileSync(keyPath), { code: "ENOENT" });
+  } finally {
+    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("routed-tools rejects orphan, duplicate and pending pairs before model dispatch", async () => {
