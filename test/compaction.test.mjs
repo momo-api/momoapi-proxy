@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLocalCompactResponse, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
+import { buildLocalCompactResponse, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { commitProviderRoute, observeProviderRoute, resetProviderRouteStateForTests } from "../src/provider-switch-state.mjs";
 import { createMomoSwitch, resetMetrics } from "../src/server.mjs";
@@ -359,7 +359,7 @@ test("a tool-result-only continuation is current data and is never checkpointed 
   assert.equal(result.payload.input[0], toolResult);
 });
 
-test("compact endpoint defaults to local checkpoint without an upstream model call", async () => {
+test("local compatibility mode creates a checkpoint only when explicitly selected", async () => {
   let fetchCalls = 0;
   await withServer(async () => { fetchCalls++; return new Response("unexpected", { status: 500 }); }, async (base) => {
     const response = await fetch(`${base}/v1/responses/compact`, {
@@ -370,6 +370,31 @@ test("compact endpoint defaults to local checkpoint without an upstream model ca
     assert.match(JSON.stringify(await response.json()), /keep this task/);
   }, { compactionMode: "local" });
   assert.equal(fetchCalls, 0);
+});
+
+test("unconfigured compaction fails closed while ordinary requests still reach upstream", async () => {
+  assert.equal(compactionPolicy({}), "native");
+  let calls = 0;
+  await withServer(async () => {
+    calls++;
+    return new Response(responseSse("resp_ordinary", []), { headers: { "content-type": "text/event-stream" } });
+  }, async (base) => {
+    const send = (path, body) => fetch(base + path, {
+      method: "POST", headers: authHeaders(), body: JSON.stringify({ model: "gpt-5.6-sol", ...body }),
+    });
+    const input = [{ role: "user", content: "new task" }];
+    const compact = await send("/v1/responses/compact", { input });
+    assert.equal(compact.status, 422);
+    assert.equal((await compact.json()).error.code, "compact_capability_unverified");
+    const trigger = await send("/v1/responses", { input: [...input, { type: "compaction_trigger" }] });
+    assert.match(await trigger.text(), /compact_capability_unverified/);
+    const managed = await send("/v1/responses", { input, context_management: [{ type: "compaction", compact_threshold: 200000 }] });
+    assert.match(await managed.text(), /compact_capability_unverified/);
+    const ordinary = await send("/v1/responses", { input });
+    assert.equal(ordinary.status, 200);
+    await ordinary.text();
+  }, { compactionMode: undefined });
+  assert.equal(calls, 1);
 });
 
 test("native compact refuses unverified capability without contacting upstream", async () => {

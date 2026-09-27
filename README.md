@@ -339,12 +339,12 @@ calls. Final parsing, output budgets and existing tolerant partial-input semanti
 are unchanged. See npm run benchmark:incremental-stream -- --baseline-root=...
 for an explicit clean-baseline, sequential A/B comparison.
 When one Codex thread switches protocol families (Responses, Chat, Gemini, or
-Claude), histories above 192 KiB use the same continuity-safe local checkpoint
-before conversion. This avoids replaying a large provider-specific transcript
-that cannot reuse the previous provider's response state or prompt cache. The
-checkpoint retains constraints, the active task, pending calls, complete call/result
+Claude), the proxy does not create a local checkpoint by default. Provider-
+specific history conversion still occurs, but a lossy replay checkpoint requires
+an explicit size guard. When enabled, the checkpoint retains constraints, the
+active task, pending calls, complete call/result
 pairs, recent execution evidence, and dynamically loaded tools. Ordinary requests
-still use the 512 KiB historical replay threshold. Optional non-secret overrides
+also have no historical replay threshold by default. Optional non-secret overrides
 are `contextPolicy.providerSwitchReplayMb` (0.0625-2) or
 `MOMO_PROVIDER_SWITCH_REPLAY_MB`; restart is required. Local metrics and bounded
 request logs expose only aggregate byte savings and a 16-hex anonymous thread hash.
@@ -385,9 +385,9 @@ Long-running Responses clients may use either official compact mode:
 }
 ```
 
-or `POST /v1/responses/compact`. Compaction defaults to a local recoverable checkpoint, so old history is not sent to or billed by an upstream model. Set `MOMO_COMPACTION_MODE=upstream` only when upstream semantic compaction is explicitly wanted. The upstream mode has an independent 32 MiB default budget (`MOMO_COMPACT_BODY_LIMIT_MB`, capped at 64 MiB), validates the returned `response.compaction`, caps the upstream response at 32 MiB, and safely markerizes old binary history before dispatch. Codex v2 local compaction envelopes are capped at 1 MiB and fall back to the fixed checkpoint when needed. Ordinary model-switch replays larger than 512 KiB are also replaced with a local history checkpoint while the current user turn is preserved; customize that ceiling with `MOMO_MAX_HISTORICAL_REPLAY_MB`. Model, authentication, quota and server errors are never converted into a fake compact success.
+or `POST /v1/responses/compact`. The default is fail-closed native capability routing: only explicitly verified Responses models may compact; unsupported models return `compact_capability_unverified` (422) rather than a fabricated checkpoint. Set `MOMO_COMPACTION_MODE=local` only to opt into the lossy compatibility checkpoint, or `MOMO_COMPACTION_MODE=upstream` to retain legacy upstream/fallback behavior. That legacy upstream mode has an independent 32 MiB default budget (`MOMO_COMPACT_BODY_LIMIT_MB`, capped at 64 MiB), validates the returned `response.compaction`, caps the response at 32 MiB, and markerizes old binary history before dispatch. Codex v2 local envelopes are capped at 1 MiB. Historical replay checkpoints require explicit `MOMO_MAX_HISTORICAL_REPLAY_MB` or provider-switch replay guard configuration; ordinary requests are not checkpointed by default.
 
-An opt-in `MOMO_COMPACTION_MODE=native` is available for capability testing; it is **not** a new default. Explicitly declare the verified model IDs in protected proxy settings as `contextPolicy.nativeCompactModels` (an array). The mode is limited to HTTPS `momoapi.us` or `api.openai.com`; an unlisted model fails with `compact_capability_unverified` (422) without contacting upstream. V1 sends the original compact input unchanged; V2 converts a valid upstream replacement history into one replayable `momo1:` item. Upstream failures, empty/opaque/incompatible histories and oversized replay envelopes fail rather than falling back to a success-shaped local checkpoint. Do not enable this mode based only on a Responses-compatible model name: first verify both compact wire versions and later replay against the actual backend. The existing `upstream` setting retains its legacy fallback behavior for compatibility.
+The default `MOMO_COMPACTION_MODE=native` starts with no models declared capable. Explicitly declare the verified model IDs in protected proxy settings as `contextPolicy.nativeCompactModels` (an array). Native compaction is limited to HTTPS `momoapi.us` or `api.openai.com` and Responses models; an unlisted model fails with `compact_capability_unverified` (422) without contacting upstream. V1 sends the original compact input unchanged; V2 converts a valid upstream replacement history into one replayable `momo1:` item. Upstream failures, empty/opaque/incompatible histories and oversized replay envelopes fail rather than falling back to a success-shaped local checkpoint. Do not declare capability based only on a Responses-compatible model name: first verify both compact wire versions and later replay against the actual backend. Existing installations with a saved or environment `compactionMode` keep their explicit mode until migrated.
 
 `previous_response_id` continuation is conservative: for native Responses routes, the proxy drops a repeated transcript only after an exact complete-prefix match crosses a recorded provider-output boundary containing a provider-issued item id. Partial or ambiguous matches, model changes, `store:false`, and non-Responses routes fail open and remain untouched. Continuation fingerprints are SHA-256 hashes, bounded, and memory-only.
 

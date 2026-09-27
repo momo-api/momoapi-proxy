@@ -1195,6 +1195,16 @@ export function createMomoSwitch(settings, options = {}) {
         }
         const routedPayload = replay.payload;
 
+        if (compactionPolicy(settings) === "native"
+          && Array.isArray(routedPayload.context_management)
+          && routedPayload.context_management.some((item) => item?.type === "compaction")
+          && !nativeCompactCapability(settings, routedPayload.model)) {
+          metricsState.compactFailures += 1;
+          response.momoCompactTrace = { policyAction: "compact_capability_unverified" };
+          return writeResponsesFailure(response, routedPayload.model, 422,
+            compactUnsupportedError(routedPayload.model).error.message, "compact_capability_unverified");
+        }
+
         isSse = true;
         metricsState.activeSse++;
         const sseHandle = { response };
