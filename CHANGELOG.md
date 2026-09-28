@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.16 - 2026-09-29
+
+- Prefer authorized channel #18 Web image IDs when older media discovery omits them; restrict model-list-only controls to one-image generation and keep APIMart IDs as explicit fallback.
+- Discover MiniMax-H3-Max and seedance-2.5 video task routes, clarify HTTPS-only APIMart references and model-specific limits in the bundled plugins.
+- Restrict public HTTPS video-reference hosts, without downloading images or making a paid submission during validation.
+
 ## 0.14.15 - 2026-09-27
 
 - Add fail-closed native compaction capability gating and opt-in routed text/tool-history pilots; no model is enabled for native compaction by default.

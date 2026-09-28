@@ -152,6 +152,11 @@ test("discovers NewAPI APIMart video models and submits one JSON task", async ()
   assert.equal(submitted[0].url, "https://gateway.example/v1/video/generations");
   assert.deepEqual(JSON.parse(submitted[0].init.body), request);
   assert.throws(() => normalizeVideoRequest({ ...request, reference_images: ["https://images.example/ref.jpg"] }, capabilities), /cannot be combined/);
+  for (const unsafe of ["https://localhost/ref.jpg", "https://192.168.1.10/ref.jpg", "https://user:pass@images.example/ref.jpg", "asset:img_123", "data:image/png;base64,aGVsbG8="]) {
+    assert.throws(() => normalizeVideoRequest({ model: "MiniMax-H3-Max", prompt: "cat", reference_images: [unsafe] }, capabilities), /public HTTPS URL/);
+    assert.throws(() => normalizeVideoRequest({ ...request, first_frame_image: unsafe }, capabilities), /public HTTPS URL/);
+  }
+  assert.doesNotThrow(() => normalizeVideoRequest({ model: "MiniMax-H3-Max", prompt: "cat", reference_images: ["https://images.example/ref.jpg"] }, capabilities));
   assert.throws(() => normalizeVideoRequest({ model: "seedance-2.5", prompt: "cat", duration: 3 }, capabilities), /Allowed: 4/);
 });
 

@@ -58,7 +58,32 @@ test("prefers listed Web channel aliases over APIMart fallback when legacy Adobe
   assert.equal(calls.length, 2);
   assert.equal(capabilities.defaults.model, "momoapi-gpt-image-2-5-flare");
   assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").operations, ["generate"]);
+  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").parameters, ["prompt", "n"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(normalizeImageRequest({ prompt: "sunrise" }, "generate", capabilities))), {
+    model: "momoapi-gpt-image-2-5-flare", prompt: "sunrise", n: 1, reference_images: [], operation: "generate", catalog_only: true,
+  });
+  assert.throws(() => normalizeImageRequest({ prompt: "sunrise", quality: "high" }, "generate", capabilities), /not verified/);
+  assert.throws(() => normalizeImageRequest({ prompt: "sunrise", reference_images: [tinyPng] }, "edit", capabilities), /does not support edit/);
   assert.equal(capabilities.models.find((model) => model.id === "gpt-image-2.5-flare").role, "fallback");
+});
+
+test("token model list supplements an unrelated partial media catalog without inferring controls", async () => {
+  const capabilities = await resolveImageCapabilities({ settings, fetchImpl: async (url) =>
+    new Response(JSON.stringify(String(url).endsWith("/v1/models")
+      ? { data: [{ id: "momoapi-gpt-image-2-5-flare" }] }
+      : { models: [{ id: "gpt-image-2", modality: "image", role: "fallback", available: true, operations: ["generate"], parameters: {} }] }), { status: 200 }) });
+  assert.equal(capabilities.defaults.model, "momoapi-gpt-image-2-5-flare");
+  assert.equal(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").limits.max_n, 1);
+});
+
+test("token model list fallback prefers Web only when explicitly listed", async () => {
+  const capabilities = await resolveImageCapabilities({ settings, fetchImpl: async (url) =>
+    new Response(JSON.stringify(String(url).endsWith("/v1/models")
+      ? { data: [{ id: "momoapi-gpt-image-2-5-flare" }, { id: "gpt-image-2.5-flare" }] }
+      : { error: "catalog unavailable" }), { status: String(url).endsWith("/v1/models") ? 200 : 503 }) });
+  assert.equal(capabilities.catalog_status, "legacy_fallback");
+  assert.equal(capabilities.defaults.model, "momoapi-gpt-image-2-5-flare");
+  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").operations, ["generate"]);
 });
 
 test("rejects a known model omitted by an authoritative partial capability catalog", () => {
@@ -152,8 +177,9 @@ test("routes GPT Image 2.5 generation with all native JSON controls", async () =
       return new Response(JSON.stringify({ code: 200, data: [{ status: "submitted", task_id: "task-25" }] }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
-  assert.equal(calls[1].url, "https://gateway.example/v1/images/generations");
-  assert.deepEqual(JSON.parse(calls[1].init.body), {
+  const submission = calls.find((call) => call.init.method === "POST");
+  assert.equal(submission.url, "https://gateway.example/v1/images/generations");
+  assert.deepEqual(JSON.parse(submission.init.body), {
     model: "gpt-image-2.5-flare", prompt: "a tree", n: 2, size: "1536x864", resolution: "2k", quality: "xhigh",
     output_format: "jpeg", background: "opaque", moderation: "low", output_compression: 55,
   });
@@ -192,9 +218,10 @@ test("passes data URL references directly to APIMart GPT Image 2.5 editing", asy
       return new Response(JSON.stringify({ code: 200, data: [{ status: "submitted", task_id: "task-upload-25" }] }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "https://gateway.example/v1/images/generations");
-  assert.deepEqual(JSON.parse(calls[0].init.body).image_urls, [tinyPng]);
+  const submissions = calls.filter((call) => call.init.method === "POST");
+  assert.equal(submissions.length, 1);
+  assert.equal(submissions[0].url, "https://gateway.example/v1/images/generations");
+  assert.deepEqual(JSON.parse(submissions[0].init.body).image_urls, [tinyPng]);
 });
 
 test("passes 16 public GPT Image 2.5 reference URLs without downloading them", async () => {
@@ -214,10 +241,11 @@ test("passes 16 public GPT Image 2.5 reference URLs without downloading them", a
       return new Response(JSON.stringify({ data: [{ b64_json: "aGVsbG8=" }] }), { status: 200, headers: { "content-type": "application/json" } });
     },
   });
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1].url, "https://gateway.example/v1/images/generations");
-  assert.equal(calls[1].init.headers["content-type"], "application/json");
-  assert.deepEqual(JSON.parse(calls[1].init.body), {
+  const submission = calls.find((call) => call.init.method === "POST");
+  assert.equal(calls.filter((call) => call.init.method === "POST").length, 1);
+  assert.equal(submission.url, "https://gateway.example/v1/images/generations");
+  assert.equal(submission.init.headers["content-type"], "application/json");
+  assert.deepEqual(JSON.parse(submission.init.body), {
     model: "gpt-image-2.5-flare", prompt: "edit", n: 1, size: "auto", resolution: "1k", quality: "auto",
     output_format: "png", background: "auto", moderation: "low", image_urls: referenceUrls,
   });
@@ -253,7 +281,7 @@ test("returns model_unavailable before calling a hidden GPT Image 2.5 route", as
     settings, request: { model: "gpt-image-2.5-flare", prompt: "x" },
     fetchImpl: async (url) => { calls += 1; return new Response(JSON.stringify(String(url).endsWith("/agent/media-capabilities") ? { models: [] } : { data: [] }), { status: 200, headers: { "content-type": "application/json" } }); },
   }), (error) => error.code === "model_unavailable" && error.statusCode === 503);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
 });
 
 test("maps Gemini generation controls to NewAPI Images fields", async () => {
