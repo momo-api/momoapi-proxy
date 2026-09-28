@@ -31,7 +31,7 @@ export function videoToolDefs(capabilities) {
     generate_audio: { type: "boolean" },
     reference_images: {
       type: "array", minItems: 1, maxItems: maxReferences,
-      items: { type: "string", description: "asset:img_..., an image data URL, or a public HTTPS image URL" },
+      items: { type: "string", description: "APIMart models require public HTTPS image URLs; compatible legacy routes may use asset:img_... or image data URLs" },
     },
     first_frame_image: { type: "string", description: "Public HTTPS URL for the first frame (APIMart models only)" },
     last_frame_image: { type: "string", description: "Public HTTPS URL for the last frame (APIMart models only)" },

@@ -1,5 +1,5 @@
 import { lookup } from "node:dns/promises";
-import { resolveImageReferenceDataUrls } from "./image-service.mjs";
+import { resolveImageReferenceDataUrls, validateReferenceUrl } from "./image-service.mjs";
 
 const VIDEO_MODEL_IDS = new Set([
   "momoapi-gemini-omni-flash",
@@ -179,8 +179,10 @@ export function normalizeVideoRequest(input, capabilities = VIDEO_CAPABILITIES) 
     const first = input.first_frame_image;
     const last = input.last_frame_image;
     if ((first !== undefined || last !== undefined) && references.length) throw fail("Frame images and reference images cannot be combined.");
-    if (first !== undefined && (typeof first !== "string" || !first.startsWith("https://"))) throw fail("first_frame_image must be a public HTTPS URL.");
-    if (last !== undefined && (typeof last !== "string" || !last.startsWith("https://"))) throw fail("last_frame_image must be a public HTTPS URL.");
+    for (const [name, value] of [["first_frame_image", first], ["last_frame_image", last], ...references.map((value) => ["reference_images", value])]) {
+      if (value === undefined) continue;
+      try { validateReferenceUrl(value); } catch { throw fail(name + " must be a public HTTPS URL."); }
+    }
     if (references.length && aspectRatio && aspectRatio !== "adaptive" && model === "seedance-2.5")
       throw fail("Seedance reference images require adaptive aspect_ratio.");
     if ((first || last) && aspectRatio && aspectRatio !== "adaptive") throw fail("Frame images require adaptive aspect_ratio.");
@@ -238,12 +240,7 @@ export async function generateVideo({ settings, request, fetchImpl = fetch, look
   if (normalized.model === "MiniMax-H3-Max" || normalized.model === "seedance-2.5") {
     // JSON is required by NewAPI's APIMart adapter. Keep HTTPS references as
     // URLs (never upload to an imaginary gateway endpoint).
-    const references = normalized.reference_images.map((reference) => {
-      if (!/^https:\/\/[^/?#]+/i.test(reference)) throw fail("APIMart video references must be public HTTPS URLs.", 400, "reference_image_error");
-      const url = new URL(reference);
-      if (url.username || url.password || url.hostname === "localhost" || /^(?:127\.|10\.|192\.168\.|169\.254\.)/.test(url.hostname)) throw fail("APIMart video references must be public HTTPS URLs.", 400, "reference_image_error");
-      return reference;
-    });
+    const references = normalized.reference_images;
     const body = { model: normalized.model, prompt: normalized.prompt, duration: normalized.duration,
       resolution: normalized.resolution, ...(references.length ? { image_urls: references } : {}),
       ...(normalized.first_frame_image ? { first_frame_image: normalized.first_frame_image } : {}),

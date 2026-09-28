@@ -216,9 +216,7 @@ export async function resolveImageCapabilities({ settings, fetchImpl = fetch, si
     // NewAPI's image-only capabilities endpoint can omit active channel-18
     // Web aliases when its old Adobe capability discovery is unavailable.
     // The token-scoped /v1/models confirms route availability (not controls).
-    if (!models.some((model) => model.role === "primary" && model.available !== false)
-        && models.length >= 3 && models.some((model) => model.id === "gpt-image-2.5-flare")
-        && models.some((model) => model.id === "gpt-image-2.5-sunburst")) {
+    if (!models.some((model) => model.role === "primary" && model.available !== false)) {
       try {
         const listed = await fetchImpl(endpoint + "/v1/models", {
           headers: { authorization: "Bearer " + settings.apiKey }, signal: imageSignal(signal, 15000),
@@ -233,6 +231,9 @@ export async function resolveImageCapabilities({ settings, fetchImpl = fetch, si
             model.availability = "token_model_list";
             model.protocol_status = "web_route_capability_unverified";
             model.operations = ["generate"];
+            model.parameters = ["prompt", "n"];
+            model.parameter_schema = { n: { allowed: [1] } };
+            model.limits = { max_n: 1, max_reference_images: 0, max_reference_bytes_each: MAX_REFERENCE_BYTES };
             capability.models.unshift(model);
           }
         }
@@ -252,10 +253,20 @@ export async function resolveImageCapabilities({ settings, fetchImpl = fetch, si
       if (!response.ok) return capability;
       const ids = catalogModelIds(await response.json());
       for (const model of capability.models) {
-        if (!MODEL_RULES[model.id]?.requiresCatalog || MODEL_RULES[model.id]?.adobe) continue;
+        if (!MODEL_RULES[model.id]?.requiresCatalog) continue;
         model.available = ids.has(model.id);
-        model.availability = model.available ? "legacy_upstream_catalog" : "not_in_upstream_catalog";
+        model.availability = model.available ? (MODEL_RULES[model.id]?.adobe ? "token_model_list" : "legacy_upstream_catalog") : "not_in_upstream_catalog";
+        if (model.available && MODEL_RULES[model.id]?.adobe) {
+          model.role = "primary";
+          model.protocol_status = "web_route_capability_unverified";
+          model.operations = ["generate"];
+          model.parameters = ["prompt", "n"];
+          model.parameter_schema = { n: { allowed: [1] } };
+          model.limits = { max_n: 1, max_reference_images: 0, max_reference_bytes_each: MAX_REFERENCE_BYTES };
+        }
       }
+      capability.defaults.model = ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-sunburst", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"]
+        .find((id) => capability.models.some((model) => model.id === id && model.available)) || capability.defaults.model;
       capability.catalog_status = "legacy_fallback";
     } catch {}
   }
@@ -339,6 +350,11 @@ export function normalizeImageRequest(input, operation = "generate", capabilitie
 
   const n = input.n === undefined ? 1 : Number(input.n);
   if (!Number.isInteger(n) || n < 1 || n > rules.maxN) throw fail("n must be an integer between 1 and " + rules.maxN + " for " + model + ".");
+  if (dynamicCapability?.availability === "token_model_list") {
+    const extra = Object.keys(input).find((key) => !["model", "prompt", "n"].includes(key));
+    if (extra) throw fail(extra + " is not verified for " + model + " by the token model list.");
+    return { model, prompt, n, reference_images: [], operation, catalog_only: true };
+  }
 
   let aspectRatio;
   let resolution;
@@ -422,7 +438,7 @@ function decodeDataUrl(value) {
   return { mimeType: match[1].toLowerCase(), dataUrl: "data:" + match[1].toLowerCase() + ";base64," + base64 };
 }
 
-function validateReferenceUrl(value) {
+export function validateReferenceUrl(value) {
   const parsed = new URL(value);
   if (parsed.protocol !== "https:") throw fail("reference image URLs must use HTTPS.");
   if (parsed.username || parsed.password) throw fail("reference image URLs must not contain credentials.");
@@ -527,6 +543,7 @@ function nativeImageBody(request) {
 }
 
 function generationBody(request) {
+  if (request.catalog_only) return { model: request.model, prompt: request.prompt, n: request.n };
   if (MODEL_RULES[request.model]?.adobe) {
     return {
       model: request.model, prompt: request.prompt, n: request.n,
