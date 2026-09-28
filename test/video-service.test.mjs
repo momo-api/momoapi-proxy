@@ -157,7 +157,7 @@ test("discovers NewAPI APIMart video models and submits one JSON task", async ()
 
 test("normalizes APIMart task status and result URL without a paid retry", async () => {
   const result = await getVideoTask({ settings, taskId: "task_public_1", fetchImpl: async (url) => {
-    assert.equal(url, "https://gateway.example/v1/video/generations/task_public_1");
+    assert.equal(url, "https://gateway.example/v1/videos/task_public_1");
     return new Response(JSON.stringify({ code: "success", data: { task_id: "task_public_1", status: "SUCCESS", result_url: "https://video.example/clip.mp4", progress: "100%" } }), { status: 200 });
   } });
   assert.equal(result.status, "completed");
