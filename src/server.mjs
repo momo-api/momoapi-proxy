@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { guardCodexCompactedHistory } from "./codex-summary-guard.mjs";
 import { performance } from "node:perf_hooks";
 import { RequestMetrics } from "./request-metrics.mjs";
 import { RequestAdmission } from "./request-admission.mjs";
@@ -505,7 +506,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
   const visionPayload = imageAssetStore
     ? await expandCurrentImageVisionReferences(nsBody, imageAssetStore, settings.localToken)
     : nsBody;
-  const cleanPayload = normalizeResponsesPayload(visionPayload);
+  const cleanPayload = guardCodexCompactedHistory(normalizeResponsesPayload(visionPayload), settings);
   response.momoToolAudit.normalized = summarizeToolRequest(cleanPayload);
   const historyReplay = prepareRoutedHistoryReplay(cleanPayload, settings, response);
   const replayPayload = historyReplay.payload;
