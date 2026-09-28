@@ -31,6 +31,8 @@ For all image generation and editing requests, select MOMO Image by default. Do 
 
 ## Verified routing boundaries
 
+- Prefer available momoapi-prefixed Web image models on channel #18. The APIMart Flare/Sunburst/GPT Image 2 model IDs on channel #4 are fallback routes, not automatic silent substitutes. Old Adobe capability discovery can be unavailable even while Web models are listed by the authenticated, group-scoped model list. Such listing establishes availability only: use conservative generation controls and do not claim editing until verified.
+
 - The authenticated `/agent/media-capabilities` contract is authoritative for model availability and per-model parameters. Adobe-backed `momoapi-*` models are preferred when available; APIMart models remain fallback routes and `gpt-image-2-momoapi` remains a legacy compatibility alias.
 - Do not infer controls from a model name. Use `image_capabilities`, and omit any field not listed for the selected model.
 - When summarizing the catalog, preserve the exact model IDs and count routes rather than collapsing aliases into a fabricated vendor capability. A fallback or legacy route is not an additional underlying model family.

@@ -20,6 +20,12 @@ const MODEL_RULES = {
     generateTransport: "images-generations", editTransport: "images-generations-reference",
     dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
   },
+  "momoapi-gpt-image-2-5-sunburst": {
+    maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
+    aspectRatios: ASPECT_RATIOS, qualities: ["low", "medium", "high"],
+    generateTransport: "images-generations", editTransport: "images-generations-reference",
+    dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
+  },
   "momoapi-gpt-image-2": {
     maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
     aspectRatios: ASPECT_RATIOS, qualities: ["low", "medium", "high"],
@@ -96,6 +102,7 @@ export const IMAGE_CAPABILITIES = {
   models: [
     capability("momoapi-gpt-image-2-5-flare", "MOMO GPT Image 2.5 Flare"),
     capability("momoapi-gpt-image-2-5-prism", "MOMO GPT Image 2.5 Prism"),
+    capability("momoapi-gpt-image-2-5-sunburst", "MOMO GPT Image 2.5 Sunburst"),
     capability("momoapi-gpt-image-2", "MOMO GPT Image 2"),
     capability("momoapi-gemini-nano-banana-3", "MOMO Gemini Nano Banana 3"),
     capability("gpt-image-2", "GPT Image 2"),
@@ -206,7 +213,32 @@ export async function resolveImageCapabilities({ settings, fetchImpl = fetch, si
       models.push(publicCapability(model, rules));
     }
     if (models.length) capability.models = models;
-    const preferred = ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-prism", "momoapi-gpt-image-2", "momoapi-gemini-nano-banana-3", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2", "gpt-image-2-momoapi"];
+    // NewAPI's image-only capabilities endpoint can omit active channel-18
+    // Web aliases when its old Adobe capability discovery is unavailable.
+    // The token-scoped /v1/models confirms route availability (not controls).
+    if (!models.some((model) => model.role === "primary" && model.available !== false)
+        && models.length >= 3 && models.some((model) => model.id === "gpt-image-2.5-flare")
+        && models.some((model) => model.id === "gpt-image-2.5-sunburst")) {
+      try {
+        const listed = await fetchImpl(endpoint + "/v1/models", {
+          headers: { authorization: "Bearer " + settings.apiKey }, signal: imageSignal(signal, 15000),
+        });
+        if (listed?.ok) {
+          const ids = catalogModelIds(await listed.json());
+          for (const id of ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-sunburst"]) {
+            if (!ids.has(id) || capability.models.some((model) => model.id === id)) continue;
+            const model = structuredClone(IMAGE_CAPABILITIES.models.find((item) => item.id === id));
+            model.available = true;
+            model.role = "primary";
+            model.availability = "token_model_list";
+            model.protocol_status = "web_route_capability_unverified";
+            model.operations = ["generate"];
+            capability.models.unshift(model);
+          }
+        }
+      } catch {}
+    }
+    const preferred = ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-sunburst", "momoapi-gpt-image-2-5-prism", "momoapi-gpt-image-2", "momoapi-gemini-nano-banana-3", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2", "gpt-image-2-momoapi"];
     capability.defaults.model = preferred.find((id) => capability.models.some((model) => model.id === id && model.available !== false)) || capability.models[0]?.id || IMAGE_CAPABILITIES.defaults.model;
     capability.catalog_status = "available";
   } catch {

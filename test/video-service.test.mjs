@@ -56,13 +56,14 @@ test("submits multipart video tasks and does not download the completed asset", 
       return new Response(JSON.stringify({ id: "task-video-1", status: "queued" }), { status: 200 });
     },
   });
-  assert.equal(calls.length, 2);
-  assert.equal(calls[1].url, "https://gateway.example/v1/videos");
-  assert.equal(calls[1].init.headers.authorization, "Bearer test-key-not-real");
-  assert.equal(calls[1].init.body.get("model"), "momoapi-veo-3-1-lite");
-  assert.equal(calls[1].init.body.get("seconds"), "6");
-  assert.equal(calls[1].init.body.get("resolution_name"), "1080p");
-  assert.equal(calls[1].init.body.getAll("input_reference[]").length, 1);
+  const submitted = calls.filter((call) => call.init.method === "POST");
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].url, "https://gateway.example/v1/videos");
+  assert.equal(submitted[0].init.headers.authorization, "Bearer test-key-not-real");
+  assert.equal(submitted[0].init.body.get("model"), "momoapi-veo-3-1-lite");
+  assert.equal(submitted[0].init.body.get("seconds"), "6");
+  assert.equal(submitted[0].init.body.get("resolution_name"), "1080p");
+  assert.equal(submitted[0].init.body.getAll("input_reference[]").length, 1);
   assert.deepEqual(result, {
     task_id: "task-video-1",
     status: "queued",
@@ -120,10 +121,47 @@ test("serves authenticated loopback video endpoints end to end", async () => {
     assert.equal((await task.json()).remote_url, "https://adobe.example/e2e.mp4");
     assert.deepEqual(calls, [
       "https://gateway.example/agent/media-capabilities",
+      "https://gateway.example/v1/models",
       "https://gateway.example/v1/videos",
       "https://gateway.example/v1/videos/task-e2e",
     ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("discovers NewAPI APIMart video models and submits one JSON task", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith("/agent/media-capabilities")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    if (String(url).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [{ id: "MiniMax-H3-Max" }, { id: "seedance-2.5" }] }), { status: 200 });
+    return new Response(JSON.stringify({ id: "task_public_1", status: "queued" }), { status: 200 });
+  };
+  const capabilities = await resolveVideoCapabilities({ settings, fetchImpl });
+  assert.equal(capabilities.defaults.model, "MiniMax-H3-Max");
+  assert.deepEqual(capabilities.models.find((model) => model.id === "MiniMax-H3-Max").limits.resolutions, ["480P", "768P", "1080P"]);
+  assert.equal(capabilities.models.find((model) => model.id === "MiniMax-H3-Max").limits.max_reference_images, 9);
+  assert.deepEqual(videoToolDefs(capabilities).find((tool) => tool.name === "video_generate").inputSchema.properties.model.enum, ["MiniMax-H3-Max", "seedance-2.5"]);
+  const request = { model: "MiniMax-H3-Max", prompt: "cat", duration: 5, resolution: "480P", first_frame_image: "https://images.example/cat.jpg" };
+  const result = await generateVideo({ settings, request, fetchImpl });
+  assert.equal(result.task_id, "task_public_1");
+  assert.equal(result.authenticated_content_url, null);
+  const submitted = calls.filter((call) => call.init.method === "POST");
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].url, "https://gateway.example/v1/video/generations");
+  assert.deepEqual(JSON.parse(submitted[0].init.body), request);
+  assert.throws(() => normalizeVideoRequest({ ...request, reference_images: ["https://images.example/ref.jpg"] }, capabilities), /cannot be combined/);
+  assert.throws(() => normalizeVideoRequest({ model: "seedance-2.5", prompt: "cat", duration: 3 }, capabilities), /Allowed: 4/);
+});
+
+test("normalizes APIMart task status and result URL without a paid retry", async () => {
+  const result = await getVideoTask({ settings, taskId: "task_public_1", fetchImpl: async (url) => {
+    assert.equal(url, "https://gateway.example/v1/video/generations/task_public_1");
+    return new Response(JSON.stringify({ code: "success", data: { task_id: "task_public_1", status: "SUCCESS", result_url: "https://video.example/clip.mp4", progress: "100%" } }), { status: 200 });
+  } });
+  assert.equal(result.status, "completed");
+  assert.equal(result.terminal, true);
+  assert.equal(result.playable_url, "https://video.example/clip.mp4");
+  assert.equal(result.authenticated_content_url, null);
 });
