@@ -3,7 +3,7 @@ import test from "node:test";
 import { copyFileSync, existsSync, mkdtempSync, rmSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildLocalCompactResponse, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay } from "../src/compaction.mjs";
+import { buildLocalCompactResponse, compactionPolicy, decodeLocalCompaction, encodeLocalCompaction, prepareCompactPayload, prepareGeminiHistoryReplay, prepareOversizedHistoryReplay, prepareProviderSwitchHistoryReplay, SUMMARY_PREFIX } from "../src/compaction.mjs";
 import { decodeRoutedCompaction, encodeRoutedCompaction } from "../src/routed-compaction.mjs";
 import { preparePreviousResponseReplay, rememberResponseState, resetResponseStateForTests } from "../src/responses-state.mjs";
 import { commitProviderRoute, observeProviderRoute, resetProviderRouteStateForTests } from "../src/provider-switch-state.mjs";
@@ -374,6 +374,30 @@ test("local compatibility mode creates a checkpoint only when explicitly selecte
     assert.match(JSON.stringify(await response.json()), /keep this task/);
   }, { compactionMode: "local" });
   assert.equal(fetchCalls, 0);
+});
+
+test("opt-in Codex summary guard marks prior requests on the actual ordinary Responses wire", async () => {
+  const captured = [];
+  const summary = SUMMARY_PREFIX + " Completed work and current state.";
+  const user = text => ({ type: "message", role: "user", content: [{ type: "input_text", text }] });
+  const input = [user("OLD_COMPLETED_TASK"), user("SECOND_OLD_TASK"),
+    { type: "message", role: "developer", content: [{ type: "input_text", text: "RULE" }] },
+    user(summary), user("CURRENT_TASK")];
+  await withServer(async (_url, init) => {
+    captured.push(JSON.parse(init.body));
+    return new Response(responseSse("resp_guarded", []), { headers: { "content-type": "text/event-stream" } });
+  }, async base => {
+    for (const enabled of [false, true]) {
+      const response = await fetch(base + "/v1/responses", { method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input }) });
+      assert.equal(response.status, 200);
+      await response.text();
+    }
+  }, { contextPolicy: { codexSummaryHistoryGuard: true } });
+  assert.equal(captured.length, 2);
+  assert.match(captured[0].input[0].content[0].text, /^\[historical user context;/);
+  assert.equal(captured[0].input.at(-1).content[0].text, "CURRENT_TASK");
+  assert.deepEqual(captured[0].input, captured[1].input);
 });
 
 test("unconfigured compaction fails closed while ordinary requests still reach upstream", async () => {
