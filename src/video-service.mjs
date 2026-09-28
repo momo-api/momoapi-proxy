@@ -286,7 +286,7 @@ export async function generateVideo({ settings, request, fetchImpl = fetch, look
 export async function getVideoTask({ settings, taskId, fetchImpl = fetch, signal }) {
   if (!/^[A-Za-z0-9._:-]{1,256}$/.test(taskId || "")) throw fail("Invalid task_id.");
   const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
-  const response = await fetchImpl(endpoint + (taskId.startsWith("task_") ? "/v1/video/generations/" : "/v1/videos/") + encodeURIComponent(taskId), {
+  const response = await fetchImpl(endpoint + "/v1/videos/" + encodeURIComponent(taskId), {
     headers: { authorization: "Bearer " + settings.apiKey },
     signal: videoSignal(signal, 60000),
   });
