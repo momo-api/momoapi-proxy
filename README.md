@@ -399,6 +399,8 @@ Local checkpoints preserve task text, system/developer constraints, pending tool
 
 ## Test evidence
 
+Experimental opt-in: set protected proxy settings `contextPolicy.codexSummaryHistoryGuard` to `true` to demote older plain-text user turns preceding one recognizable Codex replacement summary into assistant-role historical context when a newer user request exists on ordinary Responses traffic. The active user request, summary, developer instructions, and tool calls/results remain unchanged. The default does not rewrite ordinary conversation. This does not infer completion or repair already generated answers; verify with real long-session wire and behavior before enabling broadly. Disable the setting to roll back.
+
 `npm run test:container` verifies the local admission token, Responses passthrough, Gemini `functionCall` to Responses SSE conversion, and setup/rollback in a clean Node 24 container.
 
 `scripts/codex-cli-smoke.mjs` uses an actual local Codex CLI with mocked Gemini or Claude wire endpoints. It requires the model to invoke `shell_command`, return its tool result, and complete the follow-up turn. `npm run test:codex-container` performs the Claude case in a clean Debian container with Codex CLI installed inside it.
