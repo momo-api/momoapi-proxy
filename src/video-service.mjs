@@ -6,6 +6,8 @@ const VIDEO_MODEL_IDS = new Set([
   "momoapi-veo-3-1-fast",
   "momoapi-veo-3-1-lite",
   "momoapi-kling-3-standard",
+  "MiniMax-H3-Max",
+  "seedance-2.5",
 ]);
 
 export const VIDEO_CAPABILITIES = {
@@ -15,6 +17,8 @@ export const VIDEO_CAPABILITIES = {
     { id: "momoapi-veo-3-1-fast", display_name: "MOMO Veo 3.1 Fast", modality: "video", available: false },
     { id: "momoapi-veo-3-1-lite", display_name: "MOMO Veo 3.1 Lite", modality: "video", available: false },
     { id: "momoapi-kling-3-standard", display_name: "MOMO Kling 3 Standard", modality: "video", available: false },
+    { id: "MiniMax-H3-Max", display_name: "MiniMax H3 Max (APIMart)", modality: "video", available: false },
+    { id: "seedance-2.5", display_name: "Seedance 2.5 (APIMart)", modality: "video", available: false },
   ],
   defaults: { model: "momoapi-gemini-omni-flash" },
   storage: {
@@ -59,8 +63,26 @@ function publicCapability(model) {
       generate_audio: allowedValues(parameters.generate_audio),
       max_reference_images: maximum(parameters.max_reference_images, 0),
     },
-    transport: "openai-video-task",
+    transport: model?.provider === "APIMart" ? "newapi-video-json-task" : "openai-video-task",
   };
+}
+
+// NewAPI currently exposes image-only media capabilities. Video availability
+// must be checked against the authenticated, group-scoped model list instead.
+function apimartVideoCapabilities(ids) {
+  const common = { modality: "video", role: "fallback", provider: "APIMart", operations: ["generate", "image_to_video", "style_reference"] };
+  const duration = (minimum, maximum) => ({ type: "integer", allowed: Array.from({ length: maximum - minimum + 1 }, (_, i) => i + minimum), default: minimum });
+  return [
+    { ...common, id: "MiniMax-H3-Max", available: ids.has("MiniMax-H3-Max"), parameters: {
+      duration: duration(5, 15), resolution: { allowed: ["480P", "768P", "1080P"], default: "768P" },
+      aspect_ratio: { allowed: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"] },
+      max_reference_images: { maximum: 9 },
+    } },
+    { ...common, id: "seedance-2.5", available: ids.has("seedance-2.5"), parameters: {
+      duration: duration(4, 30), resolution: { allowed: ["480p", "720p", "1080p"], default: "480p" },
+      max_reference_images: { maximum: 30 },
+    } },
+  ].map(publicCapability);
 }
 
 export async function resolveVideoCapabilities({ settings, fetchImpl = fetch, signal } = {}) {
@@ -78,12 +100,33 @@ export async function resolveVideoCapabilities({ settings, fetchImpl = fetch, si
     const models = payload.models
       .filter((model) => model?.modality === "video" && VIDEO_MODEL_IDS.has(model.id))
       .map(publicCapability);
+    try {
+      const catalog = await fetchImpl(endpoint + "/v1/models", {
+        headers: { authorization: "Bearer " + settings.apiKey }, signal: videoSignal(signal, 15000),
+      });
+      if (catalog?.ok) {
+        const data = await catalog.json();
+        const ids = new Set((Array.isArray(data?.data) ? data.data : []).map((item) => item?.id));
+        models.push(...apimartVideoCapabilities(ids).filter((item) => item.available));
+      }
+    } catch {}
     if (models.length) capabilities.models = models;
-    const preferred = ["momoapi-gemini-omni-flash", "momoapi-veo-3-1-fast", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"];
+    const preferred = ["MiniMax-H3-Max", "seedance-2.5", "momoapi-gemini-omni-flash", "momoapi-veo-3-1-fast", "momoapi-veo-3-1-lite", "momoapi-kling-3-standard"];
     capabilities.defaults.model = preferred.find((id) => models.some((model) => model.id === id && model.available !== false)) || models[0]?.id || capabilities.defaults.model;
     capabilities.catalog_status = "available";
   } catch {
     capabilities.catalog_status = "unavailable";
+    try {
+      const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
+      const response = await fetchImpl(endpoint + "/v1/models", { headers: { authorization: "Bearer " + settings.apiKey }, signal: videoSignal(signal, 15000) });
+      if (response.ok) {
+        const payload = await response.json();
+        const ids = new Set((Array.isArray(payload?.data) ? payload.data : []).map((item) => item?.id));
+        capabilities.models = apimartVideoCapabilities(ids).filter((item) => item.available);
+        capabilities.defaults.model = capabilities.models[0]?.id || capabilities.defaults.model;
+        capabilities.catalog_status = "model_list_fallback";
+      }
+    } catch {}
   }
   return capabilities;
 }
@@ -130,8 +173,22 @@ export function normalizeVideoRequest(input, capabilities = VIDEO_CAPABILITIES) 
   if (references.length && !operations.some((operation) => operation === "image_to_video" || operation === "style_reference")) {
     throw fail(model + " does not support reference images.");
   }
+  if (model === "MiniMax-H3-Max" || model === "seedance-2.5") {
+    if (input.generate_audio !== undefined || input.audio !== undefined) throw fail("Audio controls are not supported by the MOMO APIMart video route.");
+    if (prompt.length > 7000) throw fail("APIMart video prompt must be at most 7000 characters.");
+    const first = input.first_frame_image;
+    const last = input.last_frame_image;
+    if ((first !== undefined || last !== undefined) && references.length) throw fail("Frame images and reference images cannot be combined.");
+    if (first !== undefined && (typeof first !== "string" || !first.startsWith("https://"))) throw fail("first_frame_image must be a public HTTPS URL.");
+    if (last !== undefined && (typeof last !== "string" || !last.startsWith("https://"))) throw fail("last_frame_image must be a public HTTPS URL.");
+    if (references.length && aspectRatio && aspectRatio !== "adaptive" && model === "seedance-2.5")
+      throw fail("Seedance reference images require adaptive aspect_ratio.");
+    if ((first || last) && aspectRatio && aspectRatio !== "adaptive") throw fail("Frame images require adaptive aspect_ratio.");
+  }
   return {
     model, prompt, reference_images: references,
+    ...(input.first_frame_image ? { first_frame_image: input.first_frame_image } : {}),
+    ...(input.last_frame_image ? { last_frame_image: input.last_frame_image } : {}),
     ...(duration !== undefined ? { duration } : {}),
     ...(aspectRatio !== undefined ? { aspect_ratio: aspectRatio } : {}),
     ...(resolution !== undefined ? { resolution } : {}),
@@ -156,7 +213,7 @@ async function readPayload(response) {
 }
 
 function videoResult(payload, endpoint, taskId) {
-  const id = payload?.id || payload?.task_id || taskId || null;
+  const id = payload?.task_id || payload?.id || taskId || null;
   const remoteUrl = [payload?.url, payload?.video_url, payload?.metadata?.url, payload?.result?.url]
     .find((value) => typeof value === "string" && /^https:\/\//i.test(value)) || null;
   const status = String(payload?.status || "queued").toLowerCase();
@@ -167,7 +224,7 @@ function videoResult(payload, endpoint, taskId) {
     remote_url: remoteUrl,
     // This gateway route requires the caller's API bearer token. It is useful
     // to SDK clients, but it must not be presented as a browser-playable URL.
-    authenticated_content_url: id ? endpoint + "/v1/videos/" + encodeURIComponent(id) + "/content" : null,
+    authenticated_content_url: id && !String(id).startsWith("task_") ? endpoint + "/v1/videos/" + encodeURIComponent(id) + "/content" : null,
     playable_url: remoteUrl,
     ...(payload?.progress !== undefined ? { progress: payload.progress } : {}),
     ...(payload?.error ? { error: payload.error } : {}),
@@ -178,6 +235,29 @@ export async function generateVideo({ settings, request, fetchImpl = fetch, look
   const capabilities = await resolveVideoCapabilities({ settings, fetchImpl, signal });
   const normalized = normalizeVideoRequest(request, capabilities);
   const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
+  if (normalized.model === "MiniMax-H3-Max" || normalized.model === "seedance-2.5") {
+    // JSON is required by NewAPI's APIMart adapter. Keep HTTPS references as
+    // URLs (never upload to an imaginary gateway endpoint).
+    const references = normalized.reference_images.map((reference) => {
+      if (!/^https:\/\/[^/?#]+/i.test(reference)) throw fail("APIMart video references must be public HTTPS URLs.", 400, "reference_image_error");
+      const url = new URL(reference);
+      if (url.username || url.password || url.hostname === "localhost" || /^(?:127\.|10\.|192\.168\.|169\.254\.)/.test(url.hostname)) throw fail("APIMart video references must be public HTTPS URLs.", 400, "reference_image_error");
+      return reference;
+    });
+    const body = { model: normalized.model, prompt: normalized.prompt, duration: normalized.duration,
+      resolution: normalized.resolution, ...(references.length ? { image_urls: references } : {}),
+      ...(normalized.first_frame_image ? { first_frame_image: normalized.first_frame_image } : {}),
+      ...(normalized.last_frame_image ? { last_frame_image: normalized.last_frame_image } : {}),
+      ...(normalized.aspect_ratio ? { aspect_ratio: normalized.aspect_ratio } : {}),
+    };
+    const response = await fetchImpl(endpoint + "/v1/video/generations", {
+      method: "POST", headers: { authorization: "Bearer " + settings.apiKey, "content-type": "application/json" },
+      body: JSON.stringify(body), signal: videoSignal(signal, 60000),
+    });
+    const payload = await readPayload(response);
+    if (!response.ok) throw fail(payload?.error?.message || "Video submission returned HTTP " + response.status + ". Do not retry an uncertain submission.", response.status, "video_upstream_error");
+    return videoResult(payload, endpoint);
+  }
   const form = new FormData();
   form.set("model", normalized.model);
   form.set("prompt", normalized.prompt);
@@ -206,11 +286,11 @@ export async function generateVideo({ settings, request, fetchImpl = fetch, look
 export async function getVideoTask({ settings, taskId, fetchImpl = fetch, signal }) {
   if (!/^[A-Za-z0-9._:-]{1,256}$/.test(taskId || "")) throw fail("Invalid task_id.");
   const endpoint = String(settings.endpoint || "").replace(/\/+$/, "");
-  const response = await fetchImpl(endpoint + "/v1/videos/" + encodeURIComponent(taskId), {
+  const response = await fetchImpl(endpoint + (taskId.startsWith("task_") ? "/v1/video/generations/" : "/v1/videos/") + encodeURIComponent(taskId), {
     headers: { authorization: "Bearer " + settings.apiKey },
     signal: videoSignal(signal, 60000),
   });
   const payload = await readPayload(response);
   if (!response.ok) throw fail(payload?.error?.message || "Video task returned HTTP " + response.status + ".", response.status, "video_task_error");
-  return videoResult(payload, endpoint, taskId);
+  return videoResult(payload?.data?.task_id ? { ...payload.data, status: payload.data.status === "SUCCESS" ? "completed" : payload.data.status === "FAILURE" ? "failed" : payload.data.status === "SUBMITTED" || payload.data.status === "QUEUED" ? "queued" : "processing", url: payload.data.result_url } : payload, endpoint, taskId);
 }

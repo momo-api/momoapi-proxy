@@ -44,6 +44,23 @@ test("uses the authenticated media capability contract and prefers Adobe primary
   assert.equal(capabilities.catalog_status, "available");
 });
 
+test("prefers listed Web channel aliases over APIMart fallback when legacy Adobe discovery is down", async () => {
+  const calls = [];
+  const capabilities = await resolveImageCapabilities({ settings, fetchImpl: async (url) => {
+    calls.push(String(url));
+    if (String(url).endsWith("/agent/media-capabilities")) return new Response(JSON.stringify({ models: [
+      { id: "gpt-image-2.5-flare", modality: "image", role: "fallback", available: true, operations: ["generate", "edit"], parameters: {} },
+      { id: "gpt-image-2.5-sunburst", modality: "image", role: "fallback", available: true, operations: ["generate", "edit"], parameters: {} },
+      { id: "gpt-image-2", modality: "image", role: "fallback", available: true, operations: ["generate", "edit"], parameters: {} },
+    ] }), { status: 200 });
+    return new Response(JSON.stringify({ data: [{ id: "momoapi-gpt-image-2-5-flare" }, { id: "momoapi-gpt-image-2-5-sunburst" }] }), { status: 200 });
+  } });
+  assert.equal(calls.length, 2);
+  assert.equal(capabilities.defaults.model, "momoapi-gpt-image-2-5-flare");
+  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").operations, ["generate"]);
+  assert.equal(capabilities.models.find((model) => model.id === "gpt-image-2.5-flare").role, "fallback");
+});
+
 test("rejects a known model omitted by an authoritative partial capability catalog", () => {
   const capabilities = {
     ...structuredClone(IMAGE_CAPABILITIES),

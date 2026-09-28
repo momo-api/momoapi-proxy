@@ -33,6 +33,8 @@ export function videoToolDefs(capabilities) {
       type: "array", minItems: 1, maxItems: maxReferences,
       items: { type: "string", description: "asset:img_..., an image data URL, or a public HTTPS image URL" },
     },
+    first_frame_image: { type: "string", description: "Public HTTPS URL for the first frame (APIMart models only)" },
+    last_frame_image: { type: "string", description: "Public HTTPS URL for the last frame (APIMart models only)" },
   };
   return [
     { name: "video_capabilities", description: "List currently available MOMO video models and their exact duration, resolution, aspect-ratio, audio, and reference-image limits.", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
