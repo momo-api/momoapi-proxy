@@ -1,5 +1,7 @@
 # MOMO API Proxy
 
+Maintainer changes and releases follow the [change and release workflow](docs/release-process.md), including off-Desktop worktrees and post-release cleanup.
+
 `MOMO API Proxy` (formerly MOMO Codex Bridge/Switch) is a dedicated, lightweight local proxy that lets Codex CLI and ChatGPT/Codex Desktop use MOMO models with one MOMO API key.
 
 ```text
