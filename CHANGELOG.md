@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.21 - 2026-09-29
+
+- Keep APIMart video-only MiniMax-H3-Max and seedance-2.5 out of the Codex text model catalog even when the upstream catalog omits modality. Video plugin capabilities and routing are unchanged.
+
 ## 0.14.20 - 2026-09-29
 
 - Update the bundled MOMO Image plugin to 0.6.5 with reference-based creation guidance and the official image prompting link. No image route or model parameter behavior changes.
