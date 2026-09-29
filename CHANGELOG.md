@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.17 - 2026-09-29
+
+- Reject missing or reserved call_unknown tool-call IDs locally instead of forwarding orphan function_call_output items upstream and returning a confusing HTTP 400.
+
 ## 0.14.16 - 2026-09-29
 
 - Prefer authorized channel #18 Web image IDs when older media discovery omits them; restrict model-list-only controls to one-image generation and keep APIMart IDs as explicit fallback.

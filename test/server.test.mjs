@@ -928,6 +928,16 @@ test("normalizes invalid historical tool names before Responses forwarding", () 
   assert.equal(normalized.tools[0].name, "...");
 });
 
+test("rejects tool results without call_id instead of forwarding call_unknown", () => {
+  for (const call_id of [undefined, "", "call_unknown"]) {
+    const item = { type: "function_call_output", output: "orphan", ...(call_id === undefined ? {} : { call_id }) };
+    assert.throws(
+      () => normalizeResponsesPayload({ model: "gpt-5.6-sol", input: [item] }),
+      (error) => error.code === "invalid_tool_continuation" && error.statusCode === 400 && /missing call_id/.test(error.message),
+    );
+  }
+});
+
 test("keeps only the latest tool output for each Responses call id", () => {
   const normalized = normalizeResponsesPayload({
     model: "gpt-5.6-sol",

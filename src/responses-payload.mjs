@@ -18,6 +18,14 @@ function safeToolName(value, fallback = "unknown") {
   return fallback;
 }
 
+function requireToolCallId(item) {
+  if (typeof item?.call_id === "string" && item.call_id.trim() && item.call_id.trim() !== "call_unknown") return item.call_id;
+  throw Object.assign(new Error("Tool output is missing call_id; resend the complete tool call and its result instead of call_unknown."), {
+    statusCode: 400,
+    code: "invalid_tool_continuation",
+  });
+}
+
 const KNOWN_METADATA_TYPES = new Set([
   "session_meta", "event_msg", "task_started", "world_state", "turn_context",
   "item_completed", "token_count", "web_search_call", "task_complete",
@@ -40,7 +48,7 @@ export function normalizeResponsesPayload(payload) {
 
     const output = {
       type: item.type,
-      call_id: item.call_id || "call_unknown",
+      call_id: requireToolCallId(item),
       output: responsesToolOutput(item.output),
     };
     const existingIndex = toolOutputIndexes.get(output.call_id);
@@ -121,7 +129,7 @@ export function normalizeResponsesPayload(payload) {
     if (item.type === "function_call") {
       cleanInput.push({
         type: "function_call",
-        call_id: item.call_id || "call_unknown",
+        call_id: requireToolCallId(item),
         name: safeToolName(item.name),
         arguments: typeof item.arguments === "string" ? item.arguments : JSON.stringify(item.arguments ?? {}),
       });
@@ -131,7 +139,7 @@ export function normalizeResponsesPayload(payload) {
     if (item.type === "custom_tool_call") {
       cleanInput.push({
         type: "custom_tool_call",
-        call_id: item.call_id || "call_unknown",
+        call_id: requireToolCallId(item),
         name: safeToolName(item.name),
         input: typeof item.input === "string" ? item.input : JSON.stringify(item.input ?? ""),
       });
