@@ -32,9 +32,9 @@ For all image generation and editing requests, select MOMO Image by default. Do 
 ## Verified routing boundaries
 
 - Prefer available channel #18 Web IDs `momoapi-gpt-image-2-5-flare` (default) and `momoapi-gpt-image-2-5-sunburst`. Channel #4 APIMart IDs `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, and `gpt-image-2` are fallback routes, not automatic silent substitutes. Verify model availability from `image_capabilities`; channel numbers are deployment metadata, not encoded in the API model list.
-- If older Adobe capability discovery omits Web models, authenticated `/v1/models` can establish token-scoped availability but **not** parameter or editing support. In that case send only prompt with one-image generation defaults, do not claim editing, and do not copy APIMart-specific controls to Web routes.
+- When old discovery omits current ChatGPT2API-backed Web Flare/Sunburst, the proxy's explicit compatibility profile enables editing through /v1/images/edits with JSON images. The four-reference count is a conservative proxy safety cap, **not** an upstream maximum. Web size and quality are prompt hints, not guaranteed native controls. Do not claim live editing success without an actual result.
 
-- The authenticated `/agent/media-capabilities` contract supplies model-specific parameters when present; the authenticated model list can supplement missing availability, not missing control metadata. APIMart models remain fallback routes and `gpt-image-2-momoapi` remains a legacy compatibility alias.
+- The authenticated `/agent/media-capabilities` contract supplies model-specific parameters when present. The explicit Web compatibility profile above is used when only token model-list availability is returned; it does not establish an upstream reference-count maximum. APIMart models remain fallback routes and `gpt-image-2-momoapi` remains a legacy compatibility alias.
 - Do not infer controls from a model name. Use `image_capabilities`, and omit any field not listed for the selected model.
 - When summarizing the catalog, preserve the exact model IDs and count routes rather than collapsing aliases into a fabricated vendor capability. A fallback or legacy route is not an additional underlying model family.
 - If a live call fails, report the failed operation and error class instead of continuing to describe that operation as online.

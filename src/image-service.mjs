@@ -6,12 +6,15 @@ const ASPECT_RATIOS = ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", 
 const GPT_IMAGE_25_MODELS = new Set(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
 const GPT_IMAGE_25_QUALITY = ["auto", "low", "medium", "high", "xhigh", "max"];
 const OUTPUT_FORMATS = ["png", "jpeg", "webp"];
+const WEB_IMAGE_25_MODELS = new Set(["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-sunburst"]);
+// Client-side safety limit, not an upstream ChatGPT2API maximum.
+const WEB_IMAGE_REFERENCE_LIMIT = 4;
 
 const MODEL_RULES = {
   "momoapi-gpt-image-2-5-flare": {
     maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
     aspectRatios: ASPECT_RATIOS, qualities: ["low", "medium", "high"],
-    generateTransport: "images-generations", editTransport: "images-generations-reference",
+    generateTransport: "images-generations", editTransport: "images-edits-json-images",
     dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
   },
   "momoapi-gpt-image-2-5-prism": {
@@ -23,7 +26,7 @@ const MODEL_RULES = {
   "momoapi-gpt-image-2-5-sunburst": {
     maxN: 4, maxReferenceImages: 4, operations: ["generate", "edit"],
     aspectRatios: ASPECT_RATIOS, qualities: ["low", "medium", "high"],
-    generateTransport: "images-generations", editTransport: "images-generations-reference",
+    generateTransport: "images-generations", editTransport: "images-edits-json-images",
     dynamic: true, requiresCatalog: true, adobe: true, maskEdits: false,
   },
   "momoapi-gpt-image-2": {
@@ -194,6 +197,28 @@ function catalogModelIds(payload) {
   return new Set(rows.map((item) => typeof item === "string" ? item : item?.id).filter((id) => typeof id === "string"));
 }
 
+function webImageCatalogProfile(model) {
+  model.available = true;
+  model.role = "primary";
+  model.availability = "token_model_list";
+  model.protocol_status = "web_edit_adapter_not_live_verified";
+  model.operations = ["generate", "edit"];
+  model.parameters = ["prompt", "n", "aspect_ratio", "size", "quality", "reference_images"];
+  model.parameter_schema = {
+    n: { allowed: [1] }, quality: { allowed: ["auto", "low", "medium", "high"] },
+    aspect_ratio: { allowed: ASPECT_RATIOS },
+    max_reference_images: { maximum: WEB_IMAGE_REFERENCE_LIMIT },
+  };
+  model.limits = {
+    max_n: 1, max_reference_images: WEB_IMAGE_REFERENCE_LIMIT,
+    reference_limit_source: "proxy_safety_limit_not_upstream_maximum",
+    aspect_ratios: ASPECT_RATIOS, qualities: ["auto", "low", "medium", "high"],
+    max_reference_bytes_each: MAX_REFERENCE_BYTES,
+  };
+  model.transports = { generate: "images-generations", edit: "images-edits-json-images" };
+  return model;
+}
+
 export async function resolveImageCapabilities({ settings, fetchImpl = fetch, signal } = {}) {
   const capability = structuredClone(IMAGE_CAPABILITIES);
   if (!settings) return capability;
@@ -226,15 +251,7 @@ export async function resolveImageCapabilities({ settings, fetchImpl = fetch, si
           for (const id of ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-sunburst"]) {
             if (!ids.has(id) || capability.models.some((model) => model.id === id)) continue;
             const model = structuredClone(IMAGE_CAPABILITIES.models.find((item) => item.id === id));
-            model.available = true;
-            model.role = "primary";
-            model.availability = "token_model_list";
-            model.protocol_status = "web_route_capability_unverified";
-            model.operations = ["generate"];
-            model.parameters = ["prompt", "n"];
-            model.parameter_schema = { n: { allowed: [1] } };
-            model.limits = { max_n: 1, max_reference_images: 0, max_reference_bytes_each: MAX_REFERENCE_BYTES };
-            capability.models.unshift(model);
+            capability.models.unshift(webImageCatalogProfile(model));
           }
         }
       } catch {}
@@ -257,12 +274,15 @@ export async function resolveImageCapabilities({ settings, fetchImpl = fetch, si
         model.available = ids.has(model.id);
         model.availability = model.available ? (MODEL_RULES[model.id]?.adobe ? "token_model_list" : "legacy_upstream_catalog") : "not_in_upstream_catalog";
         if (model.available && MODEL_RULES[model.id]?.adobe) {
-          model.role = "primary";
-          model.protocol_status = "web_route_capability_unverified";
-          model.operations = ["generate"];
-          model.parameters = ["prompt", "n"];
-          model.parameter_schema = { n: { allowed: [1] } };
-          model.limits = { max_n: 1, max_reference_images: 0, max_reference_bytes_each: MAX_REFERENCE_BYTES };
+          if (WEB_IMAGE_25_MODELS.has(model.id)) webImageCatalogProfile(model);
+          else {
+            model.role = "primary";
+            model.protocol_status = "web_route_capability_unverified";
+            model.operations = ["generate"];
+            model.parameters = ["prompt", "n"];
+            model.parameter_schema = { n: { allowed: [1] } };
+            model.limits = { max_n: 1, max_reference_images: 0, max_reference_bytes_each: MAX_REFERENCE_BYTES };
+          }
         }
       }
       capability.defaults.model = ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-sunburst", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2"]
@@ -350,7 +370,7 @@ export function normalizeImageRequest(input, operation = "generate", capabilitie
 
   const n = input.n === undefined ? 1 : Number(input.n);
   if (!Number.isInteger(n) || n < 1 || n > rules.maxN) throw fail("n must be an integer between 1 and " + rules.maxN + " for " + model + ".");
-  if (dynamicCapability?.availability === "token_model_list") {
+  if (dynamicCapability?.availability === "token_model_list" && !WEB_IMAGE_25_MODELS.has(model)) {
     const extra = Object.keys(input).find((key) => !["model", "prompt", "n"].includes(key));
     if (extra) throw fail(extra + " is not verified for " + model + " by the token model list.");
     return { model, prompt, n, reference_images: [], operation, catalog_only: true };
@@ -359,7 +379,21 @@ export function normalizeImageRequest(input, operation = "generate", capabilitie
   let aspectRatio;
   let resolution;
   let nativeControls = {};
-  if (rules.adobe) {
+  if (WEB_IMAGE_25_MODELS.has(model)) {
+    const ratio = input.aspect_ratio || input.aspectRatio;
+    if (ratio && !rules.aspectRatios.includes(ratio)) throw fail("Unsupported aspect_ratio for " + model + ": " + ratio);
+    if (input.size !== undefined && (typeof input.size !== "string" || !/^(auto|[1-9][0-9]{1,4}x[1-9][0-9]{1,4})$/.test(input.size))) {
+      throw fail("size must be auto or WIDTHxHEIGHT for " + model + ".");
+    }
+    if (ratio && input.size && input.size !== "auto") throw fail("Use either aspect_ratio or size, not both.");
+    if (input.resolution !== undefined || input.imageSize !== undefined) throw fail("resolution is not a native Web image control; use size as a prompt hint.");
+    const unsupported = ["output_format", "output_compression", "background", "moderation", "input_fidelity", "stream", "partial_images"]
+      .find((key) => input[key] !== undefined);
+    if (unsupported) throw fail(unsupported + " is not verified for the Web image route.");
+    const quality = input.quality === undefined ? undefined : optionalEnum(input, "quality", rules.qualities);
+    nativeControls = { ...(quality ? { quality } : {}), ...(input.size && input.size !== "auto" ? { size: input.size } : {}) };
+    aspectRatio = ratio;
+  } else if (rules.adobe) {
     const legacyAspect = input.aspect_ratio || input.aspectRatio;
     if (legacyAspect && rules.aspectRatios && !rules.aspectRatios.includes(legacyAspect)) throw fail("Unsupported aspect_ratio for " + model + ": " + legacyAspect);
     aspectRatio = legacyAspect || capabilities.defaults.aspect_ratio;
@@ -544,6 +578,12 @@ function nativeImageBody(request) {
 
 function generationBody(request) {
   if (request.catalog_only) return { model: request.model, prompt: request.prompt, n: request.n };
+  if (WEB_IMAGE_25_MODELS.has(request.model)) return {
+    model: request.model, prompt: request.prompt, n: request.n,
+    ...(request.size ? { size: request.size } : {}),
+    ...(request.aspect_ratio ? { size: request.aspect_ratio } : {}),
+    ...(request.quality ? { quality: request.quality } : {}),
+  };
   if (MODEL_RULES[request.model]?.adobe) {
     return {
       model: request.model, prompt: request.prompt, n: request.n,
@@ -744,6 +784,10 @@ export async function generateImage({ settings, request, fetchImpl = fetch, look
   else {
     if (GPT_IMAGE_25_MODELS.has(normalized.model)) {
       body = { ...nativeImageBody(normalized), image_urls: await apimartReferenceUrls(normalized, endpoint, settings, fetchImpl, signal, lookupImpl, assetResolver) };
+    }
+    else if (WEB_IMAGE_25_MODELS.has(normalized.model)) {
+      path = "/v1/images/edits";
+      body = { ...generationBody(normalized), images: await resolveImageReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver) };
     }
     else {
       const references = await resolveImageReferenceDataUrls(normalized, fetchImpl, signal, lookupImpl, assetResolver);

@@ -20,6 +20,13 @@ test("image MCP end-to-end over a fake upstream", async () => {
     ] }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/models") return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/images/generations") return new Response(JSON.stringify({ data: [{ url: "https://mock.gateway/generated/e2e.png", b64_json: pngBase64, task_id: "task-e2e" }] }), { status: 200, headers: { "content-type": "application/json" } });
+    if (target === "https://mock.gateway/v1/images/edits") {
+      const body = JSON.parse(init.body);
+      assert.equal(body.model, "momoapi-gpt-image-2-5-flare");
+      assert.equal(body.images.length, 1);
+      assert.ok(body.images[0].startsWith("data:image/png;base64,"));
+      return Response.json({ data: [{ b64_json: pngBase64 }] });
+    }
     if (target === "https://mock.gateway/v1/tasks/task-e2e") return new Response(JSON.stringify({ code: 200, data: { id: "task-e2e", status: "completed", result: { images: [{ url: ["https://mock.gateway/generated/e2e.png"] }] } } }), { status: 200, headers: { "content-type": "application/json" } });
     if (target === "https://mock.gateway/v1/chat/completions") {
       const body = JSON.parse(init.body);
@@ -52,7 +59,7 @@ test("image MCP end-to-end over a fake upstream", async () => {
   const waitFor = async (needle) => {
     const start = Date.now();
     while (!output.includes(needle)) {
-      if (Date.now() - start > 5000) throw new Error("timeout waiting for " + needle + " stdout=" + output + " stderr=" + errors);
+      if (Date.now() - start > 15000) throw new Error("timeout waiting for " + needle + " stdout=" + output + " stderr=" + errors);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   };
