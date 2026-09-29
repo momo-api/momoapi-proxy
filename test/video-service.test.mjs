@@ -142,6 +142,14 @@ test("discovers NewAPI APIMart video models and submits one JSON task", async ()
   assert.equal(capabilities.defaults.model, "MiniMax-H3-Max");
   assert.deepEqual(capabilities.models.find((model) => model.id === "MiniMax-H3-Max").limits.resolutions, ["480P", "768P", "1080P"]);
   assert.equal(capabilities.models.find((model) => model.id === "MiniMax-H3-Max").limits.max_reference_images, 9);
+  assert.equal(capabilities.models.find((model) => model.id === "MiniMax-H3-Max").limits.included_reference_images_without_input_surcharge, 2);
+  const seedance = capabilities.models.find((model) => model.id === "seedance-2.5");
+  assert.deepEqual(seedance.limits.aspect_ratios, ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"]);
+  assert.equal(seedance.limits.included_reference_images_without_input_surcharge, 0);
+  assert.equal(normalizeVideoRequest({ model: "seedance-2.5", prompt: "cat" }, capabilities).aspect_ratio, "adaptive");
+  assert.equal(normalizeVideoRequest({ model: "seedance-2.5", prompt: "cat", aspect_ratio: "9:16" }, capabilities).aspect_ratio, "9:16");
+  assert.throws(() => normalizeVideoRequest({ model: "seedance-2.5", prompt: "cat", aspect_ratio: "2:1" }, capabilities), /Unsupported aspect_ratio/);
+  assert.throws(() => normalizeVideoRequest({ model: "seedance-2.5", prompt: "cat", aspect_ratio: "16:9", reference_images: ["https://images.example/ref.jpg"] }, capabilities), /adaptive/);
   assert.deepEqual(videoToolDefs(capabilities).find((tool) => tool.name === "video_generate").inputSchema.properties.model.enum, ["MiniMax-H3-Max", "seedance-2.5"]);
   const request = { model: "MiniMax-H3-Max", prompt: "cat", duration: 5, resolution: "480P", first_frame_image: "https://images.example/cat.jpg" };
   const result = await generateVideo({ settings, request, fetchImpl });

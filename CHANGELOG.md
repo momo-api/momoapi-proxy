@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.18 - 2026-09-29
+
+- Advertise and validate Seedance 2.5 aspect ratios, including adaptive for image references, and expose NewAPI's model-specific image-input surcharge allowances separately from video generation cost.
+
 ## 0.14.17 - 2026-09-29
 
 - Reject missing or reserved call_unknown tool-call IDs locally instead of forwarding orphan function_call_output items upstream and returning a confusing HTTP 400.

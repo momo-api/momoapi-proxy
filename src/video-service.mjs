@@ -62,6 +62,9 @@ function publicCapability(model) {
       resolutions: allowedValues(parameters.resolution),
       generate_audio: allowedValues(parameters.generate_audio),
       max_reference_images: maximum(parameters.max_reference_images, 0),
+      ...(Number.isInteger(model?.reference_image_pricing?.included_images) ? {
+        included_reference_images_without_input_surcharge: model.reference_image_pricing.included_images,
+      } : {}),
     },
     transport: model?.provider === "APIMart" ? "newapi-video-json-task" : "openai-video-task",
   };
@@ -73,13 +76,16 @@ function apimartVideoCapabilities(ids) {
   const common = { modality: "video", role: "fallback", provider: "APIMart", operations: ["generate", "image_to_video", "style_reference"] };
   const duration = (minimum, maximum) => ({ type: "integer", allowed: Array.from({ length: maximum - minimum + 1 }, (_, i) => i + minimum), default: minimum });
   return [
-    { ...common, id: "MiniMax-H3-Max", available: ids.has("MiniMax-H3-Max"), parameters: {
+    { ...common, id: "MiniMax-H3-Max", available: ids.has("MiniMax-H3-Max"),
+      reference_image_pricing: { included_images: 2, note: "No extra image-input fee for the first two images; video generation is always billed. NewAPI channel pricing may differ from APIMart's public list." }, parameters: {
       duration: duration(5, 15), resolution: { allowed: ["480P", "768P", "1080P"], default: "768P" },
       aspect_ratio: { allowed: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"] },
       max_reference_images: { maximum: 9 },
     } },
-    { ...common, id: "seedance-2.5", available: ids.has("seedance-2.5"), parameters: {
+    { ...common, id: "seedance-2.5", available: ids.has("seedance-2.5"),
+      reference_image_pricing: { included_images: 0, note: "The deployed NewAPI channel assumes no free image-input allowance; this is not an APIMart promotional guarantee. Video generation is billed." }, parameters: {
       duration: duration(4, 30), resolution: { allowed: ["480p", "720p", "1080p"], default: "480p" },
+      aspect_ratio: { allowed: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"], default: "adaptive" },
       max_reference_images: { maximum: 30 },
     } },
   ].map(publicCapability);
