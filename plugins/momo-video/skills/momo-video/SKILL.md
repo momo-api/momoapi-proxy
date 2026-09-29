@@ -17,10 +17,10 @@ Use the MCP tools from this plugin. The local proxy keeps the MOMO credential ou
 ## APIMart video controls
 
 - MiniMax-H3-Max: duration 5-15 s; resolution 480P (cheapest), 768P (default), or 1080P; text, first/last-frame and up to 9 HTTPS reference images. The first TWO input images incur no **additional image-input fee**, not free video generation; more images are charged. The first-five-free-input-images rule belongs to the distinct MiniMax-H3 model. The current plugin does not support APIMart reference video/audio or 2K.
-- seedance-2.5: duration 4-30 s; resolution 480p (default), 720p, or 1080p; text, first/last-frame and up to 30 HTTPS reference images. Do not assume any free images; confirm cost before submission.
+- seedance-2.5: duration 4-30 s; resolution 480p (default), 720p, or 1080p; text, first/last-frame and up to 30 HTTPS reference images. The supported aspect ratios are 16:9, 4:3, 1:1, 3:4, 9:16, 21:9, adaptive (default); image-reference or first/last-frame requests require adaptive. The deployed NewAPI channel prices every reference image as an additional input: **zero images are free of the input surcharge** under its current pricing rule. This is not a guarantee about any APIMart promotion; video generation itself is billed.
 - reference_images are reference media, NOT first-frame controls. Use first_frame_image and last_frame_image for frame-based image-to-video; do not mix frames with references. These fields need public HTTPS URLs. Frame control needs adaptive aspect ratio; for Seedance references, use adaptive or omit aspect_ratio.
 - The APIMart route uses MOMO /v1/video/generations and polls the compatible /v1/videos/{task_id} endpoint. Never automatically retry an uncertain paid submission.
 
-Official parameters: https://docs.apimart.ai/en/api-reference/videos/minimax-h3/max . Only MiniMax 480P/5s text and one-frame cases have been accepted end-to-end so far.
+Official parameters: https://docs.apimart.ai/en/api-reference/videos/minimax-h3/max and https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation . Only MiniMax 480P/5s text and one-frame cases have been accepted end-to-end so far; all other combinations are document- and adapter-validated, not live paid-tested.
 
 Do not infer capabilities from model names or silently substitute another model when validation fails.
