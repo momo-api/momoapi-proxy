@@ -259,6 +259,8 @@ test("catalog excludes known media models even when upstream omits modality", as
     { id: "momoapi-kling-3-standard", agent_status: "stable" },
     { id: "momoapi-veo-3-1-fast", agent_status: "stable" },
     { id: "momoapi-veo-3-1-lite", agent_status: "stable" },
+    { id: "MiniMax-H3-Max", agent_status: "stable" },
+    { id: "seedance-2.5", agent_status: "stable" },
     { id: "provider-image-model", agent_status: "stable" },
     { id: "provider-video-model", modality: "video", agent_status: "stable" },
   ]);
