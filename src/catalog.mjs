@@ -143,6 +143,8 @@ const MEDIA_ONLY_MODEL_IDS = new Set([
   "momoapi-veo-3-1-fast",
   "momoapi-veo-3-1-lite",
   "momoapi-kling-3-standard",
+  "minimax-h3-max",
+  "seedance-2.5",
 ]);
 
 function isImageOrNonText(model) {
