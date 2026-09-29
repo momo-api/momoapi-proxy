@@ -57,13 +57,14 @@ test("prefers listed Web channel aliases over APIMart fallback when legacy Adobe
   } });
   assert.equal(calls.length, 2);
   assert.equal(capabilities.defaults.model, "momoapi-gpt-image-2-5-flare");
-  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").operations, ["generate"]);
-  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").parameters, ["prompt", "n"]);
+  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").operations, ["generate", "edit"]);
+  assert.equal(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").limits.max_reference_images, 4);
+  assert.equal(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").limits.reference_limit_source, "proxy_safety_limit_not_upstream_maximum");
   assert.deepEqual(JSON.parse(JSON.stringify(normalizeImageRequest({ prompt: "sunrise" }, "generate", capabilities))), {
-    model: "momoapi-gpt-image-2-5-flare", prompt: "sunrise", n: 1, reference_images: [], operation: "generate", catalog_only: true,
+    model: "momoapi-gpt-image-2-5-flare", prompt: "sunrise", n: 1, reference_images: [], operation: "generate",
   });
-  assert.throws(() => normalizeImageRequest({ prompt: "sunrise", quality: "high" }, "generate", capabilities), /not verified/);
-  assert.throws(() => normalizeImageRequest({ prompt: "sunrise", reference_images: [tinyPng] }, "edit", capabilities), /does not support edit/);
+  assert.equal(normalizeImageRequest({ prompt: "sunrise", quality: "high" }, "generate", capabilities).quality, "high");
+  assert.equal(normalizeImageRequest({ prompt: "sunrise", reference_images: [tinyPng] }, "edit", capabilities).reference_images.length, 1);
   assert.equal(capabilities.models.find((model) => model.id === "gpt-image-2.5-flare").role, "fallback");
 });
 
@@ -83,7 +84,44 @@ test("token model list fallback prefers Web only when explicitly listed", async 
       : { error: "catalog unavailable" }), { status: String(url).endsWith("/v1/models") ? 200 : 503 }) });
   assert.equal(capabilities.catalog_status, "legacy_fallback");
   assert.equal(capabilities.defaults.model, "momoapi-gpt-image-2-5-flare");
-  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").operations, ["generate"]);
+  assert.deepEqual(capabilities.models.find((model) => model.id === "momoapi-gpt-image-2-5-flare").operations, ["generate", "edit"]);
+});
+
+test("Web Flare and Sunburst edits use NewAPI edits JSON images, not APIMart image_urls", async () => {
+  for (const model of ["momoapi-gpt-image-2-5-flare", "momoapi-gpt-image-2-5-sunburst"]) {
+    const submissions = [];
+    const result = await generateImage({ settings, operation: "edit",
+      request: { model, prompt: "keep the subject", reference_images: Array(4).fill(tinyPng),
+        aspect_ratio: "16:9", quality: "high" },
+      fetchImpl: async (url, init = {}) => {
+        if (String(url).endsWith("/agent/media-capabilities")) return Response.json({ error: "old discovery unavailable" }, { status: 503 });
+        if (String(url).endsWith("/v1/models")) return Response.json({ data: [{ id: model }] });
+        submissions.push({ url: String(url), init });
+        return Response.json({ data: [{ b64_json: "aGVsbG8=" }] });
+      },
+    });
+    assert.equal(result.images[0].b64_json, "aGVsbG8=");
+    assert.equal(submissions.length, 1);
+    assert.equal(submissions[0].url, "https://gateway.example/v1/images/edits");
+    assert.equal(submissions[0].init.headers["content-type"], "application/json");
+    assert.deepEqual(JSON.parse(submissions[0].init.body), {
+      model, prompt: "keep the subject", n: 1, size: "16:9", quality: "high", images: Array(4).fill(tinyPng),
+    });
+  }
+});
+
+test("Web reference limit is explicitly a conservative proxy cap, not an inferred upstream limit", async () => {
+  let submissions = 0;
+  await assert.rejects(() => generateImage({ settings, operation: "edit",
+    request: { model: "momoapi-gpt-image-2-5-flare", prompt: "edit", reference_images: Array(5).fill(tinyPng) },
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/agent/media-capabilities")) return Response.json({ error: "old discovery unavailable" }, { status: 503 });
+      if (String(url).endsWith("/v1/models")) return Response.json({ data: [{ id: "momoapi-gpt-image-2-5-flare" }] });
+      submissions++;
+      return Response.json({});
+    },
+  }), /at most 4/);
+  assert.equal(submissions, 0);
 });
 
 test("rejects a known model omitted by an authoritative partial capability catalog", () => {
