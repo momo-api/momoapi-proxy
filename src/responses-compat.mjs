@@ -699,9 +699,14 @@ export function rewriteRoutedToolSearchForUpstream(body) {
       };
     }
     if (item.type === "tool_search_output") {
+      if (typeof item.call_id !== "string" || !item.call_id.trim() || item.call_id.trim() === "call_unknown") {
+        throw Object.assign(new Error("Tool search output is missing call_id; resend the complete tool call and its result."), {
+          statusCode: 400, code: "invalid_tool_continuation",
+        });
+      }
       return {
         type: "function_call_output",
-        call_id: item.call_id || "call_unknown",
+        call_id: item.call_id,
         output: typeof item.output === "string" ? item.output : JSON.stringify(item.tools || item.output || {}),
       };
     }
