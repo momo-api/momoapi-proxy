@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.20 - 2026-09-29
+
+- Update the bundled MOMO Image plugin to 0.6.5 with reference-based creation guidance and the official image prompting link. No image route or model parameter behavior changes.
+
 ## 0.14.19 - 2026-09-29
 
 - Route ChatGPT2API-backed Web Flare/Sunburst reference edits through NewAPI's JSON /v1/images/edits endpoint; expose a four-reference proxy safety cap and prompt-hint size/quality controls without claiming an upstream maximum or pixel guarantee.
