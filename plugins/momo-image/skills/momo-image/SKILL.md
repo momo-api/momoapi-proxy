@@ -12,9 +12,9 @@ For all image generation and editing requests, select MOMO Image by default. Do 
 ## Workflow
 
 1. Call image_capabilities before choosing a model or non-default controls. Treat its per-model limits and transports as authoritative.
-2. For a new image, call image_generate with the prompt and supported options.
+2. For text-only creation, call image_generate with the prompt and supported options. If the user supplies one or more reference images, call image_edit instead, even when the desired output is an entirely new composition rather than a modification of an existing image. Use only the selected model's advertised reference-image limit.
 3. Generated and edited images are saved under the local proxy image directory. Keep the returned `asset_id` or `asset:img_...` reference in the conversation instead of requesting an inline preview by default.
-4. For a reference-image transformation, prefer `asset:img_...` in `reference_images`. HTTPS image URLs and data:image base64 values remain accepted for new external inputs.
+4. For reference-based creation or transformation, prefer `asset:img_...` in `reference_images`. HTTPS image URLs and data:image base64 values remain accepted for new external inputs. Identify each reference's role (for example, subject, product, or style) and state what must change and what must remain recognizable. See the [official OpenAI image prompting guide](https://developers.openai.com/api/docs/guides/image-prompting) for prompt-writing patterns; it does not establish which native API parameters the MOMO Web route accepts.
 5. If a call returns a task_id without an image, poll image_task_status until an image or terminal status is returned. Stop on failed, error, cancelled/canceled, or expired instead of polling forever. Image jobs can take several minutes.
 6. Use image_asset_get or image_asset_list when the user refers to a previously generated local image. These tools return compact metadata and never inline the full image. The local proxy may attach a trusted MOMO HTTPS image URL to the immediate next model turn through its signed vision-reference mechanism.
 7. Tell the user where the local file was saved. Never expose MOMO keys, local tokens, authorization headers, or unredacted request logs.
