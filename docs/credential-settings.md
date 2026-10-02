@@ -70,14 +70,17 @@ No production deployment, version bump or release tag is part of this draft.
 
 ## Known release blockers (do not publish these drafts yet)
 
-- A running 0.14.21 daemon has no credential-rotation route. New install code
-  currently fails closed rather than silently overwriting its active Key.
-  Legacy upgrade needs a reviewed, authenticated managed-service transition
-  and tests; never substitute a broad port-owner kill.
+- A running 0.14.21 daemon has no credential-rotation route. Explicit Mac
+  install now probes capabilities without sending the candidate, authenticates
+  legacy metrics, and activates only the existing managed login-service label
+  with old settings/new source before verifying authenticated capabilities.
+  This bounded migration is unit-tested but still needs real legacy-Mac
+  acceptance. Disabled/missing agents and other platforms fail closed.
 - Explicit reinstall rotates the Key before full setup. A later catalog,
   launchd or desktop failure does not establish whole-install rollback.
-  Existing bootstrap app-directory restoration is NOT credential/settings
-  restoration. Do not claim that all previous settings were restored.
+  The CLI reports this as partial success. Existing bootstrap app-directory
+  restoration is NOT credential/settings restoration. Do not claim that all
+  previous settings were restored.
 - The bundled Unix bootstrap still has historical GNU-tool assumptions and
   destructive app replacement; it is not the Mac-compatible hosted bootstrap.
   It requires follow-up before advertising it for macOS.

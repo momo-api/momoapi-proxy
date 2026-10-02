@@ -116,6 +116,11 @@ test("authenticated native loopback rotation reloads future upstream requests an
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   t.after(() => new Promise((r) => server.close(r)));
   const base = `http://127.0.0.1:${server.address().port}`;
+  assert.equal((await fetch(base + "/internal/capabilities")).status, 403);
+  assert.equal((await fetch(base + "/internal/capabilities", { headers: { "x-local-token": original.localToken, origin: "https://foreign.invalid" } })).status, 403);
+  const capabilities = await fetch(base + "/internal/capabilities", { headers: { "x-local-token": original.localToken } });
+  assert.equal(capabilities.status, 200);
+  assert.equal((await capabilities.json()).apiKeyChange, true);
   const request = (headers, body = { apiKey: "new-test-credential" }) => fetch(base + "/internal/settings/api-key", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   assert.equal((await request({})).status, 403);
   assert.equal((await request({ "x-local-token": original.localToken, origin: "https://evil.invalid" })).status, 403);

@@ -24,13 +24,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var keyWindow: NSWindow?
     private var keyField: NSSecureTextField?
     private var saveButton: NSButton?
+    private var instanceLock: Int32 = -1
     private let home = FileManager.default.homeDirectoryForCurrentUser
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // launchctl and Finder may race to open the same bundle. Keep one icon.
-        let instances = NSRunningApplication.runningApplications(withBundleIdentifier: "us.momoapi.menu-bar")
-        let current = ProcessInfo.processInfo.processIdentifier
-        if instances.contains(where: { $0.processIdentifier < current }) { NSApp.terminate(nil); return }
+        // Kernel lock is released on exit/crash; do not rely on PID ordering
+        // or steal a lock by age. Finder and launchd may race to open the app.
+        let directory = home.appendingPathComponent("Library/Application Support/MOMO API Proxy")
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        catch { NSApp.terminate(nil); return }
+        instanceLock = directory.appendingPathComponent("menu-bar.lock").path.withCString { Darwin.open($0, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR) }
+        guard instanceLock >= 0, flock(instanceLock, LOCK_EX | LOCK_NB) == 0 else { NSApp.terminate(nil); return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "m.circle.fill", accessibilityDescription: "MOMO API Proxy")
         statusItem.button?.toolTip = "MOMO API Proxy"
@@ -177,7 +181,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate {
         run(["key", "change", "--api-key-stdin"], secret: key) { ok, _ in
             self.busy = false; self.saveButton?.isEnabled = true
             if ok { self.keyWindow?.close(); self.keyWindow = nil }
-            self.alert(ok ? "API Key 已验证并保存。已打开的直连客户端可能需要重启。" : "Key 修改未完成。请检查网络与 Key；终端 momoapi key change 可查看具体原因。")
+            self.alert(ok ? "API Key 已验证并保存。已打开的直连客户端可能需要重启。" : "未能确认 Key 修改结果。请先检查 momoapi doctor；不要假定旧 Key 仍生效或立即重复保存。")
             self.refreshStatus()
         }
     }

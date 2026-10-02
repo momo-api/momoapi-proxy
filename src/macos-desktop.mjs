@@ -104,6 +104,11 @@ export function controlMacService(action, { env = process.env, userId = process.
   const domain = "gui/" + userId;
   const plist = join(userHome(env), "Library", "LaunchAgents", MACOS_LAUNCHD_LABEL + ".plist");
   if (!existsSync(plist)) throw new Error("Managed LaunchAgent not found. Run momoapi install in a terminal.");
+  if (action !== "restart") {
+    const state = spawnSyncImpl("/bin/launchctl", ["print", domain + "/" + MACOS_LAUNCHD_LABEL], { encoding: "utf8", timeout: 15000 });
+    if (state.error) throw new Error("Cannot inspect managed LaunchAgent.");
+    if ((action === "start" && state.status === 0) || (action === "stop" && state.status !== 0)) return { ok: true, action, unchanged: true };
+  }
   const args = action === "stop" ? ["bootout", domain, plist] : action === "start" ? ["bootstrap", domain, plist] : ["kickstart", "-k", domain + "/" + MACOS_LAUNCHD_LABEL];
   const result = spawnSyncImpl("/bin/launchctl", args, { encoding: "utf8", timeout: 15000 });
   if (result.error || result.status !== 0) throw new Error("The managed LaunchAgent could not be controlled. Check momoapi doctor.");

@@ -100,8 +100,9 @@ test("Mac service actions target the exact managed LaunchAgent rather than port-
   const plist = join(home, "Library", "LaunchAgents", MACOS_LAUNCHD_LABEL + ".plist");
   mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true }); writeFileSync(plist, "fixture");
   const calls = [];
-  for (const action of ["start", "stop", "restart"]) controlMacService(action, { env, userId: 501, spawnSyncImpl: (cmd, args) => { calls.push([cmd, args]); return { status: 0 }; } });
-  assert.deepEqual(calls[0], ["/bin/launchctl", ["bootstrap", "gui/501", plist]]);
-  assert.deepEqual(calls[1], ["/bin/launchctl", ["bootout", "gui/501", plist]]);
-  assert.deepEqual(calls[2], ["/bin/launchctl", ["kickstart", "-k", "gui/501/" + MACOS_LAUNCHD_LABEL]]);
+  for (const action of ["start", "stop", "restart"]) controlMacService(action, { env, userId: 501, spawnSyncImpl: (cmd, args) => { calls.push([cmd, args]); return { status: args[0] === "print" && action === "start" ? 1 : 0 }; } });
+  const mutations = calls.filter(([, args]) => args[0] !== "print");
+  assert.deepEqual(mutations[0], ["/bin/launchctl", ["bootstrap", "gui/501", plist]]);
+  assert.deepEqual(mutations[1], ["/bin/launchctl", ["bootout", "gui/501", plist]]);
+  assert.deepEqual(mutations[2], ["/bin/launchctl", ["kickstart", "-k", "gui/501/" + MACOS_LAUNCHD_LABEL]]);
 });

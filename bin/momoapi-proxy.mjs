@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promptApiKey, readApiKeyStdin } from "../src/key-input.mjs";
 import { rotateApiKey, validateApiKey, credentialError } from "../src/credentials.mjs";
+import { upgradeMacInstallRuntime } from "../src/install-runtime.mjs";
 import { installMacDesktop, openMacDesktop } from "../src/macos-desktop.mjs";
 import { installAutostart, uninstallAutostart } from "../src/autostart.mjs";
 import { updateSettings } from "../src/config.mjs";
@@ -142,13 +143,25 @@ async function inputKey() {
   return promptApiKey();
 }
 
-async function changeConfiguredKey(apiKey) {
+async function changeConfiguredKey(apiKey, { allowLegacyInstallUpgrade = false } = {}) {
   const saved = readSettings();
   if (!saved.localToken) throw new Error("Install MOMO API Proxy first.");
   const port = Number(saved.port || 18789);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid saved proxy port.");
   let response;
   try {
+    if (allowLegacyInstallUpgrade) {
+      const capabilities = await fetch("http://127.0.0.1:" + port + "/internal/capabilities", {
+        redirect: "error", signal: AbortSignal.timeout(3000), headers: { "x-local-token": saved.localToken },
+      });
+      if (capabilities.status === 404) {
+        await capabilities.body?.cancel();
+        await upgradeMacInstallRuntime({ ...saved, port });
+      } else {
+        const result = await capabilities.json().catch(() => null);
+        if (!capabilities.ok || result?.ok !== true || result.apiKeyChange !== true) throw new Error("Runtime credential capability could not be authenticated.");
+      }
+    }
     response = await fetch("http://127.0.0.1:" + port + "/internal/settings/api-key", {
       method: "POST", redirect: "error", signal: AbortSignal.timeout(20000),
       headers: { "content-type": "application/json", "x-local-token": saved.localToken }, body: JSON.stringify({ apiKey }),
@@ -168,6 +181,11 @@ async function changeConfiguredKey(apiKey) {
 }
 
 async function main() {
+  if (process.platform === "darwin" && ["start", "up", "daemon", "stop", "down", "restart"].includes(command)) {
+    const action = ["start", "up", "daemon"].includes(command) ? "start" : ["stop", "down"].includes(command) ? "stop" : "restart";
+    console.log(JSON.stringify(controlMacService(action)));
+    return;
+  }
   if (command === "service" && ["start", "stop", "restart"].includes(args[0]) && process.platform === "darwin") {
     console.log(JSON.stringify(controlMacService(args[0])));
     return;
@@ -273,10 +291,17 @@ async function main() {
     // A previously trusted credential validation must not permit setup to
     // subsequently send the candidate to a different --endpoint.
     await validateApiKey(apiKey, { endpoint: endpoint || existing.endpoint || "https://momoapi.us" });
-    if (existing.apiKey && existing.localToken) await changeConfiguredKey(apiKey);
-    const result = await setup({ apiKey, endpoint, port, autostart, imagePlugin });
-    const installedSettings = readSettings();
-    const desktop = process.platform === "darwin" ? installMacDesktop() : installWindowsDesktop({ port: installedSettings.port, autostart: installedSettings.autostart });
+    if (existing.apiKey && existing.localToken) await changeConfiguredKey(apiKey, { allowLegacyInstallUpgrade: true });
+    let result, installedSettings, desktop;
+    try {
+      result = await setup({ apiKey, endpoint, port, autostart, imagePlugin });
+      installedSettings = readSettings();
+      desktop = process.platform === "darwin" ? installMacDesktop() : installWindowsDesktop({ port: installedSettings.port, autostart: installedSettings.autostart });
+    } catch {
+      throw new Error(existing.apiKey && existing.localToken
+        ? "API Key was changed, but remaining installation steps failed. This is partial success, not a full rollback. Run momoapi doctor."
+        : "Installation did not complete. Some configuration may have been written; run momoapi doctor before retrying.");
+    }
     console.log("MOMO API Proxy 配置成功！");
     console.log("  - 上游端点: " + (endpoint || "https://momoapi.us"));
     console.log("  - 本地代理: http://127.0.0.1:" + installedSettings.port + "/v1");

@@ -932,6 +932,13 @@ export function createMomoSwitch(settings, options = {}) {
         }
       }
 
+      if (request.method === "GET" && pathname === "/internal/capabilities") {
+        if (!settings.localToken || request.headers.origin || !isAuthorizedLoopbackRequest(request, remoteIp, settings.localToken)) {
+          return json(response, 403, { ok: false, error: { code: "forbidden" } });
+        }
+        return json(response, 200, { ok: true, apiKeyChange: true, version: getCurrentVersion() });
+      }
+
       if (request.method === "POST" && pathname === "/internal/settings/api-key") {
         if (!settings.localToken || request.headers.origin || !isAuthorizedLoopbackRequest(request, remoteIp, settings.localToken)) {
           return json(response, 403, { ok: false, error: { code: "forbidden", message: "Authenticated native loopback client required." } });
