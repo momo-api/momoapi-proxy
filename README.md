@@ -56,9 +56,27 @@ curl -fsSL https://raw.githubusercontent.com/momo-api/momoapi-proxy/main/install
 
 ### Manual Commands
 
+Interactive install/setup always ask for a new hidden Key; saved settings
+and inherited environment credentials do not bypass the prompt. Normal start,
+update, autostart and opening the companion never ask for a Key. Changing a Key
+is an explicit action (momoapi key change or the Settings menu).
+Unattended installs must explicitly use --api-key-env or --api-key-stdin;
+Keys in command arguments are rejected. Rotation validates only the trusted
+https://momoapi.us origin, retains preferences and hot-reloads the daemon.
+Already open direct-route clients may need restarting to refresh credentials.
+
+The native Mac menu-bar companion is built for arm64 and Intel in CI, not on
+the user's computer. Only Developer-ID-signed, notarized, assessed bundles may
+be included in a release. Until that release asset exists, the installer reports
+the missing app explicitly and the CLI remains available. See
+[credential/UI acceptance](docs/credential-settings.md) for release gates.
+
 ```bash
 # Install & configure
-momo-codex-bridge install --api-key <MOMO_KEY>
+momoapi install
+
+# Change only the API Key (hidden input; validates before saving)
+momoapi key change
 
 # Start bridge daemon
 momo-codex-bridge serve
@@ -96,7 +114,7 @@ momo-codex-bridge uninstall [--remove-key]
 ```powershell
 git clone https://github.com/momo-api/momoapi-proxy.git
 cd momoapi-proxy
-node .\bin\momo-codex-switch.mjs setup --api-key $env:MOMO_API_KEY
+node .\bin\momo-codex-switch.mjs setup --api-key-env
 node .\bin\momo-codex-switch.mjs serve
 ```
 

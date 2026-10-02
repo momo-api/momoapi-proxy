@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -49,17 +49,50 @@ export function readSettings(env = process.env) {
   try {
     return JSON.parse(readFileSync(file, "utf8"));
   } catch (error) {
-    throw new Error(`Cannot parse ${file}: ${error.message}`);
+    throw new Error("Cannot parse settings JSON. Repair the file locally; diagnostics omit file contents.");
   }
 }
 
 export function writeSettings(settings, env = process.env) {
+  const release = lockSettings(env);
+  try { return writeSettingsLocked(settings, env); } finally { release(); }
+}
+
+// All settings writers share this fail-fast lock. Never steal a lock based on
+// age: another process may still be validating a credential.
+export function lockSettings(env = process.env) {
   const directory = appHome(env);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const file = settingsPath(env);
-  writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
-  try { chmodSync(file, 0o600); } catch { /* Windows has no POSIX permissions. */ }
+  const lock = join(directory, ".settings-write.lock");
+  try { mkdirSync(lock, { mode: 0o700 }); } catch {
+    throw Object.assign(new Error("Settings are busy. Retry after the other configuration task finishes."), { code: "settings_busy" });
+  }
+  return () => rmdirSync(lock);
+}
+
+export function writeSettingsLocked(settings, env = process.env) {
+  // Legacy settings remain readable, but writes explicitly migrate to the
+  // current home. Keep the legacy source untouched; no secret backup is made.
+  const file = join(appHome(env), "settings.json");
+  const temporary = join(appHome(env), ".settings-" + randomBytes(12).toString("hex") + ".tmp");
+  try {
+    writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    renameSync(temporary, file);
+    try { chmodSync(file, 0o600); } catch { /* Windows uses profile ACLs. */ }
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
   return file;
+}
+
+export function updateSettings(patch, env = process.env) {
+  const release = lockSettings(env);
+  try {
+    const current = readSettings(env);
+    const updated = typeof patch === "function" ? patch(current) : { ...current, ...patch };
+    writeSettingsLocked(updated, env);
+    return updated;
+  } finally { release(); }
 }
 
 export function newLocalToken() {

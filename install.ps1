@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$ApiKey = "",
+  [switch]$ApiKeyEnv,
   [string]$Endpoint = "https://momoapi.us",
   [int]$Port = 18789,
   [switch]$NoAutostart,
@@ -55,17 +56,14 @@ Write-Step "Found Node.js v$nodeVer"
 $installRoot = [System.IO.Path]::Combine($HOME, ".momoapi-proxy")
 $installDir = [System.IO.Path]::Combine($installRoot, "app")
 $savedSettingsPath = [System.IO.Path]::Combine($installRoot, "settings.json")
-if (-not $ApiKey) {
+if ($ApiKeyEnv -and -not $ApiKey) {
   $ApiKey = $env:MOMO_API_KEY
 }
-if (-not $ApiKey -and (Test-Path -LiteralPath $savedSettingsPath)) {
-  try {
-    $savedSettings = Get-Content -LiteralPath $savedSettingsPath -Raw | ConvertFrom-Json
-    if ($savedSettings.apiKey) { $ApiKey = [string]$savedSettings.apiKey }
-  } catch {}
-}
 if (-not $ApiKey) {
-  $ApiKey = Read-Host "Enter your MOMO API Key (e.g. sk-momo-...)"
+  $secureKey = Read-Host "Enter a new MOMO API Key (hidden; blank cancels)" -AsSecureString
+  $keyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+  try { $ApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPointer) }
+  finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($keyPointer); $secureKey.Dispose() }
 }
 if (-not $ApiKey) {
   Write-Err "MOMO API Key is required."
@@ -179,11 +177,12 @@ Remove-Item -Path (Join-Path $binDir "momo.ps1") -Force -ErrorAction SilentlyCon
 
 # 5. Run Setup
 Write-Step "Configuring Codex provider & syncing models..."
-$setupArgs = @($bridgeBin, "install", "--api-key", $ApiKey, "--endpoint", $Endpoint, "--port", "$Port")
+$setupArgs = @($bridgeBin, "install", "--api-key-stdin", "--endpoint", $Endpoint, "--port", "$Port")
 if ($NoAutostart) { $setupArgs += "--no-autostart" }
 if ($NoImagePlugin) { $setupArgs += "--no-image-plugin" }
 
-& node @setupArgs
+$ApiKey | & node @setupArgs
+$ApiKey = $null
 if ($LASTEXITCODE -ne 0) {
   Write-Err "Setup failed with exit code $LASTEXITCODE"
   exit $LASTEXITCODE

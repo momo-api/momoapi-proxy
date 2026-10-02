@@ -2,6 +2,7 @@ node_modules/
 .momo-codex-switch/
 coverage/
 dist/
+resources/macos/
 *.log
 
 *.tgz

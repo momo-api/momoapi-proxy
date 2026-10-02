@@ -276,6 +276,8 @@ namespace MomoApi.Tray
 
             var settingsMenu = new ToolStripMenuItem("设置");
             menu.Items.Add(settingsMenu);
+            var changeKey = settingsMenu.DropDownItems.Add("修改 API Key...");
+            changeKey.Click += async (s, e) => await ChangeApiKeyAsync();
 
             autostartItem = new ToolStripMenuItem("托盘开机自动启动");
             autostartItem.CheckOnClick = true;
@@ -543,6 +545,67 @@ namespace MomoApi.Tray
                 catch { }
             }
             return "node";
+        }
+
+        private Task ChangeApiKeyAsync()
+        {
+            if (isCliRunning) return Task.FromResult(0);
+            using (var dialog = new Form())
+            {
+                dialog.Text = "修改 MOMO API Key";
+                dialog.ClientSize = new Size(460, 160);
+                dialog.StartPosition = FormStartPosition.CenterScreen;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MaximizeBox = false; dialog.MinimizeBox = false;
+                var label = new Label { Text = "输入新 Key，验证成功后保存；取消不改变现有配置。", Left = 16, Top = 18, Width = 425 };
+                var input = new TextBox { Left = 16, Top = 48, Width = 425, UseSystemPasswordChar = true, MaxLength = 4096 };
+                var save = new Button { Text = "验证并保存", Left = 235, Top = 100, Width = 105 };
+                var cancel = new Button { Text = "取消", Left = 350, Top = 100, Width = 90, DialogResult = DialogResult.Cancel };
+                dialog.Controls.AddRange(new Control[] { label, input, save, cancel });
+                dialog.AcceptButton = save; dialog.CancelButton = cancel;
+                save.Click += async (s, e) =>
+                {
+                    if (string.IsNullOrWhiteSpace(input.Text)) return;
+                    save.Enabled = false; cancel.Enabled = false; input.Enabled = false;
+                    isCliRunning = true;
+                    string key = input.Text.Trim(); input.Clear();
+                    try
+                    {
+                        ProcessStartInfo psi = ResolveCliProcessInfo("key change --api-key-stdin");
+                        psi.UseShellExecute = false; psi.CreateNoWindow = true;
+                        psi.WindowStyle = ProcessWindowStyle.Hidden;
+                        psi.RedirectStandardInput = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+                        psi.StandardOutputEncoding = Encoding.UTF8; psi.StandardErrorEncoding = Encoding.UTF8;
+                        int code = -1;
+                        await Task.Run(() =>
+                        {
+                            using (Process p = Process.Start(psi))
+                            {
+                                if (p == null) return;
+                                var stdout = p.StandardOutput.ReadToEndAsync(); var stderr = p.StandardError.ReadToEndAsync();
+                                p.StandardInput.WriteLine(key); p.StandardInput.Close(); key = null;
+                                if (!p.WaitForExit(30000)) { try { p.Kill(); } catch { } }
+                                else code = p.ExitCode;
+                                Task.WaitAll(new Task[] { stdout, stderr }, 3000);
+                            }
+                        });
+                        if (code == 0)
+                        {
+                            MessageBox.Show("API Key 已验证并保存。已打开的直连客户端可能需要重启。", "MOMO API Proxy");
+                            dialog.Close();
+                        }
+                        else MessageBox.Show("未能完成 Key 修改。请检查网络和 Key，或在终端运行 momoapi key change 查看原因。", "MOMO API Proxy");
+                    }
+                    catch { MessageBox.Show("无法执行安全 Key 修改，请检查代理安装。", "MOMO API Proxy"); }
+                    finally
+                    {
+                        key = null; isCliRunning = false;
+                        save.Enabled = true; cancel.Enabled = true; input.Enabled = true;
+                    }
+                };
+                dialog.ShowDialog();
+            }
+            return Task.FromResult(0);
         }
 
         private ProcessStartInfo ResolveCliProcessInfo(string subCommand)

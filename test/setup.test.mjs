@@ -6,6 +6,21 @@ import { join } from "node:path";
 import { migrateManagedCompactionConfig, rollback, setup, uninstall } from "../src/setup.mjs";
 import { isAutostartInstalled } from "../src/autostart.mjs";
 import { runDoctor } from "../src/doctor.mjs";
+import { writeSettings, readSettings } from "../src/config.mjs";
+
+test("reconfiguration preserves localToken and unrelated preferences instead of resetting identity", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "momo-reconfigure-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const env = { HOME: home, USERPROFILE: home, CODEX_HOME: join(home, ".codex"), MOMO_PROXY_HOME: join(home, ".proxy") };
+  const before = { apiKey: "old-test", localToken: "stable-test", endpoint: "https://momoapi.us", port: 19991,
+    autostart: false, imagePluginEnabled: false, updateMode: "manual", diagnosticsEnabled: false, custom: { enabled: false } };
+  writeSettings(before, env);
+  const fetchImpl = async () => Response.json({ data: [{ id: "gpt-5.5", agent_status: "stable" }] });
+  await setup({ apiKey: "new-test", env, fetchImpl });
+  const after = readSettings(env);
+  for (const field of ["localToken", "port", "autostart", "imagePluginEnabled", "updateMode", "diagnosticsEnabled", "custom"]) assert.deepEqual(after[field], before[field]);
+  assert.equal(after.apiKey, "new-test");
+});
 
 test("setup rejects reserved placeholder endpoints before writing configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "momo-setup-placeholder-"));

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync } fro
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codexHome, catalogPath, writeCatalog } from "./catalog.mjs";
-import { newLocalToken, normalizeEndpoint, writeSettings, settingsPath } from "./config.mjs";
+import { newLocalToken, normalizeEndpoint, writeSettingsLocked, lockSettings, readSettings, settingsPath } from "./config.mjs";
 import { installAutostart, uninstallAutostart } from "./autostart.mjs";
 import { installWindowsService, uninstallWindowsService } from "./service.mjs";
 import { installImagePlugin as installBundledImagePlugin } from "./plugin-install.mjs";
@@ -129,12 +129,17 @@ function isCodexCandidate(model) {
   return model?.id && status !== "hidden" && status !== "image" && status !== "video";
 }
 
-export async function setup({
+export async function setup(options = {}) {
+  const release = lockSettings(options.env || process.env);
+  try { return await setupLocked(options); } finally { release(); }
+}
+
+async function setupLocked({
   apiKey,
   endpoint,
-  port = 18789,
-  autostart = true,
-  imagePlugin = true,
+  port,
+  autostart,
+  imagePlugin,
   imagePluginInstaller = installBundledImagePlugin,
   autostartInstaller = installAutostart,
   windowsServiceInstaller = installWindowsService,
@@ -143,18 +148,23 @@ export async function setup({
   env = process.env,
 } = {}) {
   if (!apiKey) throw new Error("--api-key is required.");
-  const localToken = newLocalToken();
+  const previous = readSettings(env);
+  port = port ?? previous.port ?? 18789;
+  autostart = autostart ?? previous.autostart ?? true;
+  imagePlugin = imagePlugin ?? previous.imagePluginEnabled ?? true;
+  const localToken = previous.localToken || newLocalToken();
   const settings = {
+    ...previous,
     apiKey,
-    endpoint: normalizeEndpoint(endpoint || "https://momoapi.us"),
+    endpoint: normalizeEndpoint(endpoint || previous.endpoint || "https://momoapi.us"),
     port,
     localToken,
     autostart: Boolean(autostart),
-    updateCheckEnabled: true,
-    updateMode: "automatic",
-    autoUpdateEnabled: true,
-    updateCheckIntervalHours: 12,
-    diagnosticsEnabled: true,
+    updateCheckEnabled: previous.updateCheckEnabled ?? true,
+    updateMode: previous.updateMode || "automatic",
+    autoUpdateEnabled: previous.autoUpdateEnabled ?? true,
+    updateCheckIntervalHours: previous.updateCheckIntervalHours ?? 12,
+    diagnosticsEnabled: previous.diagnosticsEnabled ?? true,
     imagePluginEnabled: Boolean(imagePlugin),
   };
   const modelsResponse = await fetchImpl(settings.endpoint + "/agent/catalog", { headers: { authorization: "Bearer " + apiKey } });
@@ -195,7 +205,7 @@ export async function setup({
     "momoapi proxy": localToken,
     "momo-switch": localToken
   }, null, 2) + "\n");
-  const settingsFile = writeSettings(settings, env);
+  const settingsFile = writeSettingsLocked(settings, env);
   const currentCliPath = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "momoapi-proxy.mjs");
   switchCodexRoute("proxy", {
     env,

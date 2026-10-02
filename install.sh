@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_KEY="${1:-${MOMO_API_KEY:-}}"
+API_KEY=""
+if [ "${1:-}" = "--api-key-env" ]; then API_KEY="${MOMO_API_KEY:-}"; fi
 ENDPOINT="${MOMO_API_ENDPOINT:-https://momoapi.us}"
 PORT="${MOMO_BRIDGE_PORT:-18789}"
 
@@ -18,7 +19,9 @@ if [ "$NODE_MAJOR" -lt 22 ]; then
 fi
 
 if [ -z "$API_KEY" ]; then
-  read -rp "Enter your MOMO API Key (e.g. sk-momo-...): " API_KEY
+  if [ ! -r /dev/tty ]; then echo "==> ERROR: Run in a terminal or explicitly use --api-key-env." >&2; exit 1; fi
+  IFS= read -r -s -p "Enter a new MOMO API Key (hidden; blank cancels): " API_KEY </dev/tty
+  printf '\n' >/dev/tty
 fi
 
 if [ -z "$API_KEY" ]; then
@@ -61,10 +64,11 @@ BRIDGE_BIN="$INSTALL_DIR/bin/momoapi-proxy.mjs"
 chmod +x "$BRIDGE_BIN"
 
 echo "==> [momo-codex-bridge] Configuring Codex provider and syncing models..."
-if ! node "$BRIDGE_BIN" install --api-key "$API_KEY" --endpoint "$ENDPOINT" --port "$PORT"; then
+if ! printf '%s\n' "$API_KEY" | node "$BRIDGE_BIN" install --api-key-stdin --endpoint "$ENDPOINT" --port "$PORT"; then
   node "$BRIDGE_BIN" rollback >/dev/null 2>&1 || true
   exit 1
 fi
+unset API_KEY
 
 if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ]; then
   echo "==> [momo-codex-bridge] Waiting for the macOS LaunchAgent..."

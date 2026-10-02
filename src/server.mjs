@@ -53,6 +53,7 @@ import { contextLogFields, recordContextTrace as applyContextTrace } from "./con
 import { isAuthorizedLoopbackRequest, isLoopbackAddress, localRequestToken } from "./internal-auth.mjs";
 import { commitProviderRoute, observeProviderRoute } from "./provider-switch-state.mjs";
 import { bridgeMuseResponses } from "./muse-adapter.mjs";
+import { rotateApiKey } from "./credentials.mjs";
 
 export const metricsState = {
   startedAt: Date.now(),
@@ -758,6 +759,7 @@ export function createMomoSwitch(settings, options = {}) {
   const { fetchImpl = fetch, exitImpl = process.exit, assetStore, attachmentAssetStore: suppliedAttachmentAssetStore } = options;
   const runtimeEnv = options.env || process.env;
   settings = { ...settings };
+  const liveSettings = settings;
   Object.defineProperty(settings, "routedEnvelopeEnv", { value: runtimeEnv });
   const ownsLoggingRuntime = !options.loggingRuntime;
   const loggingRuntime = options.loggingRuntime || (options.loggingRuntimeFactory || createLoggingRuntime)({
@@ -779,6 +781,10 @@ export function createMomoSwitch(settings, options = {}) {
   let shutdownLifecycle = null;
 
   const server = createServer(async (request, response) => {
+    // An in-flight request keeps its credential snapshot; subsequent requests
+    // see a successful hot rotation without interrupting existing streams.
+    const settings = { ...liveSettings };
+    Object.defineProperty(settings, "routedEnvelopeEnv", { value: runtimeEnv });
     const t0 = Date.now();
     const metricPath = (request.url || "/").split("?")[0].replace(/\/+$/, "") || "/";
     const timing = requestMetrics.begin(request.method, metricPath);
@@ -923,6 +929,24 @@ export function createMomoSwitch(settings, options = {}) {
           return json(response, 200, { ok: true, status: "ready", service: "momo-codex-bridge", version: getCurrentVersion() });
         } catch {
           return json(response, 503, { ok: false, status: "upstream_unreachable", service: "momo-codex-bridge", version: getCurrentVersion() });
+        }
+      }
+
+      if (request.method === "POST" && pathname === "/internal/settings/api-key") {
+        if (!settings.localToken || request.headers.origin || !isAuthorizedLoopbackRequest(request, remoteIp, settings.localToken)) {
+          return json(response, 403, { ok: false, error: { code: "forbidden", message: "Authenticated native loopback client required." } });
+        }
+        if (metricsState.isDraining) return json(response, 503, { ok: false, error: { code: "draining" } });
+        try {
+          const body = await bodyOf(request, settings, { signal: abortController.signal, timeoutMs: 5000, maxBytes: 8192 });
+          const result = await rotateApiKey(body.apiKey, { env: runtimeEnv, fetchImpl, runtimeSettings: liveSettings,
+            activate: async (apiKey) => { if (options.onCredentialChanged) await options.onCredentialChanged(apiKey); },
+          });
+          return json(response, 200, result);
+        } catch (error) {
+          const code = error.code || "key_change_failed";
+          const safeMessage = code.startsWith("key_") || code === "settings_busy" ? error.message : "API Key change failed. Existing settings were not changed.";
+          return json(response, error.status || error.statusCode || (code === "settings_busy" ? 409 : 400), { ok: false, error: { code, message: safeMessage } });
         }
       }
 

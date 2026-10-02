@@ -1,5 +1,5 @@
 import { readCatalog, writeCatalog } from "./catalog.mjs";
-import { readSettings, writeSettings } from "./config.mjs";
+import { readSettings, updateSettings } from "./config.mjs";
 
 const VERIFIED_CODEX_MODELS = new Set(["ox-alpha-free", "gpt-5.5", "gpt-5.4", "deepseek-v4-pro", "claude-opus-4-6-thinking", "gemini-3.7-flash"]);
 
@@ -35,10 +35,11 @@ export async function syncCatalog({ apiKey, endpoint, env = process.env, fetchIm
 
   const settings = readSettings(env);
   if (settings.apiKey) {
-    settings.lastSyncTime = new Date().toISOString();
-    settings.lastSyncStatus = "ok";
-    delete settings.lastError;
-    writeSettings(settings, env);
+    updateSettings((current) => {
+      const updated = { ...current, lastSyncTime: new Date().toISOString(), lastSyncStatus: "ok" };
+      delete updated.lastError;
+      return updated;
+    }, env);
   }
 
   return { success: true, count: updated?.models?.length || 0, changed, target };
@@ -59,10 +60,7 @@ export function startAutoSync({ settings, fetchImpl = fetch, env = process.env, 
     } catch (err) {
       const currentSettings = readSettings(env);
       if (currentSettings.apiKey) {
-        currentSettings.lastSyncTime = new Date().toISOString();
-        currentSettings.lastSyncStatus = "error";
-        currentSettings.lastError = err.message;
-        writeSettings(currentSettings, env);
+        try { updateSettings({ lastSyncTime: new Date().toISOString(), lastSyncStatus: "error", lastError: err.message }, env); } catch { /* Credential transaction owns the settings lock. */ }
       }
       if (onSync) onSync(err);
     }

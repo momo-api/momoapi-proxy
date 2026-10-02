@@ -29,6 +29,12 @@ jobs:
         with:
           node-version: 24
       - run: node --test test/autostart.test.mjs test/setup.test.mjs
+      - run: node --test test/credentials.test.mjs test/macos-desktop.test.mjs test/key-input.test.mjs
+      - run: bash scripts/build-macos-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-companion-build-only
+          path: dist/macos/
 
   node:
     runs-on: ubuntu-latest

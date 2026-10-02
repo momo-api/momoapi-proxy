@@ -10,7 +10,7 @@ export const WINDOWS_SERVICE_STARTUP = "MOMO API Proxy Service.cmd";
 export const WINDOWS_TRAY_STARTUP = "MOMO API Proxy Tray.lnk";
 export const LEGACY_WINDOWS_SERVICE_STARTUP = "momo-codex-bridge.cmd";
 export const LEGACY_WINDOWS_TRAY_STARTUP = "momoapi-proxy-tray.lnk";
-const MACOS_LAUNCHD_LABEL = "us.momoapi.codex-bridge";
+export const MACOS_LAUNCHD_LABEL = "us.momoapi.codex-bridge";
 
 function escapeXml(value) {
   return String(value)
