@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 
 // The companion never reads or edits settings.json. Credential rotation and
 // service lifecycle are delegated to the installed CLI via a protected pipe.
@@ -19,12 +20,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusLabel = NSMenuItem(title: "MOMO API Proxy", action: nil, keyEquivalent: "")
     private var timer: Timer?
     private var busy = false
+    private var statusPending = false
     private var keyWindow: NSWindow?
     private var keyField: NSSecureTextField?
     private var saveButton: NSButton?
     private let home = FileManager.default.homeDirectoryForCurrentUser
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // launchctl and Finder may race to open the same bundle. Keep one icon.
+        let instances = NSRunningApplication.runningApplications(withBundleIdentifier: "us.momoapi.menu-bar")
+        let current = ProcessInfo.processInfo.processIdentifier
+        if instances.contains(where: { $0.processIdentifier < current }) { NSApp.terminate(nil); return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "m.circle.fill", accessibilityDescription: "MOMO API Proxy")
         statusItem.button?.toolTip = "MOMO API Proxy"
@@ -54,30 +60,35 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(entry)
     }
 
-    private func cli() throws -> (URL, [String]) {
-        // Installer wrapper pins the absolute Node executable; launchd PATH
-        // need not include Homebrew or /usr/local/bin.
-        for name in ["momoapi", "momoapi-proxy", "momo-codex-bridge"] {
-            let path = home.appendingPathComponent(".local/bin/" + name)
-            if FileManager.default.isExecutableFile(atPath: path.path) { return (path, []) }
+    private func cli() throws -> (URL, [String], String) {
+        // Non-secret install descriptor, not settings.json or a PATH-based
+        // shebang. Supports Homebrew, nvm and custom/legacy install homes.
+        let path = home.appendingPathComponent("Library/Application Support/MOMO API Proxy/runtime.json")
+        let data = try Data(contentsOf: path)
+        guard data.count <= 16384,
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              json["schema"] as? Int == 1,
+              let node = json["node"] as? String, node.hasPrefix("/"),
+              let script = json["cli"] as? String, script.hasPrefix("/"),
+              let appHome = json["appHome"] as? String, appHome.hasPrefix("/"),
+              FileManager.default.isExecutableFile(atPath: node),
+              FileManager.default.fileExists(atPath: script) else {
+            throw NSError(domain: "MOMO", code: 1, userInfo: [NSLocalizedDescriptionKey: "请在终端重新安装菜单栏入口。"])
         }
-        for directory in [".momoapi-proxy", ".momo-codex-bridge"] {
-            let script = home.appendingPathComponent(directory + "/app/bin/momoapi-proxy.mjs")
-            if !FileManager.default.fileExists(atPath: script.path) { continue }
-            for node in ["/opt/homebrew/bin/node", "/usr/local/bin/node"] {
-                if FileManager.default.isExecutableFile(atPath: node) { return (URL(fileURLWithPath: node), [script.path]) }
-            }
-        }
-        throw NSError(domain: "MOMO", code: 1, userInfo: [NSLocalizedDescriptionKey: "请先在终端安装 MOMO API Proxy。"])
+        return (URL(fileURLWithPath: node), [script], appHome)
     }
 
     private func run(_ args: [String], secret: String? = nil, completion: @escaping (Bool, String) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             do {
-                let (executable, prefix) = try self.cli()
+                let (executable, prefix, appHome) = try self.cli()
                 let process = Process()
                 process.executableURL = executable
                 process.arguments = prefix + args
+                var environment = ProcessInfo.processInfo.environment
+                environment["MOMO_PROXY_HOME"] = appHome
+                environment.removeValue(forKey: "MOMO_API_KEY")
+                process.environment = environment
                 let stdin = Pipe(), stdout = Pipe()
                 process.standardInput = stdin
                 process.standardOutput = stdout
@@ -85,9 +96,23 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 try process.run()
                 if let secret = secret { stdin.fileHandleForWriting.write(Data((secret + "\n").utf8)) }
                 try? stdin.fileHandleForWriting.close()
-                let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
+                let deadline = DispatchWorkItem {
+                    if process.isRunning {
+                        process.terminate()
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                        }
+                    }
+                }
                 DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: deadline)
-                let data = stdout.fileHandleForReading.readDataToEndOfFile()
+                // Drain stdout without unbounded buffering; Key commands never
+                // retain command output, even if a child unexpectedly prints it.
+                var data = Data()
+                while true {
+                    let chunk = stdout.fileHandleForReading.readData(ofLength: 4096)
+                    if chunk.isEmpty { break }
+                    if secret == nil && data.count < 12000 { data.append(chunk.prefix(12000 - data.count)) }
+                }
                 process.waitUntilExit()
                 deadline.cancel()
                 let text = secret == nil ? String(data: data, encoding: .utf8) ?? "" : ""
@@ -97,8 +122,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func refreshStatus() {
-        guard !busy else { return }
+        guard !busy && !statusPending else { return }
+        statusPending = true
         run(["status"]) { ok, text in
+            self.statusPending = false
             let data = text.data(using: .utf8) ?? Data()
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let running = json?["running"] as? Bool ?? false
@@ -155,6 +182,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     @objc private func cancelKey() { guard !busy else { return }; keyField?.stringValue = ""; keyWindow?.close(); keyWindow = nil }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { return !busy }
     func windowWillClose(_ notification: Notification) { keyField?.stringValue = ""; keyWindow = nil }
     @objc private func startService() { command(["service", "start"]) }
     @objc private func stopService() { command(["service", "stop"]) }

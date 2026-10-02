@@ -67,6 +67,23 @@ test("activation failure rolls back disk and runtime without a secret backup", a
   assert.deepEqual(readdirSync(home), ["settings.json"]);
 });
 
+test("deferred activation never publishes candidate to runtime on failure", async (t) => {
+  const { env, original } = fixture(t);
+  const runtime = { ...original };
+  let rejectActivation, entered;
+  const ready = new Promise((r) => { entered = r; });
+  const operation = rotateApiKey("new-test-credential", { env, runtimeSettings: runtime, fetchImpl: accepted, activate: (key) => {
+    if (key === original.apiKey) return;
+    entered(); return new Promise((_r, reject) => { rejectActivation = reject; });
+  } });
+  const checked = assert.rejects(operation, (error) => error.code === "key_activation_failed");
+  await ready;
+  assert.equal(runtime.apiKey, original.apiKey);
+  rejectActivation(new Error("activation failed"));
+  await checked;
+  assert.deepEqual(readSettings(env), original);
+});
+
 test("all configuration writers share a lock and metadata patches keep the latest Key", async (t) => {
   const { env, original } = fixture(t);
   const release = lockSettings(env);
@@ -102,6 +119,7 @@ test("authenticated native loopback rotation reloads future upstream requests an
   const request = (headers, body = { apiKey: "new-test-credential" }) => fetch(base + "/internal/settings/api-key", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   assert.equal((await request({})).status, 403);
   assert.equal((await request({ "x-local-token": original.localToken, origin: "https://evil.invalid" })).status, 403);
+  assert.equal((await request({ "x-local-token": original.localToken }, null)).status, 400);
   assert.equal((await request({ "x-local-token": original.localToken }, { apiKey: "a".repeat(10000) })).status, 413);
   const changed = await request({ "x-local-token": original.localToken });
   assert.equal(changed.status, 200);
@@ -110,4 +128,31 @@ test("authenticated native loopback rotation reloads future upstream requests an
   const models = await fetch(base + "/v1/models", { headers: { authorization: "Bearer " + original.localToken } });
   assert.equal(models.status, 200); await models.text();
   assert.equal(keys.at(-1), "Bearer new-test-credential");
+});
+
+test("an in-flight request keeps its credential snapshot while future requests use rotated Key", async (t) => {
+  const { env, original } = fixture(t);
+  const keys = [];
+  let entered, finish;
+  const active = new Promise((resolve) => { entered = resolve; });
+  const server = createMomoSwitch(original, { env, fetchImpl: async (_url, options) => {
+    const key = options.headers.authorization;
+    keys.push(key);
+    if (key === "Bearer " + original.apiKey) {
+      entered(); await new Promise((resolve) => { finish = resolve; });
+    }
+    return new Response('{"data":[]}');
+  } });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const headers = { authorization: "Bearer " + original.localToken };
+  const pending = fetch(base + "/v1/models", { headers });
+  await active;
+  const changed = await fetch(base + "/internal/settings/api-key", { method: "POST", headers: { "x-local-token": original.localToken }, body: JSON.stringify({ apiKey: "new-test-credential" }) });
+  assert.equal(changed.status, 200); await changed.text();
+  finish();
+  const prior = await pending; assert.equal(prior.status, 200); await prior.text();
+  const next = await fetch(base + "/v1/models", { headers }); await next.text();
+  assert.deepEqual(keys, ["Bearer " + original.apiKey, "Bearer new-test-credential", "Bearer new-test-credential"]);
 });

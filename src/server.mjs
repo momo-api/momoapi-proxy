@@ -939,7 +939,7 @@ export function createMomoSwitch(settings, options = {}) {
         if (metricsState.isDraining) return json(response, 503, { ok: false, error: { code: "draining" } });
         try {
           const body = await bodyOf(request, settings, { signal: abortController.signal, timeoutMs: 5000, maxBytes: 8192 });
-          const result = await rotateApiKey(body.apiKey, { env: runtimeEnv, fetchImpl, runtimeSettings: liveSettings,
+          const result = await rotateApiKey(body?.apiKey, { env: runtimeEnv, fetchImpl, runtimeSettings: liveSettings,
             activate: async (apiKey) => { if (options.onCredentialChanged) await options.onCredentialChanged(apiKey); },
           });
           return json(response, 200, result);

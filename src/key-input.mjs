@@ -6,7 +6,13 @@ export async function promptApiKey({ input = process.stdin, output = process.std
   output.write("Enter a new MOMO API Key (hidden; blank cancels): ");
   const muted = new Writable({ write(_chunk, _encoding, done) { done(); } });
   const rl = readline.createInterface({ input, output: muted, terminal: true });
-  try { return (await rl.question("")).trim(); } finally { rl.close(); output.write("\n"); }
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  rl.once("SIGINT", cancel);
+  rl.once("close", cancel);
+  try { return (await rl.question("", { signal: controller.signal })).trim(); }
+  catch (error) { if (error.name === "AbortError") return ""; throw error; }
+  finally { rl.off("SIGINT", cancel); rl.off("close", cancel); rl.close(); output.write("\n"); }
 }
 
 export async function readApiKeyStdin(input = process.stdin) {

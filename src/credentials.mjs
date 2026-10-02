@@ -51,8 +51,10 @@ export async function rotateApiKey(apiKey, { env = process.env, fetchImpl = fetc
     const updated = { ...previous, apiKey };
     writeSettingsLocked(updated, env);
     try {
-      if (runtimeSettings) runtimeSettings.apiKey = apiKey;
       await activate(apiKey);
+      // Publish only after activation succeeds. New requests must not observe
+      // an uncommitted candidate while an async activation can still fail.
+      if (runtimeSettings) runtimeSettings.apiKey = apiKey;
       if (runtimeSettings && runtimeSettings.apiKey !== apiKey) throw new Error("activation mismatch");
     } catch {
       try {

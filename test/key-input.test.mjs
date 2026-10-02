@@ -13,6 +13,20 @@ test("stdin is bounded and hidden prompting refuses non-TTY", async () => {
   await assert.rejects(promptApiKey({ input: Readable.from([]), output: new PassThrough() }), /No terminal/);
 });
 
+for (const [name, text] of [["blank", "\n"], ["Ctrl-C", "\x03"], ["EOF", null], ["value", "test-hidden-candidate\n"]]) {
+  test(`hidden terminal prompt handles ${name} without echo or hanging`, async () => {
+    const input = new PassThrough(), output = new PassThrough();
+    input.isTTY = true;
+    let displayed = "";
+    output.on("data", (chunk) => { displayed += chunk; });
+    const result = promptApiKey({ input, output });
+    if (text === null) input.end(); else input.write(text);
+    assert.equal(await result, name === "value" ? "test-hidden-candidate" : "");
+    assert.doesNotMatch(displayed, /test-hidden-candidate/);
+    input.destroy(); output.destroy();
+  });
+}
+
 test("ordinary commands do not prompt and explicit install never silently adopts saved or env Key", (t) => {
   const home = mkdtempSync(join(tmpdir(), "momo-key-cli-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -37,4 +51,9 @@ test("ordinary commands do not prompt and explicit install never silently adopts
   assert.equal(argv.status, 1);
   assert.doesNotMatch(argv.stdout + argv.stderr, /do-not-echo-test/);
   assert.equal(existsSync(file), true);
+  const unsafeEndpoint = run(["install", "--api-key-stdin", "--endpoint", "https://foreign.invalid"], "candidate-test-input\n");
+  assert.equal(unsafeEndpoint.status, 1);
+  assert.ok(unsafeEndpoint.stderr.includes("restricted to https://momoapi.us"));
+  assert.doesNotMatch(unsafeEndpoint.stderr + unsafeEndpoint.stdout, /candidate-test-input/);
+  assert.equal(readFileSync(file, "utf8"), before);
 });

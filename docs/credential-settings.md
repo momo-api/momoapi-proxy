@@ -38,6 +38,13 @@ prints an explicit message instead of falsely claiming an icon was installed.
 
 The installer places the app in ~/Applications and a separate menu-bar login
 agent; closing its settings window or quitting it does not stop the daemon.
+The non-secret runtime descriptor at ~/Library/Application Support/MOMO API
+Proxy/runtime.json records absolute Node/CLI paths and the configuration home.
+It is outside the signed bundle, contains no Key or inherited environment, and
+is atomically written with mode 0600. Finder/login never invokes env node.
+App, descriptor and UI agent are restored together on post-swap failure;
+an unverified rollback retains the uniquely named prior bundle. Ordinary
+desktop open only opens the existing app, and does not reinstall it.
 Its service actions target the exact managed launchd label, not arbitrary port
 owners. Stop unloads the service (rather than fighting KeepAlive); Start loads
 it again. The login-service toggle is distinct from quitting the menu-bar UI.
@@ -60,3 +67,17 @@ it again. The login-service toggle is distinct from quitting the menu-bar UI.
   reviewed PR; changing this repository does not change the hosted curl script.
 
 No production deployment, version bump or release tag is part of this draft.
+
+## Known release blockers (do not publish these drafts yet)
+
+- A running 0.14.21 daemon has no credential-rotation route. New install code
+  currently fails closed rather than silently overwriting its active Key.
+  Legacy upgrade needs a reviewed, authenticated managed-service transition
+  and tests; never substitute a broad port-owner kill.
+- Explicit reinstall rotates the Key before full setup. A later catalog,
+  launchd or desktop failure does not establish whole-install rollback.
+  Existing bootstrap app-directory restoration is NOT credential/settings
+  restoration. Do not claim that all previous settings were restored.
+- The bundled Unix bootstrap still has historical GNU-tool assumptions and
+  destructive app replacement; it is not the Mac-compatible hosted bootstrap.
+  It requires follow-up before advertising it for macOS.

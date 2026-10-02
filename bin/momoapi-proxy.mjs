@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promptApiKey, readApiKeyStdin } from "../src/key-input.mjs";
 import { rotateApiKey, validateApiKey, credentialError } from "../src/credentials.mjs";
-import { installMacDesktop } from "../src/macos-desktop.mjs";
+import { installMacDesktop, openMacDesktop } from "../src/macos-desktop.mjs";
 import { installAutostart, uninstallAutostart } from "../src/autostart.mjs";
 import { updateSettings } from "../src/config.mjs";
 import { controlMacService } from "../src/macos-desktop.mjs";
@@ -173,7 +173,7 @@ async function main() {
     return;
   }
   if (command === "desktop" && ["install", "open"].includes(args[0]) && process.platform === "darwin") {
-    console.log(JSON.stringify(installMacDesktop()));
+    console.log(JSON.stringify(args[0] === "open" ? openMacDesktop() : installMacDesktop()));
     return;
   }
   if (command === "autostart" && ["on", "off"].includes(args[0])) {
@@ -270,8 +270,10 @@ async function main() {
 
     console.log("正在配置 MOMO API Proxy...");
     const existing = readSettings();
+    // A previously trusted credential validation must not permit setup to
+    // subsequently send the candidate to a different --endpoint.
+    await validateApiKey(apiKey, { endpoint: endpoint || existing.endpoint || "https://momoapi.us" });
     if (existing.apiKey && existing.localToken) await changeConfiguredKey(apiKey);
-    else await validateApiKey(apiKey, { endpoint: endpoint || "https://momoapi.us" });
     const result = await setup({ apiKey, endpoint, port, autostart, imagePlugin });
     const installedSettings = readSettings();
     const desktop = process.platform === "darwin" ? installMacDesktop() : installWindowsDesktop({ port: installedSettings.port, autostart: installedSettings.autostart });
