@@ -1,0 +1,41 @@
+name: experimental-go-protocol
+
+on:
+  push:
+    branches: ['**']
+    paths: ['experimental/go-protocol/**', '.github/workflows/go-protocol.yml', '.npmignore']
+  pull_request:
+    paths: ['experimental/go-protocol/**', '.github/workflows/go-protocol.yml', '.npmignore']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-protocol:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: experimental/go-protocol
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: experimental/go-protocol/go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Fetch immutable namespace-fixed oracle (not merge)
+        run: git fetch origin e78d70fb3445eaea04ca1998bb07a35d8a3f3f30
+      - run: go vet ./...
+      - run: go test -count=5 ./...
+      - name: Race tests
+        if: runner.os != 'Windows'
+        run: go test -race -count=5 ./...
+      - name: Identical offline fixtures against Node baseline
+        run: node differential.mjs
