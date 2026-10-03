@@ -24,6 +24,7 @@ test("release package uses the updater-compatible root and version", () => {
       .filter(Boolean);
     assert.ok(names.length > 0);
     assert.ok(names.every((name) => name.startsWith("momoapi-proxy/")));
+    assert.ok(names.every((name) => !name.startsWith("momoapi-proxy/experimental/")));
     assert.ok(names.includes("momoapi-proxy/bin/momoapi-proxy.mjs"));
     assert.ok(names.includes("momoapi-proxy/src/update-supervisor.mjs"));
     assert.ok(names.includes("momoapi-proxy/.agents/plugins/marketplace.json"));
