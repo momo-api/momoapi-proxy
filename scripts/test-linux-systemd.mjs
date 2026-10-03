@@ -1,7 +1,7 @@
 // Invoke as a disposable container's non-root user with a live user manager.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { installAutostart, uninstallAutostart } from "../src/autostart.mjs";
@@ -47,7 +47,20 @@ try {
   const stopped = spawnSync("systemctl", ["--user", "is-active", "momo-codex-bridge.service"], { encoding: "utf8", timeout: 15000 });
   assert.notEqual(stopped.status, 0, "CLI stop must stop systemd unit");
   cli(["start"]); await ready(); control(["is-active", "momo-codex-bridge.service"]);
+  const dropIn = join(process.env.HOME, ".config/systemd/user/momo-codex-bridge.service.d");
+  mkdirSync(dropIn, { recursive: true });
+  writeFileSync(join(dropIn, "acceptance.conf"), "[Service]\nEnvironment=MOMO_PROXY_HOME=/another-installation\n");
+  control(["daemon-reload"]);
+  try {
+    assert.throws(() => uninstallAutostart({ osPlatform: "linux", env }), /does not match this installation/);
+    assert.ok(existsSync(join(process.env.HOME, ".config/systemd/user/momo-codex-bridge.service")), "refused uninstall must preserve unit");
+    const refused = spawnSync(process.execPath, ["bin/momoapi-proxy.mjs", "restart", "--no-desktop"], { env, encoding: "utf8", timeout: 20000 });
+    assert.equal(refused.status, 1, "customized drop-in must refuse managed CLI action");
+    assert.match(refused.stderr, /does not match this installation/);
+  } finally { rmSync(dropIn, { recursive: true }); control(["daemon-reload"]); }
+  cli(["start"]); await ready(); control(["is-active", "momo-codex-bridge.service"]);
   console.log("Linux CLI start/stop/restart stay systemd-managed; no detached orphan accepted");
+  console.log("Linux real systemd drop-in override is refused, recovery after exact test cleanup passes");
   console.log("Linux systemd user: enable, authenticated readiness, restart, stop and start passed");
 } finally { uninstallAutostart({ osPlatform: "linux", env }); }
 const check = spawnSync("systemctl", ["--user", "is-active", "momo-codex-bridge.service"], { encoding: "utf8", timeout: 15000 });

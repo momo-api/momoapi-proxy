@@ -23,7 +23,7 @@ test("Linux autostart activates and uninstalls only the selected user unit", () 
   const oldHome = process.env.HOME;
   process.env.HOME = root;
   const env = { HOME: root, MOMO_PROXY_HOME: join(root, "proxy % space") };
-  const spawnSyncImpl = (command, args) => { calls.push([command, args]); return { status: 0 }; };
+  const spawnSyncImpl = (command, args) => { if (args.includes("show")) return { status: 0, stdout: 'FragmentPath=' + autostartTarget("linux", env) + '\nDropInPaths=\n' }; calls.push([command, args]); return { status: 0 }; };
   try {
     const result = installAutostart({}, { osPlatform: "linux", env, activate: true, spawnSyncImpl });
     assert.equal(result.activated, true);
@@ -35,8 +35,11 @@ test("Linux autostart activates and uninstalls only the selected user unit", () 
     assert.deepEqual(calls, [
       ["systemctl", ["--user", "daemon-reload"]],
       ["systemctl", ["--user", "enable", "--now", "momo-codex-bridge.service"]],
+      ["systemctl", ["--user", "daemon-reload"]],
       ["systemctl", ["--user", "start", "momo-codex-bridge.service"]],
+      ["systemctl", ["--user", "daemon-reload"]],
       ["systemctl", ["--user", "stop", "momo-codex-bridge.service"]],
+      ["systemctl", ["--user", "daemon-reload"]],
       ["systemctl", ["--user", "disable", "--now", "momo-codex-bridge.service"]],
       ["systemctl", ["--user", "daemon-reload"]],
     ]);
@@ -53,6 +56,26 @@ test("Linux CLI refuses a user unit belonging to another configuration home", (t
     assert.throws(() => controlInstalledLinuxService("start", { osPlatform: "linux", env: { ...env, MOMO_PROXY_HOME: join(root, "two") },
       spawnSyncImpl() { assert.fail("must not operate another home's unit"); },
     }), /does not match/);
+    const target = autostartTarget("linux", env);
+    const unit = readFileSync(target, "utf8");
+    writeFileSync(target, unit + '\n[Service]\nEnvironment=MOMO_PROXY_HOME=/another-home\n');
+    assert.throws(() => uninstallAutostart({ osPlatform: "linux", env, deactivate: true,
+      spawnSyncImpl() { assert.fail("must not uninstall custom unit"); },
+    }), /does not match/);
+    assert.equal(existsSync(target), true);
+    assert.throws(() => controlInstalledLinuxService("start", { osPlatform: "linux", env,
+      spawnSyncImpl() { assert.fail("must not control overridden unit"); },
+    }), /does not match/);
+    writeFileSync(target, unit);
+    for (const stdout of ['FragmentPath=' + target + '\nDropInPaths=/override.conf\n', 'FragmentPath=/other.service\nDropInPaths=\n']) {
+      assert.throws(() => uninstallAutostart({ osPlatform: "linux", env, deactivate: true,
+        spawnSyncImpl(_command, args) { assert.ok(args.includes("show")); return { status: 0, stdout }; },
+      }), /does not match/);
+      assert.equal(existsSync(target), true);
+      assert.throws(() => controlInstalledLinuxService("start", { osPlatform: "linux", env,
+        spawnSyncImpl(_command, args) { assert.ok(args.includes("show")); return { status: 0, stdout }; },
+      }), /does not match/);
+    }
   } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; }
 });
 

@@ -37,20 +37,32 @@ function systemdValue(value) {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%");
 }
 
+function linuxUnit(env, nodePath) {
+  return "[Unit]\nDescription=MOMO Codex Bridge\nAfter=network.target\n\n[Service]\nType=simple\nEnvironment=MOMO_PROXY_CONSOLE_MIRROR=0\nEnvironment=\"MOMO_PROXY_HOME=" + systemdValue(appHome(env)) + "\"\nExecStart=\"" + systemdValue(nodePath) + "\" \"" + systemdValue(BIN_PATH) + "\" serve\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
+}
+
 export function controlInstalledLinuxService(action, {
   env = process.env, osPlatform = platform(), nodePath = process.execPath, spawnSyncImpl = spawnSync,
 } = {}) {
-  if (osPlatform !== "linux" || !["start", "stop"].includes(action)) return false;
+  if (osPlatform !== "linux" || !["start", "stop", "disable"].includes(action)) return false;
   if ((env.HOME || homedir()) !== (process.env.HOME || homedir())) return false;
   const target = autostartTarget("linux", env);
   if (!existsSync(target)) return false;
   const unit = readFileSync(target, "utf8");
   // Never operate another installation's user unit or a caller-customized unit.
-  const homeLine = 'Environment="MOMO_PROXY_HOME=' + systemdValue(appHome(env)) + '"';
-  const execLine = 'ExecStart="' + systemdValue(nodePath) + '" "' + systemdValue(BIN_PATH) + '" serve';
-  const lines = unit.split(/\r?\n/);
-  if (!lines.includes(homeLine) || !lines.includes(execLine)) throw new Error("Linux user service does not match this installation; no service action was taken.");
-  systemctlUser([action, "momo-codex-bridge.service"], spawnSyncImpl);
+  const refuse = () => { throw new Error("Linux user service does not match this installation; no service action was taken."); };
+  if (unit !== linuxUnit(env, nodePath)) refuse();
+  const query = () => {
+    const result = spawnSyncImpl("systemctl", ["--user", "show", "momo-codex-bridge.service", "--property=FragmentPath", "--property=DropInPaths"], { encoding: "utf8", timeout: 15000 });
+    if (result.error || result.status !== 0) refuse();
+    const properties = Object.fromEntries(String(result.stdout || "").trim().split(/\r?\n/).map(line => { const index = line.indexOf("="); return [line.slice(0, index), line.slice(index + 1)]; }));
+    if (properties.FragmentPath !== target || properties.DropInPaths !== "") refuse();
+  };
+  query(); // Do not reload or control another fragment or a drop-in-customized unit.
+  systemctlUser(["daemon-reload"], spawnSyncImpl);
+  query(); // Refresh stale manager state, then re-check effective fragment/drop-ins.
+  if (readFileSync(target, "utf8") !== unit) refuse();
+  systemctlUser(action === "disable" ? ["disable", "--now", "momo-codex-bridge.service"] : [action, "momo-codex-bridge.service"], spawnSyncImpl);
   return true;
 }
 
@@ -158,7 +170,7 @@ export function installAutostart(settings, {
 
   if (!isAbsolute(nodePath)) throw new Error("Linux autostart requires an absolute Node.js executable path.");
   const previousService = existsSync(target) ? readFileSync(target) : null;
-  const service = "[Unit]\nDescription=MOMO Codex Bridge\nAfter=network.target\n\n[Service]\nType=simple\nEnvironment=MOMO_PROXY_CONSOLE_MIRROR=0\nEnvironment=\"MOMO_PROXY_HOME=" + systemdValue(appHome(env)) + "\"\nExecStart=\"" + systemdValue(nodePath) + "\" \"" + systemdValue(BIN_PATH) + "\" serve\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
+  const service = linuxUnit(env, nodePath);
   writeFileSync(target, service);
   // A custom test/login home must never address the host user manager.
   const activated = activate && (env.HOME || homedir()) === (process.env.HOME || homedir());
@@ -185,7 +197,7 @@ export function uninstallAutostart({
 } = {}) {
   const target = autostartTarget(osPlatform, env);
   const linuxSession = osPlatform === "linux" && deactivate && (env.HOME || homedir()) === (process.env.HOME || homedir());
-  if (linuxSession && existsSync(target)) systemctlUser(["disable", "--now", "momo-codex-bridge.service"], spawnSyncImpl);
+  if (linuxSession && existsSync(target)) controlInstalledLinuxService("disable", { env, osPlatform, spawnSyncImpl });
   if (osPlatform === "darwin" && deactivate && Number.isInteger(userId) && userId >= 0) {
     spawnSyncImpl("launchctl", ["bootout", `gui/${userId}`, target], launchctlOptions());
   }

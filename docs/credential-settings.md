@@ -124,12 +124,23 @@ No production deployment, version bump or release tag is part of this draft.
   published ports or privileged flag were used (512 MiB, two CPUs, 256 PIDs).
 - Follow-up managed CLI acceptance: after authenticated shutdown the CLI stops
   the matching systemd unit, and start/restart invoke that unit instead of
-  creating a detached orphan. Unit ownership checks require exact selected
-  configuration home and Node/CLI command; mismatched/custom units fail closed.
+  creating a detached orphan. Unit ownership checks require the complete
+  canonical unit, exact effective FragmentPath and empty DropInPaths before
+  and after daemon-reload. Start/stop and uninstall all share this verification;
+  mismatched/custom units fail closed without deleting their unit file.
   Real CLI restart/stop/start and systemd active/inactive checks passed in the
   same isolated non-privileged container. Older/custom units without the
   ownership markers require explicit operator review/reinstallation, not
   guessing ownership or killing their process.
+- Bounded Prism static review recovered in small scopes after a zero-output
+  600-second gateway failure. Credential activation and authenticated shutdown
+  received scoped approval after supplying actual callers/auth handlers. The
+  initial simulated external-activation finding was withdrawn; the documented
+  crash-lock fail-closed policy and lack of claimed power-loss durability were
+  accepted as operational limitations. Linux review identified unit overrides
+  and unguarded uninstall; canonical/effective-unit checks and real drop-in
+  refusal regressions were added. These are source review statements, not a
+  human PR approval or a full Mac/Windows delivery sign-off.
 - Not established: physical tray clicking, Windows/macOS login/reboot, or
   Linux physical login/reboot. Task registration still requires green CI and
   standard-user acceptance. Mac signing/notarization/device gates are unchanged.
