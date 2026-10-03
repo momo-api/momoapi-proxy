@@ -45,7 +45,7 @@ jobs:
         run: |
           tags="production"
           if [ "$RUNNER_OS" = Linux ]; then tags="gtk3,production"; fi
-          if go list -tags "$tags" -f '{{join .GoFiles " "}}' . | grep -q nativecheck; then
+          if go list -tags "$tags" -f '{{join .GoFiles " "}}' . | grep -Eq 'nativecheck|attachcheck'; then
             echo "Probe leaked into normal build"; exit 1
           fi
           go build -tags "$tags" -trimpath -ldflags "-s -w" -o "$RUNNER_TEMP/momo-spike.exe" .
@@ -56,3 +56,5 @@ jobs:
         run: |
           go vet -tags nativecheck,production ./...
           go build -tags nativecheck,production -trimpath -o "$RUNNER_TEMP/momo-nativecheck.exe" .
+          go vet -tags attachcheck,production ./...
+          go build -tags attachcheck,production -trimpath -o "$RUNNER_TEMP/momo-attachcheck.exe" .

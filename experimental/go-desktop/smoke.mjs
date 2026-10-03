@@ -15,6 +15,7 @@ async function command(action,session){
 }
 try{
  const probe=await command('nativecheck',{});assert.notEqual(probe.code,0);assert(!probe.out.includes('PROFILE:'));
+ const attach=await command('attachcheck',{});assert.notEqual(attach.code,0);assert(!attach.out.includes('PROFILE:'));
  for(let i=0;i<100&&!output.includes(String.fromCharCode(10));i++)await delay(50);
  const ready=JSON.parse(output.trim());assert.equal(ready.Experimental,true);assert.equal(ready.Protocol,1);
  const session={Endpoint:ready.Endpoint,Token:token};

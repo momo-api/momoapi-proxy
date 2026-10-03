@@ -1,4 +1,4 @@
-//go:build nativecheck && windows && !nogui
+//go:build nativecheck && !attachcheck && windows && !nogui
 
 package main
 

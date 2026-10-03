@@ -86,3 +86,42 @@ navigation/debug listener or second-instance acceptance. The probe owns its
 server in-process: stopping that owned server does NOT prove independent daemon
 survival after normal desktop quit/crash. Existing CLI detach test is separate.
 macOS/Linux native UI acceptance remains open despite successful compile CI.
+
+## Independent core and attached UI (Windows continuation)
+
+Separate attachcheck entry reads a synthetic session from private stdin, closes
+stdin before WebView creation, and runs the shared desktop construction with
+temporary-profile/observer hooks. Normal desktop supplies nil hooks and adds no
+test command, route, binding or page code. Real normal serve is a DIFFERENT
+process owned by the Node harness, never launched or terminated by the UI.
+The normal second-instance callback now ignores all launch data/args and only
+shows the existing window through an atomically published window pointer.
+
+Framework path evidence: state POST crosses the same strict bridge; navigation
+completes; explicit Show establishes native visibility; shared Close hides;
+same-endpoint second process exits 23 without constructing a second window;
+first callback reopens the existing window. Graceful mode observes Quit and
+PostShutdown; hold mode requires an exact GUI child kill and no shutdown hook.
+After each, the same independent daemon remains alive and start/status/stop
+CLI operations pass. Normal-source exclusion and absent-test-route/CLI checks
+keep test observations out of the default product path. Hosted CI compiles
+both Windows probes but does not claim interactive acceptance.
+
+Initial visibility observations failed in early runs; the probe now explicitly
+shows after navigation completion. These failures were NOT a Close deadlock,
+and success does NOT prove automatic startup visibility. That gate remains
+open. No debug stack-writing code or path is kept in the source; a local
+synthetic-only diagnostic stack is retained outside Git for audit, not uploaded.
+
+Prism design review (88.796s) and static source review (102.75s) are advice, not
+expert execution. Fixed timeout-boundary evidence by joining the watchdog and
+checking elapsed deadline, and now assert all exact children exit after cleanup.
+Two review concerns already have executor-backed implementation: control.Call
+enforces a 3-second HTTP total timeout and strict Protocol/Experimental/
+ProxyImplemented validation before desktop construction, with negative tests.
+There is no named-pipe discovery/ACL or real credential handoff in this spike.
+
+Open gates: automatic first-window visibility, human tray/titlebar/menu clicks,
+actual unmodified normal-binary UI quit/crash, external navigation/debug-listener,
+Chinese/high-DPI and macOS/Linux native UI. Synthetic probe forced kill is not
+an OS-crash test. This still does not implement a Go API proxy or secure broker.

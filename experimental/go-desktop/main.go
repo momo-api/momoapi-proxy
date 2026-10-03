@@ -1,4 +1,4 @@
-//go:build !nativecheck
+//go:build !nativecheck && !attachcheck
 
 package main
 

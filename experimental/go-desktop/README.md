@@ -51,6 +51,29 @@ Framework API Close/Show is NOT a human titlebar/tray click, visual inspection,
 crash recovery or independent-server/UI shutdown-isolation acceptance.
 Only Windows is implemented; macOS/Linux native UI gates remain open.
 
+## Windows independent-core attachment probe
+
+go build -tags production -trimpath -o <outside-repo-normal.exe> .
+go build -tags attachcheck,production -trimpath -o <outside-repo-attach.exe> .
+node attach-smoke.mjs <absolute-normal.exe> <absolute-attach.exe>
+
+The Node harness creates a normal independent serve process and private-pipe
+synthetic sessions. The separately compiled attach probe uses the **same**
+desktop page, bridge, tray setup, close hook and per-endpoint single-instance ID.
+It waits for a real state POST and native navigation completion, explicitly
+shows the window, closes/hides it, then relaunches a second attached process.
+The normal second-instance callback ignores all arguments/data and only shows
+the existing window. The second test process exits 23; first native visibility
+must return. Normal CLI still has no probe command or test route.
+
+One run quits the first UI through the framework and requires PostShutdown;
+another kills that exact disposable GUI child without PostShutdown. After each,
+the same independent daemon must still accept start/status/stop commands.
+This tests shared normal GUI construction with test-only observations/profile,
+not the entire unmodified normal executable, human tray clicks, or OS crashes.
+The probe explicitly calls Show before Close: automatic initial visibility is
+NOT proven. Fresh-launch visibility is a separate open acceptance gate.
+
 ## Boundaries and remaining gates
 Control accepts only authenticated non-browser requests; Origin/Sec-Fetch-Site
 denied. No CORS. Wails asset handler bridges only fixed local demo actions,

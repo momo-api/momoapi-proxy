@@ -29,6 +29,8 @@ func TestBoundary(t *testing.T) {
 			{"POST", "/demo/start?x=1", origin, "", 400, 0},
 			{"POST", "/demo/start", origin, strings.Repeat("x", 8192), 400, 0},
 			{"POST", "/shell", origin, "", 404, 0},
+			{"POST", "/attachcheck", origin, "", 404, 0},
+			{"POST", "/nativecheck/complete/test", origin, "", 404, 0},
 		} {
 			calls := 0
 			h := Handler("demo", origin, func(context.Context, string) (control.State, error) {
