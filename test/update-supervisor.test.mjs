@@ -3,7 +3,23 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isManagedImageMcpProcess, isManagedTrayProcess, pruneFailedUpdateDirectories, restoreManagedTray, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
+import { isManagedImageMcpProcess, isManagedTrayProcess, pruneFailedUpdateDirectories, restoreManagedTray, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, stopSupervisorRuntime, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
+
+test("copied supervisor never adopts legacy credentials outside an explicit home", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "momo-supervisor-home-boundary-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const legacy = join(root, ".momo-codex-bridge"); mkdirSync(legacy);
+  writeFileSync(join(legacy, "settings.json"), JSON.stringify({ localToken: "synthetic-unrelated", port: 19876 }));
+  for (const name of ["MOMO_PROXY_HOME", "MOMO_BRIDGE_HOME", "MOMO_SWITCH_HOME"]) {
+    const env = { USERPROFILE: root, HOME: root, [name]: join(root, "selected") };
+    assert.deepEqual(await stopSupervisorRuntime(env), { ok: false, errorCode: "runtime_settings_missing" });
+    const calls = [];
+    assert.equal(await waitForExpectedHealth({ port: 19876, expectedVersion: "0.14.22", env, timeoutMs: 50,
+      fetchImpl: async (url) => { calls.push(url); return Response.json({ ok: true, service: "momo-codex-bridge", version: "0.14.22" }); },
+    }), false);
+    assert.equal(calls.length, 1); // health only, no legacy token sent to metrics
+  }
+});
 
 function createVersion(root, version) {
   mkdirSync(join(root, "bin"), { recursive: true });

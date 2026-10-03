@@ -90,6 +90,13 @@ function proxyHome(env = process.env) {
     || join(env.USERPROFILE || env.HOME || tmpdir(), ".momoapi-proxy");
 }
 
+function supervisorSettingsFile(env) {
+  const primary = join(proxyHome(env), "settings.json");
+  if (env.MOMO_PROXY_HOME || env.MOMO_BRIDGE_HOME || env.MOMO_SWITCH_HOME) return existsSync(primary) ? primary : null;
+  const user = env.USERPROFILE || env.HOME || tmpdir();
+  return [primary, join(user, ".momo-codex-bridge", "settings.json"), join(user, ".momo-codex-switch", "settings.json")].find(existsSync);
+}
+
 function appendSupervisorLog(message, env = process.env) {
   try {
     const target = join(proxyHome(env), "update-supervisor.log");
@@ -143,8 +150,7 @@ export async function waitForExpectedHealth({ port, expectedVersion, requireUpst
       if (response.ok) {
         const payload = await response.json();
         if (payload.ok === true && payload.service === "momo-codex-bridge" && (!expectedVersion || payload.version === expectedVersion)) {
-          const user = env.USERPROFILE || env.HOME || tmpdir();
-          const file = [join(proxyHome(env), "settings.json"), join(user, ".momo-codex-bridge", "settings.json"), join(user, ".momo-codex-switch", "settings.json")].find(existsSync);
+          const file = supervisorSettingsFile(env);
           if (!file) return false;
           const saved = JSON.parse(readFileSync(file, "utf8"));
           if (!saved.localToken) return false;
@@ -159,9 +165,7 @@ export async function waitForExpectedHealth({ port, expectedVersion, requireUpst
 }
 
 export async function stopSupervisorRuntime(env = process.env) {
-  const home = proxyHome(env);
-  const user = env.USERPROFILE || env.HOME || tmpdir();
-  const file = [join(home, "settings.json"), join(user, ".momo-codex-bridge", "settings.json"), join(user, ".momo-codex-switch", "settings.json")].find(existsSync);
+  const file = supervisorSettingsFile(env);
   if (!file) return { ok: false, errorCode: "runtime_settings_missing" };
   let settings;
   try { settings = JSON.parse(readFileSync(file, "utf8")); } catch { return { ok: false, errorCode: "runtime_settings_invalid" }; }
