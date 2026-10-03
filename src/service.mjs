@@ -119,13 +119,13 @@ export function buildWindowsLauncherVbs(serviceScriptPath) {
   ].join("\r\n") + "\r\n";
 }
 
-export function buildWindowsServiceWrapperCmd(binPath, logPath) {
+export function buildWindowsServiceWrapperCmd(binPath, logPath, nodePath = process.execPath) {
   return [
     "@echo off",
     "setlocal",
     "set MOMO_PROXY_CONSOLE_MIRROR=0",
     `:loop`,
-    `>>"${logPath}" 2>&1 node "${binPath}" serve`,
+    `>>"${logPath}" 2>&1 "${nodePath}" "${binPath}" serve`,
     `if %ERRORLEVEL% NEQ 0 (`,
     `  >>"${logPath}" echo [%DATE% %TIME%] MOMO Bridge exited with code %ERRORLEVEL%; restarting in 3s`,
     `  ping -n 4 127.0.0.1 >nul`,

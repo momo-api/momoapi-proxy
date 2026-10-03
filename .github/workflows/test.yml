@@ -20,6 +20,7 @@ jobs:
           node-version: 24
       - run: ./scripts/test-tray.ps1
       - run: node --test test/autostart.test.mjs
+      - run: node --test test/credentials.test.mjs test/key-input.test.mjs test/install-runtime.test.mjs test/runtime-control.test.mjs test/cli-runtime.test.mjs test/installer-acceptance.test.mjs test/update-supervisor.test.mjs
 
   macos-autostart:
     runs-on: macos-latest

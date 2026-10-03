@@ -19,12 +19,25 @@ test("Mac legacy migration authenticates then activates only managed service usi
   assert.equal(attempts, 2);
 });
 test("missing or disabled Mac agent and other platforms never attempt migration", async () => {
-  for (const context of [{ osPlatform: "win32" }, { existsSyncImpl: () => false }, { saved: { ...saved, autostart: false } }]) {
+  for (const context of [{ existsSyncImpl: () => false }, { saved: { ...saved, autostart: false } }]) {
     await assert.rejects(upgradeMacInstallRuntime(context.saved || saved, { ...options, ...context,
       fetchImpl: () => assert.fail("must not fetch"), autostartInstaller: () => assert.fail("must not activate"),
     }), /requires a managed Mac/);
   }
 });
+
+for (const osPlatform of ["win32", "linux"]) {
+  test(osPlatform + " legacy migration gracefully stops authenticated runtime before starting current source", async () => {
+    const events = [];
+    const result = await upgradeMacInstallRuntime(saved, { osPlatform,
+      stopRuntime: async (settings) => { assert.deepEqual(settings, saved); events.push("stop"); },
+      startRuntime: async () => { events.push("start"); },
+      fetchImpl: async (_url, request) => { assert.equal(request.headers["x-local-token"], saved.localToken); events.push("capability"); return Response.json({ ok: true, apiKeyChange: true }); },
+    });
+    assert.deepEqual(result, { upgraded: true });
+    assert.deepEqual(events, ["stop", "start", "capability"]);
+  });
+}
 test("authentication refusal never controls service", async () => {
   for (const status of [401, 403, 404, 500]) {
     await assert.rejects(upgradeMacInstallRuntime(saved, { ...options, fetchImpl: async () => Response.json({ ok: false }, { status }),

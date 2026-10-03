@@ -98,7 +98,7 @@ export function installAutostart(settings, {
   if (osPlatform === "win32") {
     const migration = migrateWindowsAutostart({ env });
     if (migration.conflicts.length) throw new Error("Both legacy and current MOMO startup entries exist; resolve the conflict before reinstalling.");
-    const script = "@echo off\r\nset MOMO_PROXY_CONSOLE_MIRROR=0\r\nstart \"\" /B node \"" + BIN_PATH + "\" serve > nul 2>&1\r\n";
+    const script = "@echo off\r\nset MOMO_PROXY_CONSOLE_MIRROR=0\r\nstart \"\" /B \"" + nodePath + "\" \"" + BIN_PATH + "\" serve > nul 2>&1\r\n";
     writeFileSync(target, script);
     const legacy = join(dirname(target), LEGACY_WINDOWS_SERVICE_STARTUP);
     if (existsSync(legacy)) unlinkSync(legacy);
@@ -126,7 +126,7 @@ export function installAutostart(settings, {
     return { installed: true, activated: Boolean(activate), target, type: "launchd_plist" };
   }
 
-  const service = "[Unit]\nDescription=MOMO Codex Bridge\nAfter=network.target\n\n[Service]\nType=simple\nEnvironment=MOMO_PROXY_CONSOLE_MIRROR=0\nExecStart=node " + BIN_PATH + " serve\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
+  const service = "[Unit]\nDescription=MOMO Codex Bridge\nAfter=network.target\n\n[Service]\nType=simple\nEnvironment=MOMO_PROXY_CONSOLE_MIRROR=0\nExecStart=\"" + nodePath.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%") + "\" \"" + BIN_PATH.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%") + "\" serve\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n";
   writeFileSync(target, service);
   return { installed: true, target, type: "systemd_service" };
 }

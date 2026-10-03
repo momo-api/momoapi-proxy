@@ -79,6 +79,8 @@ test("background launchers explicitly disable request-log console mirroring", (t
 
   const wrapper = buildWindowsServiceWrapperCmd("C:\\app\\momoapi-proxy.mjs", "C:\\logs\\daemon.log");
   assert.match(wrapper, /set MOMO_PROXY_CONSOLE_MIRROR=0\r\n/);
+  assert.ok(wrapper.includes(process.execPath));
+  assert.doesNotMatch(wrapper, /2>&1 node /);
 });
 
 test("Windows service wrappers prefer the stable installed application path", (t) => {

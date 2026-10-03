@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { basename, dirname, join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { connect } from "node:net";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -129,7 +130,7 @@ export async function waitForProcessExit(pid, timeoutMs = 30_000) {
   return false;
 }
 
-export async function waitForExpectedHealth({ port, expectedVersion, requireUpstream = false, timeoutMs = 30_000, fetchImpl = fetch } = {}) {
+export async function waitForExpectedHealth({ port, expectedVersion, requireUpstream = false, timeoutMs = 30_000, fetchImpl = fetch, env = process.env } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -141,7 +142,15 @@ export async function waitForExpectedHealth({ port, expectedVersion, requireUpst
       });
       if (response.ok) {
         const payload = await response.json();
-        if (!expectedVersion || payload.version === expectedVersion) return true;
+        if (payload.ok === true && payload.service === "momo-codex-bridge" && (!expectedVersion || payload.version === expectedVersion)) {
+          const user = env.USERPROFILE || env.HOME || tmpdir();
+          const file = [join(proxyHome(env), "settings.json"), join(user, ".momo-codex-bridge", "settings.json"), join(user, ".momo-codex-switch", "settings.json")].find(existsSync);
+          if (!file) return false;
+          const saved = JSON.parse(readFileSync(file, "utf8"));
+          if (!saved.localToken) return false;
+          const authenticated = await fetchImpl('http://127.0.0.1:' + port + '/internal/metrics', { redirect: "error", signal: AbortSignal.timeout(2000), headers: { "x-local-token": saved.localToken } });
+          if (authenticated.ok && (await authenticated.json()).ok === true) return true;
+        }
       }
     } catch {}
     await sleep(250);
@@ -149,8 +158,55 @@ export async function waitForExpectedHealth({ port, expectedVersion, requireUpst
   return false;
 }
 
-function runProxyCli(scriptPath, commandArgs, timeoutMs = 30_000) {
+export async function stopSupervisorRuntime(env = process.env) {
+  const home = proxyHome(env);
+  const user = env.USERPROFILE || env.HOME || tmpdir();
+  const file = [join(home, "settings.json"), join(user, ".momo-codex-bridge", "settings.json"), join(user, ".momo-codex-switch", "settings.json")].find(existsSync);
+  if (!file) return { ok: false, errorCode: "runtime_settings_missing" };
+  let settings;
+  try { settings = JSON.parse(readFileSync(file, "utf8")); } catch { return { ok: false, errorCode: "runtime_settings_invalid" }; }
+  const port = Number(settings.port || 18789);
+  if (!settings.localToken || !Number.isInteger(port) || port < 1 || port > 65535) return { ok: false, errorCode: "runtime_config_invalid" };
+  const base = "http://127.0.0.1:" + port;
+  const options = { redirect: "error", headers: { "x-local-token": settings.localToken } };
+  try {
+    const metrics = await fetch(base + "/internal/metrics", { ...options, signal: AbortSignal.timeout(2000) });
+    if (!metrics.ok || (await metrics.json()).ok !== true) return { ok: false, errorCode: "runtime_untrusted" };
+  } catch (error) { return { ok: error?.cause?.code === "ECONNREFUSED", errorCode: "runtime_probe_failed" }; }
+  if (process.platform === "darwin") {
+    const result = spawnSync("/bin/launchctl", ["bootout", "gui/" + process.getuid() + "/us.momoapi.codex-bridge"], { encoding: "utf8", timeout: 15000 });
+    if (result.error || result.status !== 0) return { ok: false, errorCode: "managed_launchd_stop_failed" };
+  }
+  try {
+    if (process.platform !== "darwin") {
+    const response = await fetch(base + "/internal/shutdown", { ...options, method: "POST", signal: AbortSignal.timeout(2500) });
+    if (!response.ok || (await response.json()).ok !== true) return { ok: false, errorCode: "runtime_shutdown_refused" };
+    }
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const closed = await new Promise((resolve) => {
+        const socket = connect({ host: "127.0.0.1", port });
+        const finish = (value) => { socket.destroy(); resolve(value); };
+        socket.once("connect", () => finish(false));
+        socket.once("error", (error) => finish(error.code === "ECONNREFUSED"));
+        socket.setTimeout(1000, () => finish(false));
+      });
+      if (closed) return { ok: true };
+      await sleep(100);
+    }
+  } catch {}
+  return { ok: false, errorCode: "runtime_shutdown_unverified" };
+}
+
+async function runProxyCli(scriptPath, commandArgs, timeoutMs = 30_000) {
   const args = Array.isArray(commandArgs) ? commandArgs : [commandArgs];
+  // The copied supervisor must not execute a legacy CLI's port-killing stop.
+  if (args[0] === "stop") return stopSupervisorRuntime();
+  if (args[0] === "restart") {
+    const stopped = await stopSupervisorRuntime();
+    if (!stopped.ok) return stopped;
+    args[0] = "start";
+  }
   const result = spawnSync(process.execPath, [scriptPath, ...args], {
     stdio: "ignore",
     windowsHide: true,
@@ -180,7 +236,7 @@ async function runCliThenCheckHealth({
 }) {
   let commandResult;
   try {
-    commandResult = runCli(scriptPath, command, timeoutMs);
+    commandResult = await runCli(scriptPath, command, timeoutMs);
   } catch (error) {
     commandResult = { ok: false, errorCode: error?.code || error?.name || "command_threw" };
   }
@@ -188,7 +244,7 @@ async function runCliThenCheckHealth({
   if (!commandSucceeded) {
     appendSupervisorLog(`${phase} command did not complete successfully (${cliRunErrorCode(commandResult)}); checking the service health independently.`, env);
   }
-  const healthy = await healthCheck({ port, expectedVersion, requireUpstream });
+  const healthy = await healthCheck({ port, expectedVersion, requireUpstream, env });
   if (healthy && !commandSucceeded) {
     appendSupervisorLog(`${phase} reached the expected healthy version despite the command failure or timeout.`, env);
   }
@@ -384,6 +440,7 @@ export async function superviseUpdate({
   restoreTrayProcess = restoreManagedTray,
   trayRestoreWait = sleep,
   platform = process.platform,
+  localActivation = false,
 } = {}) {
   const stagedActivation = Boolean(stagingDir);
   let activationMode = stagedActivation ? "swap" : "legacy";
@@ -407,7 +464,10 @@ export async function superviseUpdate({
   if (stagedActivation) {
     validateStagedLayout({ rootDir, stagingDir, backupDir });
     appendSupervisorLog(`Stopping proxy v${previousVersion} before activating v${targetVersion}.`, env);
-    if (pathExists(newScript)) runCli(newScript, "stop", 30_000);
+    if (pathExists(newScript) && !cliRunSucceeded(await runCli(newScript, "stop", 30_000))) {
+      writeSupervisorStatus({ status: "activation_failed", current: previousVersion, latest: targetVersion, errorCode: "update_stop_unverified", hasUpdate: true, checkFailed: true }, env);
+      return { activated: false, rolledBack: false, errorCode: "update_stop_unverified" };
+    }
     try {
       const stoppedTrayPids = await stopTrayProcesses(rootDir);
       if (stoppedTrayPids.length) appendSupervisorLog(`Stopped ${stoppedTrayPids.length} managed tray process(es) before replacing the application tree.`, env);
@@ -449,7 +509,7 @@ export async function superviseUpdate({
     if (installImagePlugin) {
       const stagedScript = join(stagingDir, "bin", "momoapi-proxy.mjs");
       const marketplaceMigrated = pathExists(stagedScript)
-        && cliRunSucceeded(runCli(stagedScript, ["plugin", "install"], 120_000));
+        && cliRunSucceeded(await runCli(stagedScript, ["plugin", "install"], 120_000));
       appendSupervisorLog(marketplaceMigrated
         ? "Moved the MOMO Image marketplace outside the application tree before activation."
         : "The MOMO Image marketplace pre-activation migration was unavailable; activation will continue with rollback protection.", env);
@@ -550,12 +610,12 @@ export async function superviseUpdate({
   const activationCommand = stagedActivation ? "start" : "restart";
   const { commandSucceeded: activationCommandSucceeded, healthy } = await runCliThenCheckHealth({
     runCli, scriptPath: newScript, command: activationCommand, healthCheck, port, expectedVersion: targetVersion,
-    requireUpstream: true,
+    requireUpstream: !localActivation,
     phase: `Activating proxy v${targetVersion}`, env,
   });
   let desktopRefreshSucceeded = true;
   if (healthy && platform === "win32") {
-    desktopRefreshSucceeded = cliRunSucceeded(runCli(newScript, ["desktop", "refresh"], 30_000));
+    desktopRefreshSucceeded = cliRunSucceeded(await runCli(newScript, ["desktop", "refresh"], 30_000));
     appendSupervisorLog(desktopRefreshSucceeded
       ? `Refreshed the stable Windows tray binary for v${targetVersion}.`
       : `Refreshing the stable Windows tray binary for v${targetVersion} failed; starting rollback.`, env);
@@ -564,7 +624,7 @@ export async function superviseUpdate({
   const activationErrorCode = healthy && !desktopRefreshSucceeded ? "update_desktop_refresh_failed" : "update_activation_failed";
   if (activationReady) {
     const imagePluginInstalled = installImagePlugin
-      ? cliRunSucceeded(runCli(newScript, ["plugin", "install"], 120_000))
+      ? cliRunSucceeded(await runCli(newScript, ["plugin", "install"], 120_000))
       : false;
     writeSupervisorStatus({
       status: "active",
@@ -591,7 +651,7 @@ export async function superviseUpdate({
 
   if (!healthy) appendSupervisorLog(`Proxy v${targetVersion} failed health verification; starting rollback.`, env);
   if (activationMode === "inplace") {
-    if (pathExists(newScript)) runCli(newScript, "stop", 15_000);
+    if (pathExists(newScript) && !cliRunSucceeded(await runCli(newScript, "stop", 15_000))) return { activated: false, rolledBack: false, errorCode: "update_stop_unverified" };
     let restoredTree = false;
     try {
       replaceContents(rootDir, backupDir);
@@ -622,7 +682,7 @@ export async function superviseUpdate({
     };
   }
 
-  if (pathExists(backupScript)) runCli(backupScript, "stop", 15_000);
+  if (pathExists(newScript) && !cliRunSucceeded(await runCli(newScript, "stop", 15_000))) return { activated: false, rolledBack: false, errorCode: "update_stop_unverified" };
 
   const failedDir = rootDir + `.failed-${Date.now()}-${process.pid}`;
   try {
@@ -633,7 +693,7 @@ export async function superviseUpdate({
       if (!pathExists(rootDir) && pathExists(failedDir)) await retry(() => move(failedDir, rootDir));
     } catch {}
     const recoverableScript = join(rootDir, "bin", "momoapi-proxy.mjs");
-    if (pathExists(recoverableScript)) runCli(recoverableScript, "start");
+    if (pathExists(recoverableScript)) await runCli(recoverableScript, "start");
     writeSupervisorStatus({
       status: "rollback_failed",
       current: targetVersion,
@@ -697,6 +757,7 @@ if (invokedPath && invokedPath.toLowerCase() === fileURLToPath(import.meta.url).
       port: Number(arg("--port") || 18789),
       parentPid: Number(arg("--parent-pid") || 0),
       installImagePlugin: !process.argv.includes("--no-image-plugin"),
+      localActivation: process.argv.includes("--local-activation"),
     });
     process.exitCode = result.activated || result.restoredHealthy ? 0 : 1;
   } finally {

@@ -75,12 +75,35 @@ No production deployment, version bump or release tag is part of this draft.
   legacy metrics, and activates only the existing managed login-service label
   with old settings/new source before verifying authenticated capabilities.
   This bounded migration is unit-tested but still needs real legacy-Mac
-  acceptance. Disabled/missing agents and other platforms fail closed.
+  acceptance. Windows/Linux authenticate legacy metrics and gracefully stop
+  the old runtime before starting current source with old settings, then check
+  authenticated credential capability. No port-owner kill is allowed.
 - Explicit reinstall rotates the Key before full setup. A later catalog,
   launchd or desktop failure does not establish whole-install rollback.
   The CLI reports this as partial success. Existing bootstrap app-directory
   restoration is NOT credential/settings restoration. Do not claim that all
   previous settings were restored.
-- The bundled Unix bootstrap still has historical GNU-tool assumptions and
-  destructive app replacement; it is not the Mac-compatible hosted bootstrap.
-  It requires follow-up before advertising it for macOS.
+- The bundled Unix bootstrap now uses Node SHA-256 and Bash 3-compatible
+  metadata parsing, retains a prior app directory, and does not kill port
+  owners. Like the hosted bootstrap, this is not full settings rollback.
+
+## Windows/Linux acceptance (2026-10-03)
+
+- Tests run in isolated configuration homes with synthetic credentials and a
+  local mock upstream; no real account/Key was used or exported.
+- Real CLI first install creates settings/Codex configuration, starts and stops
+  the daemon, and fetches the model list. Explicit reinstall ignores stale
+  disk/inherited Key; blank/rejected input leaves settings unchanged; accepted
+  input preserves localToken and preferences.
+- A live legacy fixture authenticates shutdown before a fresh CLI daemon is
+  launched. Candidate Key is never sent to the old runtime. This exercises the
+  protocol boundary, not an archived binary on a fresh OS image.
+- Real Windows headless start/restart/stop and refusal to kill an unrelated
+  listener are tested. Native tray compiles and presentation assertions pass.
+- Linux uses a Podman node:24-alpine image and a second network-disabled run.
+  A Linux container cannot validate WinForms, Task Scheduler or Windows kernel
+  semantics. Windows tests therefore run on Windows locally and CI.
+- Not established: physical tray interaction, Windows login/reboot/Task
+  Scheduler registration in a disposable OS, or Linux systemd user-session
+  login/reboot. These remain release acceptance gates; container success does
+  not establish them. Mac signing/notarization/device gates are unchanged.

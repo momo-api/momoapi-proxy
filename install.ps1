@@ -53,6 +53,7 @@ if ($major -lt 22) {
 Write-Step "Found Node.js v$nodeVer"
 
 # 2. Resolve API Key
+if ($PSBoundParameters.ContainsKey('ApiKey')) { throw "Do not pass a Key in command arguments. Use hidden input or explicitly -ApiKeyEnv." }
 $installRoot = [System.IO.Path]::Combine($HOME, ".momoapi-proxy")
 $installDir = [System.IO.Path]::Combine($installRoot, "app")
 $savedSettingsPath = [System.IO.Path]::Combine($installRoot, "settings.json")
@@ -93,6 +94,7 @@ if (-not $downloaded) { throw "Unable to download a release package matching the
 tar -xzf $tgzPath -C $stagingDir --strip-components=1 --no-same-owner --no-same-permissions
 $package = Get-Content -Raw (Join-Path $stagingDir "package.json") | ConvertFrom-Json
 if ([string]$package.version -ne $version) { throw "Package version does not match the verified manifest." }
+if (-not (Select-String -LiteralPath (Join-Path $stagingDir "bin/momoapi-proxy.mjs") -SimpleMatch '--api-key-stdin' -Quiet)) { throw "Release lacks safe credential input; installation was not changed." }
 if (Test-Path -LiteralPath $installDir) {
   $previousPackage = Get-Content -LiteralPath (Join-Path $installDir "package.json") -Raw | ConvertFrom-Json
   $previousVersion = [string]$previousPackage.version
@@ -109,6 +111,7 @@ if (Test-Path -LiteralPath $installDir) {
     "--previous", $previousVersion,
     "--port", "$Port",
     "--parent-pid", "0"
+    "--local-activation"
   )
   if ($NoImagePlugin) { $supervisorArgs += "--no-image-plugin" }
   & node @supervisorArgs

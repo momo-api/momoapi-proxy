@@ -594,7 +594,7 @@ namespace MomoApi.Tray
                             MessageBox.Show("API Key 已验证并保存。已打开的直连客户端可能需要重启。", "MOMO API Proxy");
                             dialog.Close();
                         }
-                        else MessageBox.Show("未能完成 Key 修改。请检查网络和 Key，或在终端运行 momoapi key change 查看原因。", "MOMO API Proxy");
+                        else MessageBox.Show("未能确认 Key 修改结果。请先运行 momoapi doctor；不要假定旧 Key 仍生效或立即重复保存。", "MOMO API Proxy");
                     }
                     catch { MessageBox.Show("无法执行安全 Key 修改，请检查代理安装。", "MOMO API Proxy"); }
                     finally

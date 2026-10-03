@@ -1,6 +1,7 @@
 FROM node:24-alpine
 WORKDIR /app
 COPY package.json ./
+COPY install.sh ./install.sh
 COPY bin ./bin
 COPY src ./src
 COPY test ./test

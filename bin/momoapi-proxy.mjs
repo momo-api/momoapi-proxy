@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-import { spawnSync, spawn, execSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import { openSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promptApiKey, readApiKeyStdin } from "../src/key-input.mjs";
 import { rotateApiKey, validateApiKey, credentialError } from "../src/credentials.mjs";
 import { upgradeMacInstallRuntime } from "../src/install-runtime.mjs";
+import { probeManagedRuntime, stopManagedRuntime } from "../src/runtime-control.mjs";
 import { installMacDesktop, openMacDesktop } from "../src/macos-desktop.mjs";
 import { installAutostart, uninstallAutostart } from "../src/autostart.mjs";
 import { updateSettings } from "../src/config.mjs";
@@ -19,7 +20,7 @@ import { runDoctor } from "../src/doctor.mjs";
 import { logPath, readRecentLogReport, logInfo, logError } from "../src/logger.mjs";
 import { readLogTail } from "../src/log-tail.mjs";
 import { checkAndRecordLatestVersion, getCurrentVersion, readUpdateStatus, startUpdateChecker, updateSelf, writeUpdateStatus } from "../src/updater.mjs";
-import { writeRuntimePort, writeHeartbeat, stopWindowsService } from "../src/service.mjs";
+import { writeRuntimePort, writeHeartbeat } from "../src/service.mjs";
 import { installWindowsDesktop, refreshWindowsTray } from "../src/desktop-install.mjs";
 import { runImageMcp } from "../src/mcp-image.mjs";
 import { runVideoMcp } from "../src/mcp-video.mjs";
@@ -47,32 +48,6 @@ function reportLogTailLimit(report) {
   }
 }
 
-function killWindowsProcessByPattern(pattern) {
-  if (process.platform !== "win32") return;
-  try {
-    const wql = "CommandLine LIKE '%" + pattern.replace(/'/g, "''") + "%'";
-    spawnSync("powershell.exe", [
-      "-NoProfile",
-      "-Command",
-      "Get-CimInstance Win32_Process -Filter '" + wql + "' -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
-    ], { stdio: "ignore" });
-  } catch {}
-}
-
-function isWindowsProcessRunning(pattern) {
-  if (process.platform !== "win32") return false;
-  try {
-    const wql = "CommandLine LIKE '%" + pattern.replace(/'/g, "''") + "%'";
-    const res = spawnSync("powershell.exe", [
-      "-NoProfile",
-      "-Command",
-      "Get-CimInstance Win32_Process -Filter '" + wql + "' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessId",
-    ], { encoding: "utf8" });
-    return Boolean(res.stdout && res.stdout.trim());
-  } catch {
-    return false;
-  }
-}
 
 function daemonLogPath() {
   const dir = appHome();
@@ -84,9 +59,8 @@ async function waitForHealth(port, maxWaitMs = 3500) {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
     try {
-      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
-      if (res.ok) return true;
-    } catch {}
+      if ((await probeManagedRuntime({ ...readSettings(), port })).running) return true;
+    } catch (error) { if (error.code === "runtime_untrusted") throw error; }
     await new Promise((r) => setTimeout(r, 150));
   }
   return false;
@@ -94,7 +68,7 @@ async function waitForHealth(port, maxWaitMs = 3500) {
 
 async function startDaemon(binFile, scriptDir, port) {
   if (await waitForHealth(port, 400)) {
-    if (process.platform === "win32") {
+    if (process.platform === "win32" && !hasFlag("--no-desktop")) {
       installWindowsDesktop({ port });
     }
     return true;
@@ -115,7 +89,7 @@ async function startDaemon(binFile, scriptDir, port) {
   });
   daemon.unref();
 
-  if (process.platform === "win32") {
+  if (process.platform === "win32" && !hasFlag("--no-desktop")) {
     installWindowsDesktop({ port });
   }
 
@@ -156,7 +130,10 @@ async function changeConfiguredKey(apiKey, { allowLegacyInstallUpgrade = false }
       });
       if (capabilities.status === 404) {
         await capabilities.body?.cancel();
-        await upgradeMacInstallRuntime({ ...saved, port });
+        await upgradeMacInstallRuntime({ ...saved, port }, { startRuntime: async () => {
+          const script = fileURLToPath(import.meta.url);
+          await startDaemon(script, dirname(script), port);
+        } });
       } else {
         const result = await capabilities.json().catch(() => null);
         if (!capabilities.ok || result?.ok !== true || result.apiKeyChange !== true) throw new Error("Runtime credential capability could not be authenticated.");
@@ -184,6 +161,16 @@ async function main() {
   if (process.platform === "darwin" && ["start", "up", "daemon", "stop", "down", "restart"].includes(command)) {
     const action = ["start", "up", "daemon"].includes(command) ? "start" : ["stop", "down"].includes(command) ? "stop" : "restart";
     console.log(JSON.stringify(controlMacService(action)));
+    return;
+  }
+  if (process.platform !== "darwin" && ["stop", "down", "restart"].includes(command)) {
+    const settings = readSettings();
+    await stopManagedRuntime(settings);
+    if (command === "restart") {
+      const binFile = fileURLToPath(import.meta.url);
+      await startDaemon(binFile, dirname(binFile), Number(settings.port || 18789));
+    } else writeHeartbeat({ running: false, port: settings.port });
+    console.log(JSON.stringify({ ok: true, action: command }));
     return;
   }
   if (command === "service" && ["start", "stop", "restart"].includes(args[0]) && process.platform === "darwin") {
@@ -249,10 +236,7 @@ async function main() {
     }
 
     let isRunning = false;
-    try {
-      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
-      if (res.ok) isRunning = true;
-    } catch {}
+    isRunning = (await probeManagedRuntime(settings)).running;
 
     if (!isRunning) {
       console.log("✅ [3/5] 启动本地代理服务: http://127.0.0.1:" + port + "/v1");
@@ -296,7 +280,7 @@ async function main() {
     try {
       result = await setup({ apiKey, endpoint, port, autostart, imagePlugin });
       installedSettings = readSettings();
-      desktop = process.platform === "darwin" ? installMacDesktop() : installWindowsDesktop({ port: installedSettings.port, autostart: installedSettings.autostart });
+      desktop = hasFlag("--no-desktop") ? { installed: false, message: "Headless installation requested." } : process.platform === "darwin" ? installMacDesktop() : installWindowsDesktop({ port: installedSettings.port, autostart: installedSettings.autostart });
     } catch {
       throw new Error(existing.apiKey && existing.localToken
         ? "API Key was changed, but remaining installation steps failed. This is partial success, not a full rollback. Run momoapi doctor."
@@ -317,10 +301,7 @@ async function main() {
     try { settings = resolveDaemonSettings(); } catch { settings = readSettings(); }
     const port = settings.port || 18789;
     let isRunning = false;
-    try {
-      const res = await fetch("http://127.0.0.1:" + port + "/healthz");
-      if (res.ok) isRunning = true;
-    } catch {}
+    isRunning = (await probeManagedRuntime(settings)).running;
     if (isRunning) {
       console.log("MOMO Codex Bridge is already running on http://127.0.0.1:" + port + "/v1");
       return;
@@ -332,57 +313,6 @@ async function main() {
     console.log("MOMO Codex Bridge started successfully!");
     console.log("  - Local Bridge: http://127.0.0.1:" + port + "/v1");
     console.log("  - Status: Running in background (Taskbar Tray active)");
-  } else if (command === "stop" || command === "down") {
-    let settings = null;
-    try { settings = resolveDaemonSettings(); } catch { settings = readSettings(); }
-    const port = settings.port || 18789;
-    console.log("Stopping MOMO Codex Bridge on port " + port + "...");
-    stopWindowsService();
-    if (process.platform === "win32") {
-      try {
-        spawnSync("powershell.exe", [
-          "-NoProfile",
-          "-Command",
-          `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`,
-        ], { stdio: "ignore" });
-        killWindowsProcessByPattern("tray.ps1");
-        killWindowsProcessByPattern("momoapi-tray.exe");
-        killWindowsProcessByPattern("MomoApiProxyTray.exe");
-      } catch {}
-    } else {
-      try {
-        execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || fuser -k ${port}/tcp 2>/dev/null`, { stdio: "ignore" });
-      } catch {}
-    }
-    writeHeartbeat({ running: false, port });
-    console.log("MOMO Codex Bridge stopped.");
-  } else if (command === "restart") {
-    let settings = null;
-    try { settings = resolveDaemonSettings(); } catch { settings = readSettings(); }
-    const port = settings.port || 18789;
-    console.log("Restarting MOMO Codex Bridge...");
-    stopWindowsService();
-    if (process.platform === "win32") {
-      try {
-        spawnSync("powershell.exe", [
-          "-NoProfile",
-          "-Command",
-          `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`,
-        ], { stdio: "ignore" });
-        killWindowsProcessByPattern("tray.ps1");
-        killWindowsProcessByPattern("momoapi-tray.exe");
-        killWindowsProcessByPattern("MomoApiProxyTray.exe");
-      } catch {}
-    } else {
-      try {
-        execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null || fuser -k ${port}/tcp 2>/dev/null`, { stdio: "ignore" });
-      } catch {}
-    }
-    await new Promise((r) => setTimeout(r, 400));
-    const binFile = fileURLToPath(import.meta.url);
-    const scriptDir = dirname(binFile);
-    await startDaemon(binFile, scriptDir, port);
-    console.log("MOMO Codex Bridge restarted successfully on http://127.0.0.1:" + port + "/v1");
   } else if (command === "serve") {
     try {
       const currentCliPath = fileURLToPath(import.meta.url);
@@ -552,9 +482,11 @@ async function main() {
       } catch {}
     }
     const catalog = readCatalog();
+    isRunning = isRunning && health?.ok === true && health?.service === "momo-codex-bridge" && daemonMetrics?.ok === true;
     console.log(JSON.stringify({
       service: "momo-codex-bridge",
       running: isRunning,
+      authenticatedRuntime: isRunning,
       endpoint: settings.endpoint || "https://momoapi.us",
       host: settings.host || "127.0.0.1",
       port: settings.port || 18789,
