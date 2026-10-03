@@ -76,6 +76,15 @@ The auto probe mode verifies first-window visibility from the shared
 navigation-completed hook before any test-only Close/Show action. This is not a
 human launch or shell/tray presentation test.
 
+The tray probe mode posts native events only to a unique random-class
+message-only window owned by the exact probe PID. It exercises the pinned
+beta24 tray left-button callback and native menu open/quit command dispatch.
+Callback counts, native visibility, worker join and PostShutdown are required;
+the independent normal daemon must still serve start/status/stop after quit.
+This is NOT mouse automation, shell icon placement/visibility, popup-menu
+rendering or human click acceptance. Unknown command checks assert final hidden
+state and no extra shared callback, not absence of every transient visual state.
+
 ## Boundaries and remaining gates
 Control accepts only authenticated non-browser requests; Origin/Sec-Fetch-Site
 denied. No CORS. Wails asset handler bridges only fixed local demo actions,

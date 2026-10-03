@@ -72,6 +72,16 @@ try {
   const autoProfile = automatic.out.split(/\r?\n/).find(l => l.startsWith('PROFILE: '));
   if (autoProfile) console.log(autoProfile);
   console.log('PASS: automatic first-window visibility after navigation.');
+  const tray = launch(probe, ['tray'], session);
+  assert.equal(await finished(tray, 18000), 0);
+  assert(tray.out.includes('ATTACH: shutdown') && tray.out.includes('ATTACH: passed'));
+  assert.equal(daemon.closed, false);
+  await cli(session, 'demo-start', true);
+  await cli(session, 'status', true);
+  await cli(session, 'demo-stop', false);
+  const trayProfile=tray.out.split(/\r?\n/).find(l=>l.startsWith('PROFILE: '));
+  if(trayProfile) console.log(trayProfile);
+  console.log('PASS: native tray left-click event, menu open/quit commands; independent core survives. NOT physical mouse clicks.');
   for (const mode of ['graceful', 'hold']) {
     const first = launch(probe, [mode], session);
     await until(first, () => first.out.includes('ATTACH: hidden'));

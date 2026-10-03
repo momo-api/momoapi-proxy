@@ -142,3 +142,23 @@ Auto probe waits for real state/navigation/visibility and quits without calling
 Show; attached lifecycle probes likewise no longer force initial visibility.
 Windows local repeat-5 evidence covers auto, graceful, forced-termination and
 second-instance paths. Mac/Linux startup behavior is unchanged/unverified.
+
+## Native tray event path (2026-10-04)
+
+Attach probe now adds a tray mode; normal CLI has no new mode/route/binding.
+Test-only random window class and exact PID constrain FindWindowEx enumeration
+to the disposable probe's own message-only tray window. Exhausted/non-unique
+enumerations fail closed; revalidation and PostMessage occur together on the
+owning UI thread. Native WM_USER+1 left-button event and pinned beta24 menu
+command IDs exercise the actual shared callbacks, not direct callback calls.
+Hidden -> left-open -> Close -> menu-open -> menu-quit must produce one of each
+callback, native visibility changes and PostShutdown. Probe worker is joined
+before reading pass evidence. Independent normal core remains usable afterward.
+
+Prism static review (75.266s) found quit-causality, enumeration-bound and
+unknown-command observation risks. Added callback counts, worker join and
+unique revalidation; narrowed unknown-command claim to final hidden state/no
+extra callbacks. We do not claim no transient visual state. Final Windows
+repeat-5 covers tray mode plus prior auto/graceful/forced/second-instance paths.
+Manual shell mouse clicks, icon visibility/placement, right-click popup
+rendering, unmodified normal GUI and other platforms remain open gates.

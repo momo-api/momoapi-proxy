@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,7 +24,7 @@ import (
 // Separate test executable. Session arrives only by private stdin; the Node
 // harness owns a DIFFERENT normal serve process. Never ship this binary.
 func main() {
-	if len(os.Args) != 2 || (os.Args[1] != "auto" && os.Args[1] != "graceful" && os.Args[1] != "hold") {
+	if len(os.Args) != 2 || (os.Args[1] != "tray" && os.Args[1] != "auto" && os.Args[1] != "graceful" && os.Args[1] != "hold") {
 		fmt.Fprintln(os.Stderr, "invalid attach probe mode")
 		os.Exit(1)
 	}
@@ -38,12 +40,22 @@ func main() {
 	fmt.Println("PROFILE: " + profile) // Retained synthetic profile, no deletion.
 	loaded, second, navigated := make(chan struct{}, 1), make(chan struct{}, 1), make(chan struct{}, 1)
 	var autoVisible, hidden, reopened, shutdown, timedOut atomic.Bool
+	var trayPassed atomic.Bool
+	var trayOpen, menuOpen, menuQuit atomic.Int32
+	classBytes := make([]byte, 16)
+	if _, err = rand.Read(classBytes); err != nil {
+		os.Exit(1)
+	}
+	className := "MOMO.attachcheck." + hex.EncodeToString(classBytes)
 	done := make(chan struct{})
 	watchStopped := make(chan struct{})
+	workerStopped := make(chan struct{})
 	var deadline time.Time
 	err = desktopConfigured(s, func(options *application.Options) {
 		fmt.Println("ATTACH: configured")
 		options.Windows.WebviewUserDataPath = profile
+		// Random test-only class isolates message discovery to our exact process.
+		options.Windows.WndClass = className
 		options.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 		options.Assets.DisableLogging = true
 		original := options.Assets.Handler
@@ -98,6 +110,7 @@ func main() {
 			}
 		}()
 		go func() {
+			defer close(workerStopped)
 			select {
 			case <-loaded:
 			case <-done:
@@ -130,6 +143,12 @@ func main() {
 			}
 			hidden.Store(true)
 			fmt.Println("ATTACH: hidden")
+			if os.Args[1] == "tray" {
+				if trayNativeCheck(window, className) {
+					trayPassed.Store(true)
+				}
+				return // Successful quit must come from the actual tray menu callback.
+			}
 			select {
 			case <-second:
 			case <-done:
@@ -149,15 +168,30 @@ func main() {
 				fmt.Println("ATTACH: holding")
 			}
 		}()
+	}, func(action string) {
+		switch action {
+		case "tray-open":
+			trayOpen.Add(1)
+		case "menu-open":
+			menuOpen.Add(1)
+		case "menu-quit":
+			menuQuit.Add(1)
+		}
 	})
 	close(done)
 	// Join watchdog before reading its result; wall-clock deadline also prevents
 	// a delayed timer goroutine from falsely passing at the timeout boundary.
 	joined := false
+	workerJoined := false
 	if !deadline.IsZero() {
 		select {
 		case <-watchStopped:
 			joined = true
+		case <-time.After(3 * time.Second):
+		}
+		select {
+		case <-workerStopped:
+			workerJoined = true
 		case <-time.After(3 * time.Second):
 		}
 	}
@@ -165,7 +199,10 @@ func main() {
 	if os.Args[1] == "auto" {
 		passedLifecycle = autoVisible.Load()
 	}
-	passed := err == nil && joined && time.Now().Before(deadline) && passedLifecycle && shutdown.Load() && !timedOut.Load()
+	if os.Args[1] == "tray" {
+		passedLifecycle = hidden.Load() && trayPassed.Load() && trayOpen.Load() == 1 && menuOpen.Load() == 1 && menuQuit.Load() == 1
+	}
+	passed := err == nil && joined && workerJoined && time.Now().Before(deadline) && passedLifecycle && shutdown.Load() && !timedOut.Load()
 	if !passed {
 		fmt.Fprintln(os.Stderr, "attach evidence incomplete")
 		os.Exit(1)
