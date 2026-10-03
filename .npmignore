@@ -1,0 +1,12 @@
+node_modules/
+.momo-codex-switch/
+coverage/
+dist/
+*.log
+*.tgz
+tmp/
+.tmp-*/
+__pycache__/
+*.pyc
+# Experimental desktop modules must never enter existing Node release packages.
+experimental/
