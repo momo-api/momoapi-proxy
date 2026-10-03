@@ -9,5 +9,5 @@ COPY scripts/compact-fixtures.mjs ./scripts/compact-fixtures.mjs
 COPY scripts/build-release-package.mjs ./scripts/build-release-package.mjs
 COPY .agents ./.agents
 COPY plugins ./plugins
-RUN node --test
-CMD ["node", "--test"]
+RUN node --test --test-concurrency=4 --test-timeout=60000
+CMD ["node", "--test", "--test-concurrency=4", "--test-timeout=60000"]

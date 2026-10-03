@@ -48,6 +48,7 @@ jobs:
 
   container:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - run: docker build --tag momoapi-proxy:test .
