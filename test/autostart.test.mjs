@@ -4,7 +4,54 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { autostartTarget, installAutostart, isAutostartInstalled, migrateWindowsAutostart, uninstallAutostart, WINDOWS_SERVICE_STARTUP, WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_SERVICE_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP } from "../src/autostart.mjs";
-import { buildWindowsServiceWrapperCmd, readRuntimePort, resolveWindowsServiceBinPath, writeHeartbeat, writeRuntimePort } from "../src/service.mjs";
+import { buildWindowsTaskXml, windowsTaskName, buildWindowsServiceWrapperCmd, readRuntimePort, resolveWindowsServiceBinPath, writeHeartbeat, writeRuntimePort } from "../src/service.mjs";
+
+test("Windows custom homes have independent tasks and safe launcher paths", () => {
+  assert.equal(windowsTaskName({}), "momo-codex-bridge");
+  assert.equal(windowsTaskName({ USERPROFILE: "C:/user", MOMO_PROXY_HOME: "C:/user/.momoapi-proxy" }), "momo-codex-bridge");
+  assert.notEqual(windowsTaskName({ MOMO_PROXY_HOME: "one" }), windowsTaskName({ MOMO_PROXY_HOME: "two" }));
+  assert.equal(windowsTaskName({ MOMO_PROXY_HOME: "one" }), windowsTaskName({ MOMO_PROXY_HOME: "one" }));
+  assert.match(buildWindowsTaskXml('C:\\A&B\\launcher.vbs'), /A&amp;B/);
+  assert.match(buildWindowsTaskXml("fixture.vbs", "S-1-5-21-123"), /<UserId>S-1-5-21-123<\/UserId>/);
+  assert.match(buildWindowsServiceWrapperCmd("cli", "log", "node", { MOMO_PROXY_HOME: "chosen&home!" }), /set "MOMO_PROXY_HOME=chosen&home!"/);
+  assert.throws(() => buildWindowsServiceWrapperCmd("cli%injected%", "log"), /launcher paths/);
+});
+
+test("Linux autostart activates and uninstalls only the selected user unit", () => {
+  const calls = [];
+  const root = mkdtempSync(join(tmpdir(), "momo-systemd-unit-"));
+  const oldHome = process.env.HOME;
+  process.env.HOME = root;
+  const env = { HOME: root, MOMO_PROXY_HOME: join(root, "proxy % space") };
+  const spawnSyncImpl = (command, args) => { calls.push([command, args]); return { status: 0 }; };
+  try {
+    const result = installAutostart({}, { osPlatform: "linux", env, activate: true, spawnSyncImpl });
+    assert.equal(result.activated, true);
+    assert.match(readFileSync(result.target, "utf8"), /MOMO_PROXY_HOME=.*proxy %% space/);
+    assert.match(readFileSync(result.target, "utf8"), /Restart=on-failure/);
+    uninstallAutostart({ osPlatform: "linux", env, deactivate: true, spawnSyncImpl });
+    assert.deepEqual(calls, [
+      ["systemctl", ["--user", "daemon-reload"]],
+      ["systemctl", ["--user", "enable", "--now", "momo-codex-bridge.service"]],
+      ["systemctl", ["--user", "disable", "--now", "momo-codex-bridge.service"]],
+      ["systemctl", ["--user", "daemon-reload"]],
+    ]);
+  } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Linux activation failure preserves the previous unit file", () => {
+  const root = mkdtempSync(join(tmpdir(), "momo-systemd-failure-"));
+  const oldHome = process.env.HOME; process.env.HOME = root;
+  const env = { HOME: root, MOMO_PROXY_HOME: join(root, "proxy") };
+  const target = autostartTarget("linux", env);
+  mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, "previous unit");
+  try {
+    assert.throws(() => installAutostart({}, { osPlatform: "linux", env, activate: true,
+      spawnSyncImpl(_command, args) { return { status: args.includes("enable") ? 1 : 0 }; },
+    }), /Linux user service/);
+    assert.equal(readFileSync(target, "utf8"), "previous unit");
+  } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; rmSync(root, { recursive: true, force: true }); }
+});
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "momo-startup-test-"));
@@ -57,6 +104,7 @@ test("Windows install and uninstall use branded names and support legacy lifecyc
   assert.equal(result.target, join(dir, WINDOWS_SERVICE_STARTUP));
   assert.match(readFileSync(result.target, "utf8"), /momoapi-proxy\.mjs/);
   assert.match(readFileSync(result.target, "utf8"), /MOMO_PROXY_CONSOLE_MIRROR=0/);
+  assert.ok(readFileSync(result.target, "utf8").includes('set "MOMO_PROXY_HOME='));
   assert.equal(existsSync(join(dir, LEGACY_WINDOWS_SERVICE_STARTUP)), false);
   writeFileSync(join(dir, LEGACY_WINDOWS_SERVICE_STARTUP), "duplicate legacy");
   assert.equal(uninstallAutostart({ osPlatform: "win32", env }).uninstalled, true);

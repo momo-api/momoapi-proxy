@@ -103,7 +103,25 @@ No production deployment, version bump or release tag is part of this draft.
 - Linux uses a Podman node:24-alpine image and a second network-disabled run.
   A Linux container cannot validate WinForms, Task Scheduler or Windows kernel
   semantics. Windows tests therefore run on Windows locally and CI.
-- Not established: physical tray interaction, Windows login/reboot/Task
-  Scheduler registration in a disposable OS, or Linux systemd user-session
-  login/reboot. These remain release acceptance gates; container success does
-  not establish them. Mac signing/notarization/device gates are unchanged.
+- Follow-up: native WinForms editor automation exercises masked input, blank
+  save, cancel, pending-save close refusal, success/failure and custom CLI
+  selection (10 assertions). It instantiates the actual editor, not the tray
+  application context, so it does not start or inspect the user's proxy.
+- Windows launchers persist the selected proxy home, reject unsafe CMD paths,
+  escape Task XML and use an explicit current-user SID. Custom homes have
+  independent task names; the ordinary home keeps the legacy task name.
+  Real Task Scheduler acceptance was attempted locally and denied by OS
+  permissions. It is not counted as a pass; an isolated script is in CI.
+  The generated Startup CMD fallback was executed locally against a synthetic
+  CLI and passed absolute-Node, selected-home and serve-argument assertions.
+- Linux previously wrote a unit without enabling it. It now enables/starts
+  the current user's unit and disables/stops it on uninstall. Custom login
+  homes do not address the host manager. Restart is on-failure so an
+  authenticated intentional CLI shutdown does not immediately respawn.
+- A dedicated non-privileged, network-disabled Podman container runs a real
+  systemd user manager as UID 1100. Enable, authenticated daemon readiness,
+  restart, stop, start, disable, removal and reload passed. No host mounts,
+  published ports or privileged flag were used (512 MiB, two CPUs, 256 PIDs).
+- Not established: physical tray clicking, Windows/macOS login/reboot, or
+  Linux physical login/reboot. Task registration still requires green CI and
+  standard-user acceptance. Mac signing/notarization/device gates are unchanged.

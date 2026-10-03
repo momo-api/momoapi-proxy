@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: 24
       - run: ./scripts/test-tray.ps1
+      - run: node scripts/test-windows-service.mjs
       - run: node --test test/autostart.test.mjs
       - run: node --test test/credentials.test.mjs test/key-input.test.mjs test/install-runtime.test.mjs test/runtime-control.test.mjs test/cli-runtime.test.mjs test/installer-acceptance.test.mjs test/update-supervisor.test.mjs
 
@@ -53,6 +54,23 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build --tag momoapi-proxy:test .
       - run: docker run --rm momoapi-proxy:test
+
+  linux-systemd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y podman
+      - run: sudo podman build -f Dockerfile.systemd-test -t momo-systemd-test .
+      - run: sudo podman run -d --name momo-systemd-test --network none --systemd always --cgroupns private --memory 512m --cpus 2 --pids-limit 256 --tmpfs /run --tmpfs /tmp momo-systemd-test
+      - run: |
+          for attempt in $(seq 1 30); do
+            sudo podman exec momo-systemd-test systemctl is-active user@1100.service && break
+            sleep 1
+          done
+          sudo podman exec --user 1100 --env HOME=/home/acceptance --env USERPROFILE=/home/acceptance --env XDG_RUNTIME_DIR=/run/user/1100 --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1100/bus momo-systemd-test node scripts/test-linux-systemd.mjs
+      - if: always()
+        run: sudo podman rm -f momo-systemd-test
 
   release-package:
     runs-on: ubuntu-latest
