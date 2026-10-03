@@ -92,14 +92,14 @@ export class ResponseStreamEmitter {
     this.activeTextMessage = null;
   }
 
-  writeFunctionCall({ callId, name, arguments: args }) {
-    this.budget.value({ callId, name, arguments: args });
+  writeFunctionCall({ callId, name, namespace, arguments: args }) {
+    this.budget.value({ callId, name, ...(namespace ? { namespace } : {}), arguments: args });
     this.flushTextMessage();
     const itemId = `fc_${randomUUID()}`;
     const cid = callId || `call_${randomUUID()}`;
     const argumentsText = typeof args === "string" ? args : JSON.stringify(args || {});
     const outIdx = this.outputIndex++;
-    const item = { id: itemId, type: "function_call", status: "completed", call_id: cid, name, arguments: argumentsText };
+    const item = { id: itemId, type: "function_call", status: "completed", call_id: cid, name, ...(namespace ? { namespace } : {}), arguments: argumentsText };
     
     this.response.write(event("response.output_item.added", {
       response_id: this.responseId,
@@ -129,14 +129,14 @@ export class ResponseStreamEmitter {
     return { callId: cid, itemId };
   }
 
-  writeCustomToolCall({ callId, name, input }) {
-    this.budget.value({ callId, name, input });
+  writeCustomToolCall({ callId, name, namespace, input }) {
+    this.budget.value({ callId, name, ...(namespace ? { namespace } : {}), input });
     this.flushTextMessage();
     const itemId = `ctc_${randomUUID()}`;
     const cid = callId || `call_${randomUUID()}`;
     const inputText = String(input || "");
     const outIdx = this.outputIndex++;
-    const item = { id: itemId, type: "custom_tool_call", status: "completed", call_id: cid, name, input: inputText };
+    const item = { id: itemId, type: "custom_tool_call", status: "completed", call_id: cid, name, ...(namespace ? { namespace } : {}), input: inputText };
 
     this.response.write(event("response.output_item.added", {
       response_id: this.responseId,
@@ -198,7 +198,7 @@ export function functionEvents(responseId, index, call) {
   const itemId = `fc_${randomUUID()}`;
   const callId = call.callId || `call_${randomUUID()}`;
   const argumentsText = typeof call.arguments === "string" ? call.arguments : JSON.stringify(call.arguments || {});
-  const item = { id: itemId, type: "function_call", status: "completed", call_id: callId, name: call.name, arguments: argumentsText };
+  const item = { id: itemId, type: "function_call", status: "completed", call_id: callId, name: call.name, ...(call.namespace ? { namespace: call.namespace } : {}), arguments: argumentsText };
   return {
     callId,
     events: [
@@ -214,7 +214,7 @@ export function customToolEvents(responseId, index, call) {
   const itemId = `ctc_${randomUUID()}`;
   const callId = call.callId || `call_${randomUUID()}`;
   const input = String(call.input || "");
-  const item = { id: itemId, type: "custom_tool_call", status: "completed", call_id: callId, name: call.name, input };
+  const item = { id: itemId, type: "custom_tool_call", status: "completed", call_id: callId, name: call.name, ...(call.namespace ? { namespace: call.namespace } : {}), input };
   return {
     callId,
     events: [

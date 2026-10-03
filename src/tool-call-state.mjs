@@ -78,10 +78,10 @@ function rememberCall(calls, callId, value) {
 
 export function emitRememberedCall(emitter, calls, mapped, args, callId, context = {}) {
   const id = callId || "call_" + randomUUID();
-  rememberCall(calls, id, { name: mapped.name, originalName: mapped.originalName, kind: mapped.kind, arguments: args, ...context });
+  rememberCall(calls, id, { name: mapped.name, originalName: mapped.originalName, namespace: mapped.namespace, kind: mapped.kind, arguments: args, ...context });
   try {
     return mapped.kind === "custom"
-      ? emitter.writeCustomToolCall({ callId: id, name: mapped.originalName, input: customInput(args) })
-      : emitter.writeFunctionCall({ callId: id, name: mapped.originalName, arguments: args });
+      ? emitter.writeCustomToolCall({ callId: id, name: mapped.originalName, namespace: mapped.namespace, input: customInput(args) })
+      : emitter.writeFunctionCall({ callId: id, name: mapped.originalName, namespace: mapped.namespace, arguments: args });
   } catch (error) { calls.delete(id); throw error; }
 }
