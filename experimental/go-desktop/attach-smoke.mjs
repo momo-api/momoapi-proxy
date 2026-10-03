@@ -62,6 +62,16 @@ try {
   assert.equal(ready.Protocol, 1);
   assert.equal(ready.Experimental, true);
   const session = {Endpoint: ready.Endpoint, Token: token};
+  const automatic = launch(probe, ['auto'], session);
+  const autoPassed = () => /(?:^|\r?\n)ATTACH: auto-visible(?:\r?\n|$)/.test(automatic.out);
+  await until(automatic, () => autoPassed() || automatic.closed, 15000);
+  assert.equal(await finished(automatic), 0);
+  assert(autoPassed());
+  assert(!automatic.out.includes('ATTACH: auto-visible-failed'));
+  assert(automatic.out.includes('ATTACH: shutdown') && automatic.out.includes('ATTACH: passed'));
+  const autoProfile = automatic.out.split(/\r?\n/).find(l => l.startsWith('PROFILE: '));
+  if (autoProfile) console.log(autoProfile);
+  console.log('PASS: automatic first-window visibility after navigation.');
   for (const mode of ['graceful', 'hold']) {
     const first = launch(probe, [mode], session);
     await until(first, () => first.out.includes('ATTACH: hidden'));
@@ -93,7 +103,7 @@ try {
   passed = true;
 } catch {
 	for (const record of children) {
-		console.error(JSON.stringify({closed: record.closed, code: record.code, configured: record.out.includes('ATTACH: configured'), created: record.out.includes('ATTACH: created'), root: record.out.includes('ATTACH: root'), loaded: record.out.includes('ATTACH: loaded'), visible: record.out.includes('ATTACH: visible'), closeReturned: record.out.includes('ATTACH: close-returned'), hidden: record.out.includes('ATTACH: hidden'), reopened: record.out.includes('ATTACH: reopened'), holding: record.out.includes('ATTACH: holding'), shutdown: record.out.includes('ATTACH: shutdown'), passed: record.out.includes('ATTACH: passed')}));
+    console.error(JSON.stringify({closed: record.closed, code: record.code, configured: record.out.includes('ATTACH: configured'), created: record.out.includes('ATTACH: created'), root: record.out.includes('ATTACH: root'), loaded: record.out.includes('ATTACH: loaded'), autoExact: /(?:^|\\r?\\n)ATTACH: auto-visible(?:\\r?\\n|$)/.test(record.out), autoFailed: record.out.includes('ATTACH: auto-visible-failed'), visible: record.out.includes('ATTACH: visible'), closeReturned: record.out.includes('ATTACH: close-returned'), hidden: record.out.includes('ATTACH: hidden'), reopened: record.out.includes('ATTACH: reopened'), holding: record.out.includes('ATTACH: holding'), shutdown: record.out.includes('ATTACH: shutdown'), passed: record.out.includes('ATTACH: passed')}));
 	}
   // Do not echo arbitrary child output, session or assert actual/expected values.
   console.error('FAIL: attached native lifecycle evidence incomplete');

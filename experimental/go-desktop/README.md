@@ -60,8 +60,9 @@ node attach-smoke.mjs <absolute-normal.exe> <absolute-attach.exe>
 The Node harness creates a normal independent serve process and private-pipe
 synthetic sessions. The separately compiled attach probe uses the **same**
 desktop page, bridge, tray setup, close hook and per-endpoint single-instance ID.
-It waits for a real state POST and native navigation completion, explicitly
-shows the window, closes/hides it, then relaunches a second attached process.
+It waits for a real state POST and native navigation completion; the shared
+normal hook shows the window, then the probe closes/hides it and relaunches a
+second attached process.
 The normal second-instance callback ignores all arguments/data and only shows
 the existing window. The second test process exits 23; first native visibility
 must return. Normal CLI still has no probe command or test route.
@@ -71,8 +72,9 @@ another kills that exact disposable GUI child without PostShutdown. After each,
 the same independent daemon must still accept start/status/stop commands.
 This tests shared normal GUI construction with test-only observations/profile,
 not the entire unmodified normal executable, human tray clicks, or OS crashes.
-The probe explicitly calls Show before Close: automatic initial visibility is
-NOT proven. Fresh-launch visibility is a separate open acceptance gate.
+The auto probe mode verifies first-window visibility from the shared
+navigation-completed hook before any test-only Close/Show action. This is not a
+human launch or shell/tray presentation test.
 
 ## Boundaries and remaining gates
 Control accepts only authenticated non-browser requests; Origin/Sec-Fetch-Site
@@ -84,7 +86,7 @@ closed. HTTP deadlines, 32 simultaneous daemon connections,
 bounded input, redirects denied, environment proxy disabled, protocol handshake.
 This does not defend against hostile same-user processes.
 
-Native UI clicking, startup, hide/tray/quit/crash lifecycle, Chinese/high-DPI,
+Native UI clicking, shell/tray presentation, quit/crash lifecycle, Chinese/high-DPI,
 Linux/macOS delivery, signatures, notarization, login/reboot are unverified gates.
 Per-endpoint framework single-instance also needs native acceptance.
 Next PR: secure user-scoped session discovery and native acceptance, then

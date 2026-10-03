@@ -98,7 +98,8 @@ The normal second-instance callback now ignores all launch data/args and only
 shows the existing window through an atomically published window pointer.
 
 Framework path evidence: state POST crosses the same strict bridge; navigation
-completes; explicit Show establishes native visibility; shared Close hides;
+completes; the shared normal navigation hook establishes native visibility;
+shared Close hides;
 same-endpoint second process exits 23 without constructing a second window;
 first callback reopens the existing window. Graceful mode observes Quit and
 PostShutdown; hold mode requires an exact GUI child kill and no shutdown hook.
@@ -107,11 +108,13 @@ CLI operations pass. Normal-source exclusion and absent-test-route/CLI checks
 keep test observations out of the default product path. Hosted CI compiles
 both Windows probes but does not claim interactive acceptance.
 
-Initial visibility observations failed in early runs; the probe now explicitly
-shows after navigation completion. These failures were NOT a Close deadlock,
-and success does NOT prove automatic startup visibility. That gate remains
-open. No debug stack-writing code or path is kept in the source; a local
-synthetic-only diagnostic stack is retained outside Git for audit, not uploaded.
+Initial visibility observations failed in early runs because beta24 left the
+new window hidden after navigation. The shared normal construction now calls
+Show only from WebViewNavigationCompleted; the auto attach mode verifies that
+path before any test-only Close/Show action. This is not a human launch or
+shell/tray presentation test. No debug stack-writing code or path is kept in
+the source; a local synthetic-only diagnostic stack remains outside Git, not
+uploaded.
 
 Prism design review (88.796s) and static source review (102.75s) are advice, not
 expert execution. Fixed timeout-boundary evidence by joining the watchdog and
@@ -121,7 +124,21 @@ enforces a 3-second HTTP total timeout and strict Protocol/Experimental/
 ProxyImplemented validation before desktop construction, with negative tests.
 There is no named-pipe discovery/ACL or real credential handoff in this spike.
 
-Open gates: automatic first-window visibility, human tray/titlebar/menu clicks,
+Open gates: human tray/titlebar/menu clicks,
 actual unmodified normal-binary UI quit/crash, external navigation/debug-listener,
 Chinese/high-DPI and macOS/Linux native UI. Synthetic probe forced kill is not
 an OS-crash test. This still does not implement a Go API proxy or secure broker.
+
+## First-window visibility follow-up (2026-10-04)
+
+Baseline auto mode (no test Show) reproduced hidden first-window failure. A
+Windows navigation-completed hook in normal desktop construction fixes it.
+Prism static review (60.687s) found a late-event/close-ordering risk: replaced
+bare CAS with a serialized one-shot visibility gate; both first Show and Close
+run on the UI queue. Close-before-first cancels automatic Show, later reloads
+cannot reopen a hidden window, and explicit second-instance/tray Show bypasses
+the startup gate. Unit tests cover both orderings and 100 concurrent races.
+Auto probe waits for real state/navigation/visibility and quits without calling
+Show; attached lifecycle probes likewise no longer force initial visibility.
+Windows local repeat-5 evidence covers auto, graceful, forced-termination and
+second-instance paths. Mac/Linux startup behavior is unchanged/unverified.

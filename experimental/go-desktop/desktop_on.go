@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"github.com/momo-api/momoapi-proxy/experimental/go-desktop/internal/control"
 	"github.com/momo-api/momoapi-proxy/experimental/go-desktop/internal/desktopbridge"
+	"github.com/momo-api/momoapi-proxy/experimental/go-desktop/internal/visibility"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"image"
@@ -50,7 +51,16 @@ func desktopConfigured(s control.Session, configure func(*application.Options), 
 	app := application.New(options)
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "MOMO experimental — NOT a proxy", Width: 760, Height: 540, URL: "/"})
 	activeWindow.Store(window)
-	hideOnClose(window, nil)
+	var initial visibility.Gate
+	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		e.Cancel()
+		application.InvokeSync(func() { initial.Close(func() { window.Hide() }) })
+	})
+	if runtime.GOOS == "windows" {
+		window.OnWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
+			application.InvokeSync(func() { initial.First(func() { window.Show() }) })
+		})
+	}
 	menu := app.NewMenu()
 	menu.Add("打开实验窗口").OnClick(func(*application.Context) { window.Show() })
 	menu.Add("退出界面（不停止服务）").OnClick(func(*application.Context) { app.Quit() })

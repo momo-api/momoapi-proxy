@@ -22,7 +22,7 @@ import (
 // Separate test executable. Session arrives only by private stdin; the Node
 // harness owns a DIFFERENT normal serve process. Never ship this binary.
 func main() {
-	if len(os.Args) != 2 || (os.Args[1] != "graceful" && os.Args[1] != "hold") {
+	if len(os.Args) != 2 || (os.Args[1] != "auto" && os.Args[1] != "graceful" && os.Args[1] != "hold") {
 		fmt.Fprintln(os.Stderr, "invalid attach probe mode")
 		os.Exit(1)
 	}
@@ -37,7 +37,7 @@ func main() {
 	}
 	fmt.Println("PROFILE: " + profile) // Retained synthetic profile, no deletion.
 	loaded, second, navigated := make(chan struct{}, 1), make(chan struct{}, 1), make(chan struct{}, 1)
-	var hidden, reopened, shutdown, timedOut atomic.Bool
+	var autoVisible, hidden, reopened, shutdown, timedOut atomic.Bool
 	done := make(chan struct{})
 	watchStopped := make(chan struct{})
 	var deadline time.Time
@@ -108,7 +108,16 @@ func main() {
 			case <-done:
 				return
 			}
-			window.Show()
+			if os.Args[1] == "auto" {
+				if !waitVisible(window, true) {
+					fmt.Println("ATTACH: auto-visible-failed")
+					return
+				}
+				autoVisible.Store(true)
+				fmt.Println("ATTACH: auto-visible")
+				app.Quit()
+				return
+			}
 			if !waitVisible(window, true) {
 				fmt.Println("ATTACH: visible-failed")
 				return
@@ -152,7 +161,11 @@ func main() {
 		case <-time.After(3 * time.Second):
 		}
 	}
-	passed := err == nil && joined && time.Now().Before(deadline) && hidden.Load() && reopened.Load() && shutdown.Load() && !timedOut.Load()
+	passedLifecycle := hidden.Load() && reopened.Load()
+	if os.Args[1] == "auto" {
+		passedLifecycle = autoVisible.Load()
+	}
+	passed := err == nil && joined && time.Now().Before(deadline) && passedLifecycle && shutdown.Load() && !timedOut.Load()
 	if !passed {
 		fmt.Fprintln(os.Stderr, "attach evidence incomplete")
 		os.Exit(1)
