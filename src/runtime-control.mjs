@@ -23,12 +23,14 @@ export async function probeManagedRuntime(settings = readSettings(), { fetchImpl
   return { running: true };
 }
 
-export function portIsClosed(port) {
+export function portIsClosed(port, { connectImpl = connect } = {}) {
   return new Promise((resolve, reject) => {
-    const socket = connect({ host: "127.0.0.1", port });
+    const socket = connectImpl({ host: "127.0.0.1", port });
     const finish = (closed, error) => { socket.destroy(); error ? reject(failure("runtime_port_ambiguous")) : resolve(closed); };
     socket.once("connect", () => finish(false));
-    socket.once("error", (error) => finish(error.code === "ECONNREFUSED", error.code !== "ECONNREFUSED"));
+    // ECONNRESET can occur while the authenticated daemon drains. It does
+    // not prove closure: keep waiting within the bounded shutdown deadline.
+    socket.once("error", (error) => finish(error.code === "ECONNREFUSED", !["ECONNREFUSED", "ECONNRESET"].includes(error.code)));
     socket.setTimeout(1000, () => finish(false, true));
   });
 }

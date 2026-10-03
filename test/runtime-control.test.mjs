@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { probeManagedRuntime, stopManagedRuntime } from "../src/runtime-control.mjs";
+import { probeManagedRuntime, stopManagedRuntime, portIsClosed } from "../src/runtime-control.mjs";
+import { EventEmitter } from "node:events";
 const settings = { port: 19876, localToken: "local-test-only", apiKey: "upstream-test-never-send" };
+test("connection reset during graceful drain is pending, never proof of closure", async () => {
+  const connectImpl = () => {
+    const socket = new EventEmitter(); socket.destroy = () => {}; socket.setTimeout = () => {};
+    queueMicrotask(() => socket.emit("error", { code: "ECONNRESET" }));
+    return socket;
+  };
+  assert.equal(await portIsClosed(19876, { connectImpl }), false);
+});
 test("stop only sends authenticated graceful shutdown and waits for closed port", async () => {
   const calls = [];
   let closed = 0;
