@@ -25,6 +25,8 @@ func run() error {
 		return errors.New("unsupported command")
 	}
 	s, err := control.ReadSession(os.Stdin)
+	// Close the consumed private handle before creating WebView children.
+	_ = os.Stdin.Close()
 	if err != nil {
 		return err
 	}

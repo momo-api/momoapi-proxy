@@ -97,3 +97,60 @@ func TestCancellationStopsOwnedListener(t *testing.T) {
 		t.Fatal("shutdown timeout")
 	}
 }
+
+func TestSessionCannotHideOversizedTrailingInput(t *testing.T) {
+	input := `{"Token":"` + demoToken + `"}` + strings.Repeat(" ", 5000)
+	if _, err := ReadSession(strings.NewReader(input)); err == nil {
+		t.Fatal("accepted oversized whitespace")
+	}
+	for _, endpoint := range []string{"http://127.0.0.1:0", "http://127.0.0.1:65536", "http://127.0.0.1:80?"} {
+		b, _ := json.Marshal(Session{endpoint, demoToken})
+		if _, err := ReadSession(strings.NewReader(string(b))); err == nil {
+			t.Fatal("accepted invalid endpoint")
+		}
+	}
+}
+
+func TestResponseContractStrictness(t *testing.T) {
+	valid := `{"Protocol":1,"Experimental":true,"ProxyImplemented":false,"DemoRunning":false}`
+	for _, tc := range []struct{ body, kind string }{
+		{valid + " {}", "application/json"},
+		{valid + strings.Repeat(" ", 5000), "application/json"},
+		{valid, "text/plain"},
+		{`{"Protocol":1,"Experimental":true}`, "application/json"},
+		{valid[:len(valid)-1] + `,"Protocol":1}`, "application/json"},
+		{valid[:len(valid)-1] + `,"Extra":true}`, "application/json"},
+		{`{"Protocol":99,"Experimental":true}`, "application/json"},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", tc.kind)
+			_, _ = io.WriteString(w, tc.body)
+		}))
+		_, err := Call(context.Background(), Session{server.URL, demoToken}, "state")
+		server.Close()
+		if err == nil {
+			t.Fatal("accepted invalid response contract")
+		}
+	}
+}
+
+func TestBrowserHeadersAndEmptyQueryDenied(t *testing.T) {
+	for _, tc := range []struct{ path, header, value, body string }{
+		{"/control/v1/state", "Origin", "null", ""},
+		{"/control/v1/state", "Sec-Fetch-Site", "same-origin", ""},
+		{"/control/v1/state", "Sec-Fetch-Mode", "navigate", ""},
+		{"/control/v1/state?", "", "", ""},
+		{"/control/v1/state", "", "", "x"},
+	} {
+		req := httptest.NewRequest("GET", tc.path, strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer "+demoToken)
+		if tc.header != "" {
+			req.Header.Set(tc.header, tc.value)
+		}
+		w := httptest.NewRecorder()
+		Handler(demoToken).ServeHTTP(w, req)
+		if w.Code < 400 {
+			t.Fatal("accepted browser/query/body input")
+		}
+	}
+}

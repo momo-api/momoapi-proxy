@@ -2,6 +2,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -32,7 +33,11 @@ type State struct {
 // Session secrets must arrive by private pipe, never argv, env or files.
 func ReadSession(r io.Reader) (Session, error) {
 	var s Session
-	d := json.NewDecoder(io.LimitReader(r, 4097))
+	data, err := io.ReadAll(io.LimitReader(r, 4097))
+	if err != nil || len(data) > 4096 {
+		return Session{}, errors.New("invalid session input")
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if d.Decode(&s) != nil {
 		return Session{}, errors.New("invalid session input")
@@ -61,7 +66,13 @@ func Handler(token string) http.Handler {
 	var running atomic.Bool
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" {
+		browser := r.Header.Get("Origin") != ""
+		for name := range r.Header {
+			if strings.HasPrefix(strings.ToLower(name), "sec-fetch-") {
+				browser = true
+			}
+		}
+		if browser {
 			http.Error(w, "browser control denied", 403)
 			return
 		}
@@ -69,7 +80,7 @@ func Handler(token string) http.Handler {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
-		if r.URL.RawQuery != "" {
+		if r.URL.RawQuery != "" || r.URL.ForceQuery || r.URL.RawPath != "" {
 			http.Error(w, "query denied", 400)
 			return
 		}
@@ -125,7 +136,7 @@ func Serve(ctx context.Context, token string, ready func(string)) error {
 		_ = server.Shutdown(shutdown)
 	}()
 	ready("http://" + l.Addr().String()) // endpoint only; never token
-	err = server.Serve(l)
+	err = server.Serve(&cappedListener{Listener: l, slots: make(chan struct{}, 32)})
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
@@ -166,8 +177,56 @@ func Call(ctx context.Context, s Session, action string) (State, error) {
 		return State{}, errors.New("incompatible demo service")
 	}
 	var state State
-	if json.Unmarshal(data, &state) != nil || state.Protocol != Protocol || !state.Experimental || state.ProxyImplemented {
+	if decodeState(data, &state) != nil || state.Protocol != Protocol || !state.Experimental || state.ProxyImplemented {
 		return State{}, errors.New("incompatible demo service")
 	}
 	return state, nil
+}
+
+func decodeState(data []byte, state *State) error {
+	d := json.NewDecoder(bytes.NewReader(data))
+	start, err := d.Token()
+	if err != nil || start != json.Delim('{') {
+		return errors.New("invalid state")
+	}
+	seen := map[string]bool{}
+	for d.More() {
+		key, err := d.Token()
+		if err != nil {
+			return err
+		}
+		name, ok := key.(string)
+		if !ok || seen[name] {
+			return errors.New("duplicate state field")
+		}
+		seen[name] = true
+		var dst any
+		switch name {
+		case "Protocol":
+			dst = &state.Protocol
+		case "Experimental":
+			dst = &state.Experimental
+		case "ProxyImplemented":
+			dst = &state.ProxyImplemented
+		case "DemoRunning":
+			dst = &state.DemoRunning
+		default:
+			return errors.New("unknown state field")
+		}
+		var raw json.RawMessage
+		if d.Decode(&raw) != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, dst) != nil {
+			return errors.New("invalid state field")
+		}
+	}
+	if len(seen) != 4 {
+		return errors.New("missing state field")
+	}
+	if _, err = d.Token(); err != nil {
+		return err
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		return errors.New("trailing state")
+	}
+	return nil
 }

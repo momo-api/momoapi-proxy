@@ -1,0 +1,50 @@
+name: experimental-go-desktop
+
+on:
+  push:
+    branches: ['**']
+    paths: ['experimental/go-desktop/**', '.github/workflows/go-desktop-spike.yml']
+  pull_request:
+    paths: ['experimental/go-desktop/**', '.github/workflows/go-desktop-spike.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: experimental/go-desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: experimental/go-desktop/go.mod
+          cache-dependency-path: experimental/go-desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Linux native WebView headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Vet and unit tests (no GUI startup)
+        run: |
+          go vet -tags nogui ./...
+          go test -tags nogui -count=5 ./...
+      - name: Race tests
+        if: runner.os != 'Windows'
+        run: go test -race -count=5 ./internal/...
+      - name: Native desktop compilation (not signed release)
+        run: |
+          tags=""
+          if [ "$RUNNER_OS" = Linux ]; then tags="gtk3"; fi
+          go build -tags "$tags" -trimpath -ldflags "-s -w" -o "$RUNNER_TEMP/momo-spike.exe" .
+      - name: Real CLI process smoke (no desktop window)
+        run: node smoke.mjs "$RUNNER_TEMP/momo-spike.exe"

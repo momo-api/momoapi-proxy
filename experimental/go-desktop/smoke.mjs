@@ -8,7 +8,7 @@ let stderr='',output='';daemon.stderr.on('data',b=>stderr+=b);daemon.stdout.on('
 daemon.stdin.end(JSON.stringify({Token:token}));
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function command(action,session){
- const child=spawn(binary,[action],{windowsHide:true,stdio:['pipe','pipe','pipe']});
+ const child=spawn(binary,[action],{windowsHide:true,stdio:['pipe','pipe','pipe'],timeout:10000});
  let out='',err='';child.stdout.on('data',b=>out+=b);child.stderr.on('data',b=>err+=b);child.stdin.end(JSON.stringify(session));
  const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)});
  assert(!out.includes(token)&&!err.includes(token));return {code,out,err};
@@ -21,6 +21,10 @@ try{
   const r=await command(action,session);assert.equal(r.code,0);const state=JSON.parse(r.out);assert.equal(state.DemoRunning,running);assert.equal(state.ProxyImplemented,false);
  }
  const bad=await command('status',{...session,Token:'0'.repeat(64)});assert.notEqual(bad.code,0);
+ // Client processes exited without stopping the independent owner.
+ assert.equal(daemon.exitCode,null);
+ const afterClients=await command('status',session);assert.equal(afterClients.code,0);
+ const unavailable=await command('status',{Endpoint:'http://127.0.0.1:1',Token:token});assert.notEqual(unavailable.code,0);
  const origin=await fetch(ready.Endpoint+'/control/v1/state',{headers:{Authorization:'Bearer '+token,Origin:'https://evil.example'}});assert.equal(origin.status,403);
  assert(!output.includes(token)&&!stderr.includes(token));
  console.log('PASS: real CLI readiness, status, idempotent demo controls, auth, Origin denial, no secret output. UI and proxy NOT tested.');

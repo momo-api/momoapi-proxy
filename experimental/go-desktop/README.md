@@ -33,7 +33,10 @@ No published installer or signatures are created by this spike.
 ## Boundaries and remaining gates
 Control accepts only authenticated non-browser requests; Origin/Sec-Fetch-Site
 denied. No CORS. Wails asset handler bridges only fixed local demo actions,
-not arbitrary paths/URLs/shell. Non-local asset Origins denied. HTTP deadlines,
+not arbitrary paths/URLs/shell. Each platform's exact asset Origin is required
+for every demo action (POST); only top-level navigation may omit Origin.
+Native WebView request headers still require acceptance; missing headers fail
+closed. HTTP deadlines, 32 simultaneous daemon connections,
 bounded input, redirects denied, environment proxy disabled, protocol handshake.
 This does not defend against hostile same-user processes.
 

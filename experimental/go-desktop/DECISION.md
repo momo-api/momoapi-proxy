@@ -35,3 +35,23 @@ then protocol adapter migration with frozen common fixtures and complete tool
 identity/budget/cancellation regressions. Only after parity: installation,
 signed updater and real platform service/keychain integration. Current 46-case
 black-box is not sufficient for full Node-to-Go replacement.
+
+## Follow-up hardening
+
+The same draft PR now includes explicit three-platform native build CI, CLI
+smoke and internal race tests on Linux/macOS. CI compile does not exercise
+native UI windows, tray or credentials; builds are not published installers.
+
+Extracted the asset bridge into a framework-independent tested package. Exact
+platform Origin is required for all demo POST calls; root navigation alone can
+omit Origin. This is a deliberate fail-closed gate until real WebView headers
+are observed. Unknown routes/methods, query, encoded paths, non-empty bodies
+and downstream errors are tested. Session size includes trailing whitespace;
+response tests assert Content-Type, full JSON and byte bound, not incidental
+failure at a different check. Consumed stdin is closed before WebView startup.
+Daemon connection ceiling is 32; excess connections close immediately, slots
+are released exactly once and reused. CLI smoke confirms attach-client exits
+do not stop the owner. Native UI exit/crash behavior remains unverified.
+
+Safe session discovery/broker is intentionally not added: no real secret may
+be connected before OS peer-authentication and native-origin/lifecycle gates.
