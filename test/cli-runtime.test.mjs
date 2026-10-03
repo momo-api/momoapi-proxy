@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { getCurrentVersion } from "../src/updater.mjs";
+import { stopSupervisorRuntime } from "../src/update-supervisor.mjs";
 
 const BIN = join(process.cwd(), "bin", "momoapi-proxy.mjs");
 const VERSION = getCurrentVersion();
@@ -159,6 +160,51 @@ test("offline status reports version but does not fabricate daemon logging count
   assert.equal(status.running, false);
   assert.deepEqual(status.logging, { available: false, reason: "daemon_offline" });
   assert.deepEqual(status.diagnostics, { available: false, reason: "daemon_offline" });
+});
+
+test("standalone update supervisor gracefully stops authenticated daemon without legacy CLI", async (t) => {
+  const fixture = await createFixture(t);
+  const run = spawnCli(["serve"], fixture.env);
+  t.after(() => { if (run.child.exitCode === null && run.child.signalCode === null) run.child.kill(); });
+  await waitForHealth(fixture.port);
+  assert.deepEqual(await stopSupervisorRuntime(fixture.env), { ok: true });
+  assert.equal((await waitForExit(run)).code, 0);
+});
+
+test("stop and restart refuse an unrelated listener and leave it alive", async (t) => {
+  const fixture = await createFixture(t);
+  let shutdowns = 0;
+  const unrelated = createServer((request, response) => {
+    if (request.url === "/internal/shutdown") shutdowns++;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ service: "unrelated", version: VERSION }));
+  });
+  await new Promise((resolve) => unrelated.listen(fixture.port, "127.0.0.1", resolve));
+  t.after(() => closeServer(unrelated));
+  for (const command of ["start", "stop", "restart"]) {
+    const run = spawnCli([command, "--no-desktop"], fixture.env);
+    assert.equal((await waitForExit(run)).code, 1);
+    assert.match(run.output().stderr, /runtime_untrusted/);
+    assert.equal((await fetch('http://127.0.0.1:' + fixture.port + '/healthz')).status, 200);
+  }
+  assert.equal(shutdowns, 0);
+});
+
+test("headless start restart stop completes real daemon lifecycle without a Key prompt", async (t) => {
+  const fixture = await createFixture(t);
+  t.after(async () => {
+    const stop = spawnCli(["stop", "--no-desktop"], fixture.env);
+    await waitForExit(stop).catch(() => {});
+  });
+  for (const command of ["start", "restart"]) {
+    const run = spawnCli([command, "--no-desktop"], fixture.env);
+    assert.equal((await waitForExit(run, 10000)).code, 0, run.output().stderr);
+    assert.doesNotMatch(run.output().stdout + run.output().stderr, /Enter a new/);
+    assert.equal((await waitForHealth(fixture.port)).version, VERSION);
+  }
+  const stop = spawnCli(["stop", "--no-desktop"], fixture.env);
+  assert.equal((await waitForExit(stop, 10000)).code, 0, stop.output().stderr);
+  await assert.rejects(fetch('http://127.0.0.1:' + fixture.port + '/healthz'));
 });
 
 test("SIGTERM flushes accepted request records before process exit", { skip: process.platform === "win32" ? "POSIX signal semantics required" : false }, async (t) => {

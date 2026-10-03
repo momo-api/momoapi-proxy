@@ -1,0 +1,15 @@
+FROM node:24-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends systemd dbus libpam-systemd \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1100 acceptance \
+    && mkdir -p /var/lib/systemd/linger \
+    && touch /var/lib/systemd/linger/acceptance \
+    && systemctl enable user@1100.service
+WORKDIR /app
+COPY package.json ./
+COPY src ./src
+COPY bin ./bin
+COPY scripts/test-linux-systemd.mjs ./scripts/test-linux-systemd.mjs
+ENV container=podman
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

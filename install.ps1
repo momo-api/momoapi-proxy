@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$ApiKey = "",
+  [switch]$ApiKeyEnv,
   [string]$Endpoint = "https://momoapi.us",
   [int]$Port = 18789,
   [switch]$NoAutostart,
@@ -52,20 +53,18 @@ if ($major -lt 22) {
 Write-Step "Found Node.js v$nodeVer"
 
 # 2. Resolve API Key
+if ($PSBoundParameters.ContainsKey('ApiKey')) { throw "Do not pass a Key in command arguments. Use hidden input or explicitly -ApiKeyEnv." }
 $installRoot = [System.IO.Path]::Combine($HOME, ".momoapi-proxy")
 $installDir = [System.IO.Path]::Combine($installRoot, "app")
 $savedSettingsPath = [System.IO.Path]::Combine($installRoot, "settings.json")
-if (-not $ApiKey) {
+if ($ApiKeyEnv -and -not $ApiKey) {
   $ApiKey = $env:MOMO_API_KEY
 }
-if (-not $ApiKey -and (Test-Path -LiteralPath $savedSettingsPath)) {
-  try {
-    $savedSettings = Get-Content -LiteralPath $savedSettingsPath -Raw | ConvertFrom-Json
-    if ($savedSettings.apiKey) { $ApiKey = [string]$savedSettings.apiKey }
-  } catch {}
-}
 if (-not $ApiKey) {
-  $ApiKey = Read-Host "Enter your MOMO API Key (e.g. sk-momo-...)"
+  $secureKey = Read-Host "Enter a new MOMO API Key (hidden; blank cancels)" -AsSecureString
+  $keyPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
+  try { $ApiKey = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPointer) }
+  finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($keyPointer); $secureKey.Dispose() }
 }
 if (-not $ApiKey) {
   Write-Err "MOMO API Key is required."
@@ -95,6 +94,7 @@ if (-not $downloaded) { throw "Unable to download a release package matching the
 tar -xzf $tgzPath -C $stagingDir --strip-components=1 --no-same-owner --no-same-permissions
 $package = Get-Content -Raw (Join-Path $stagingDir "package.json") | ConvertFrom-Json
 if ([string]$package.version -ne $version) { throw "Package version does not match the verified manifest." }
+if (-not (Select-String -LiteralPath (Join-Path $stagingDir "bin/momoapi-proxy.mjs") -SimpleMatch '--api-key-stdin' -Quiet)) { throw "Release lacks safe credential input; installation was not changed." }
 if (Test-Path -LiteralPath $installDir) {
   $previousPackage = Get-Content -LiteralPath (Join-Path $installDir "package.json") -Raw | ConvertFrom-Json
   $previousVersion = [string]$previousPackage.version
@@ -111,6 +111,7 @@ if (Test-Path -LiteralPath $installDir) {
     "--previous", $previousVersion,
     "--port", "$Port",
     "--parent-pid", "0"
+    "--local-activation"
   )
   if ($NoImagePlugin) { $supervisorArgs += "--no-image-plugin" }
   & node @supervisorArgs
@@ -179,11 +180,12 @@ Remove-Item -Path (Join-Path $binDir "momo.ps1") -Force -ErrorAction SilentlyCon
 
 # 5. Run Setup
 Write-Step "Configuring Codex provider & syncing models..."
-$setupArgs = @($bridgeBin, "install", "--api-key", $ApiKey, "--endpoint", $Endpoint, "--port", "$Port")
+$setupArgs = @($bridgeBin, "install", "--api-key-stdin", "--endpoint", $Endpoint, "--port", "$Port")
 if ($NoAutostart) { $setupArgs += "--no-autostart" }
 if ($NoImagePlugin) { $setupArgs += "--no-image-plugin" }
 
-& node @setupArgs
+$ApiKey | & node @setupArgs
+$ApiKey = $null
 if ($LASTEXITCODE -ne 0) {
   Write-Err "Setup failed with exit code $LASTEXITCODE"
   exit $LASTEXITCODE

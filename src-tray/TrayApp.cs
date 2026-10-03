@@ -149,6 +149,63 @@ namespace MomoApi.Tray
         }
     }
 
+    public sealed class ApiKeyEditorDialog : Form
+    {
+        private readonly TextBox input;
+        private readonly Button save;
+        private readonly Button cancel;
+        private readonly Label message;
+        private bool saving;
+
+        public ApiKeyEditorDialog(Func<string, Task<bool>> saveKey)
+        {
+            Text = "修改 MOMO API Key"; ClientSize = new Size(460, 175);
+            StartPosition = FormStartPosition.CenterScreen; FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false; MinimizeBox = false;
+            message = new Label { Text = "输入新 Key，验证成功后保存；取消不改变现有配置。", Left = 16, Top = 18, Width = 425, Height = 40 };
+            input = new TextBox { Name = "keyInput", Left = 16, Top = 62, Width = 425, UseSystemPasswordChar = true, MaxLength = 4096 };
+            save = new Button { Name = "saveKey", Text = "验证并保存", Left = 235, Top = 115, Width = 105 };
+            cancel = new Button { Name = "cancelKey", Text = "取消", Left = 350, Top = 115, Width = 90, DialogResult = DialogResult.Cancel };
+            Controls.AddRange(new Control[] { message, input, save, cancel });
+            AcceptButton = save; CancelButton = cancel;
+            cancel.Click += (s, e) => { if (!saving) Close(); };
+            FormClosing += (s, e) => { if (saving) e.Cancel = true; };
+            save.Click += async (s, e) =>
+            {
+                if (saving || string.IsNullOrWhiteSpace(input.Text)) return;
+                string key = input.Text.Trim(); input.Clear();
+                saving = true; save.Enabled = false; cancel.Enabled = false; input.Enabled = false;
+                bool saved = false;
+                try { saved = await saveKey(key); }
+                catch { message.Text = "无法执行安全 Key 修改，请检查代理安装。"; }
+                finally
+                {
+                    key = null; saving = false;
+                    save.Enabled = true; cancel.Enabled = true; input.Enabled = true;
+                }
+                if (saved) { DialogResult = DialogResult.OK; Close(); }
+                else message.Text = "未能确认修改结果。请先运行 momoapi doctor，不要假定旧 Key 仍生效或立即重复保存。";
+            };
+        }
+    }
+
+    public static class TrayCli
+    {
+        public static string ResolveScript(string home, string customHome, string baseDirectory)
+        {
+            string[] candidates = !string.IsNullOrWhiteSpace(customHome)
+                ? new string[] { Path.Combine(customHome, "app", "bin", "momoapi-proxy.mjs"), Path.Combine(customHome, "bin", "momoapi-proxy.mjs") }
+                : new string[] { Path.Combine(home, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs"),
+                    Path.Combine(home, ".momoapi-proxy", "bin", "momoapi-proxy.mjs"),
+                    Path.Combine(home, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs"),
+                    Path.Combine(baseDirectory, "momoapi-proxy.mjs"),
+                    Path.Combine(baseDirectory, "..", "app", "bin", "momoapi-proxy.mjs"),
+                    Path.Combine(baseDirectory, "..", "bin", "momoapi-proxy.mjs") };
+            foreach (string path in candidates) if (File.Exists(path)) return Path.GetFullPath(path);
+            throw new FileNotFoundException("Cannot locate the MOMO CLI in the selected proxy home.");
+        }
+    }
+
     public class TrayApplicationContext : ApplicationContext
     {
         private readonly int port;
@@ -177,7 +234,8 @@ namespace MomoApi.Tray
         {
             this.port = port;
             this.userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            this.proxyHome = Path.Combine(userHome, ".momoapi-proxy");
+            string customHome = Environment.GetEnvironmentVariable("MOMO_PROXY_HOME");
+            this.proxyHome = string.IsNullOrWhiteSpace(customHome) ? Path.Combine(userHome, ".momoapi-proxy") : customHome;
             this.syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
 
             InitJobObject();
@@ -276,6 +334,8 @@ namespace MomoApi.Tray
 
             var settingsMenu = new ToolStripMenuItem("设置");
             menu.Items.Add(settingsMenu);
+            var changeKey = settingsMenu.DropDownItems.Add("修改 API Key...");
+            changeKey.Click += async (s, e) => await ChangeApiKeyAsync();
 
             autostartItem = new ToolStripMenuItem("托盘开机自动启动");
             autostartItem.CheckOnClick = true;
@@ -545,32 +605,54 @@ namespace MomoApi.Tray
             return "node";
         }
 
+        private Task ChangeApiKeyAsync()
+        {
+            if (isCliRunning) return Task.FromResult(0);
+            using (var dialog = new ApiKeyEditorDialog(async key =>
+            {
+                    isCliRunning = true;
+                    try
+                    {
+                        ProcessStartInfo psi = ResolveCliProcessInfo("key change --api-key-stdin");
+                        psi.UseShellExecute = false; psi.CreateNoWindow = true;
+                        psi.WindowStyle = ProcessWindowStyle.Hidden;
+                        psi.RedirectStandardInput = true; psi.RedirectStandardOutput = true; psi.RedirectStandardError = true;
+                        psi.StandardOutputEncoding = Encoding.UTF8; psi.StandardErrorEncoding = Encoding.UTF8;
+                        int code = -1;
+                        await Task.Run(() =>
+                        {
+                            using (Process p = Process.Start(psi))
+                            {
+                                if (p == null) return;
+                                var stdout = p.StandardOutput.ReadToEndAsync(); var stderr = p.StandardError.ReadToEndAsync();
+                                p.StandardInput.WriteLine(key); p.StandardInput.Close(); key = null;
+                                if (!p.WaitForExit(30000)) { try { p.Kill(); } catch { } }
+                                else code = p.ExitCode;
+                                Task.WaitAll(new Task[] { stdout, stderr }, 3000);
+                            }
+                        });
+                        return code == 0;
+                    }
+                    finally
+                    {
+                        key = null; isCliRunning = false;
+                    }
+            }))
+            {
+                if (dialog.ShowDialog() == DialogResult.OK)
+                    MessageBox.Show("API Key 已验证并保存。已打开的直连客户端可能需要重启。", "MOMO API Proxy");
+            }
+            return Task.FromResult(0);
+        }
+
         private ProcessStartInfo ResolveCliProcessInfo(string subCommand)
         {
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            string[] possibleMjs = new string[]
-            {
-                Path.Combine(home, ".momoapi-proxy", "app", "bin", "momoapi-proxy.mjs"),
-                Path.Combine(home, ".momoapi-proxy", "bin", "momoapi-proxy.mjs"),
-                Path.Combine(home, ".momo-codex-bridge", "app", "bin", "momoapi-proxy.mjs"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "momoapi-proxy.mjs"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "app", "bin", "momoapi-proxy.mjs"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "bin", "momoapi-proxy.mjs")
-            };
-
+            string mjs = TrayCli.ResolveScript(home, Environment.GetEnvironmentVariable("MOMO_PROXY_HOME"), AppDomain.CurrentDomain.BaseDirectory);
             string nodeExe = FindNodeExe();
-
-            foreach (string mjs in possibleMjs)
-            {
-                if (File.Exists(mjs))
-                {
-                    string args = EscapeWindowsArgument(mjs) + " " + EscapeSubCommand(subCommand);
-                    return new ProcessStartInfo(nodeExe, args);
-                }
-            }
-
-            return new ProcessStartInfo(nodeExe, EscapeSubCommand(subCommand));
+            string args = EscapeWindowsArgument(mjs) + " " + EscapeSubCommand(subCommand);
+            return new ProcessStartInfo(nodeExe, args);
         }
 
         private static string EscapeSubCommand(string subCommand)
@@ -610,9 +692,9 @@ namespace MomoApi.Tray
             try
             {
                 string customHome = Environment.GetEnvironmentVariable("MOMO_PROXY_HOME");
-                string[] possibleSettings = new string[]
-                {
-                    !string.IsNullOrEmpty(customHome) ? Path.Combine(customHome, "settings.json") : null,
+                string[] possibleSettings = !string.IsNullOrWhiteSpace(customHome)
+                    ? new string[] { Path.Combine(customHome, "settings.json") }
+                    : new string[] {
                     Path.Combine(proxyHome, "settings.json"),
                     Path.Combine(userHome, ".momo-codex-bridge", "settings.json")
                 };

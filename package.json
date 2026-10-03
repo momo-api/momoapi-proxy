@@ -2,6 +2,7 @@
   "name": "@momo-api/momoapi-proxy",
   "version": "0.14.21",
   "private": true,
+  "files": ["bin/", "src/", "src-macos/", "plugins/", ".agents/", "resources/macos/", "scripts/", "docs/", "install.sh", "install.ps1", "app.ico", "README.md", "CHANGELOG.md", "LICENSE"],
   "description": "Lightweight local Codex & Desktop Responses bridge for MOMO API",
   "type": "module",
   "bin": {

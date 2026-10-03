@@ -3,7 +3,23 @@ import test from "node:test";
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isManagedImageMcpProcess, isManagedTrayProcess, pruneFailedUpdateDirectories, restoreManagedTray, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
+import { isManagedImageMcpProcess, isManagedTrayProcess, pruneFailedUpdateDirectories, restoreManagedTray, startManagedTray, stopManagedImageMcpProcesses, stopManagedTrayProcesses, stopSupervisorRuntime, superviseUpdate, waitForExpectedHealth } from "../src/update-supervisor.mjs";
+
+test("copied supervisor never adopts legacy credentials outside an explicit home", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "momo-supervisor-home-boundary-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const legacy = join(root, ".momo-codex-bridge"); mkdirSync(legacy);
+  writeFileSync(join(legacy, "settings.json"), JSON.stringify({ localToken: "synthetic-unrelated", port: 19876 }));
+  for (const name of ["MOMO_PROXY_HOME", "MOMO_BRIDGE_HOME", "MOMO_SWITCH_HOME"]) {
+    const env = { USERPROFILE: root, HOME: root, [name]: join(root, "selected") };
+    assert.deepEqual(await stopSupervisorRuntime(env), { ok: false, errorCode: "runtime_settings_missing" });
+    const calls = [];
+    assert.equal(await waitForExpectedHealth({ port: 19876, expectedVersion: "0.14.22", env, timeoutMs: 50,
+      fetchImpl: async (url) => { calls.push(url); return Response.json({ ok: true, service: "momo-codex-bridge", version: "0.14.22" }); },
+    }), false);
+    assert.equal(calls.length, 1); // health only, no legacy token sent to metrics
+  }
+});
 
 function createVersion(root, version) {
   mkdirSync(join(root, "bin"), { recursive: true });
@@ -26,16 +42,45 @@ test("failed update directory retention is bounded to the newest three", (t) => 
   );
 });
 
-test("update readiness checks authenticated upstream reachability while rollback health stays local", async () => {
+test("unverified old runtime stop aborts before touching either application tree", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "momo-supervisor-stop-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const root = join(home, "app"), staging = join(home, ".momoapi-proxy-update-stage"), backup = root + ".update-backup";
+  createVersion(root, "0.14.21"); createVersion(staging, "0.14.22");
+  const result = await superviseUpdate({ rootDir: root, stagingDir: staging, backupDir: backup,
+    previousVersion: "0.14.21", targetVersion: "0.14.22", env: { MOMO_PROXY_HOME: home }, waitForParent: async () => true,
+    runCli: async () => ({ ok: false }), move: () => assert.fail("must not swap"), remove: () => assert.fail("must not remove"),
+  });
+  assert.equal(result.errorCode, "update_stop_unverified");
+  assert.equal(JSON.parse(readFileSync(join(root, "package.json"))).version, "0.14.21");
+});
+
+test("explicit install activation can check authenticated local health before fresh Key instead of expired old upstream", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "momo-local-activation-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const root = join(home, "app"), backup = root + ".update-backup";
+  createVersion(root, "0.14.22"); createVersion(backup, "0.14.21");
+  const result = await superviseUpdate({ rootDir: root, backupDir: backup, targetVersion: "0.14.22", previousVersion: "0.14.21",
+    env: { MOMO_PROXY_HOME: home }, localActivation: true, installImagePlugin: false, platform: "linux", waitForParent: async () => true,
+    runCli: async () => ({ ok: true }), healthCheck: async ({ requireUpstream }) => { assert.equal(requireUpstream, false); return true; },
+  });
+  assert.equal(result.activated, true);
+});
+
+test("update readiness checks authenticated upstream reachability while rollback health stays local", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "momo-health-auth-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  writeFileSync(join(home, "settings.json"), JSON.stringify({ localToken: "health-test-only" }));
+  const env = { MOMO_PROXY_HOME: home };
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(url);
-    return Response.json({ ok: true, version: "0.13.28" });
+    return Response.json({ ok: true, service: "momo-codex-bridge", version: "0.13.28" });
   };
-  assert.equal(await waitForExpectedHealth({ port: 18789, expectedVersion: "0.13.28", requireUpstream: true, timeoutMs: 50, fetchImpl }), true);
+  assert.equal(await waitForExpectedHealth({ port: 18789, expectedVersion: "0.13.28", requireUpstream: true, timeoutMs: 50, fetchImpl, env }), true);
   assert.match(calls[0], /\/readyz$/);
   calls.length = 0;
-  assert.equal(await waitForExpectedHealth({ port: 18789, expectedVersion: "0.13.28", timeoutMs: 50, fetchImpl }), true);
+  assert.equal(await waitForExpectedHealth({ port: 18789, expectedVersion: "0.13.28", timeoutMs: 50, fetchImpl, env }), true);
   assert.match(calls[0], /\/healthz$/);
 });
 

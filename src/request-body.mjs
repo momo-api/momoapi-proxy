@@ -24,10 +24,11 @@ export function requestReservationBytes(request, settings = {}) {
 
 // Event-based collection permits an early HTTP error before closing an unread
 // upload. IncomingMessage's async iterator destroys the socket on early exit.
-export async function bodyOf(request, settings = {}, { signal, timeoutMs = 120000 } = {}) {
+export async function bodyOf(request, settings = {}, { signal, timeoutMs = 120000, maxBytes: routeMaxBytes } = {}) {
   if (signal?.aborted || request.aborted) throw admissionError(499, "request_cancelled", "Client cancelled the upload.");
   const expected = declaredBodyBytes(request, settings);
-  const maxBytes = getMaxRequestBodyBytes(settings);
+  const maxBytes = Math.min(getMaxRequestBodyBytes(settings), routeMaxBytes || Infinity);
+  if (expected !== null && expected > maxBytes) throw admissionError(413, "payload_too_large", "Request body exceeds this route's limit.");
   const readStart = performance.now();
   const raw = await new Promise((resolve, reject) => {
     let target = expected === null ? null : Buffer.allocUnsafe(expected);
