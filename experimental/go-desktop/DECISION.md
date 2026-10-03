@@ -55,3 +55,34 @@ do not stop the owner. Native UI exit/crash behavior remains unverified.
 
 Safe session discovery/broker is intentionally not added: no real secret may
 be connected before OS peer-authentication and native-origin/lifecycle gates.
+
+## Windows native evidence (continuation)
+
+Separate opt-in nativecheck binary uses a new synthetic WebView2 temp profile,
+the same page/strict asset bridge and actual control client. Local Windows
+interactive-session probe passes: real JS POST Origin equals
+http://wails.localhost for state/start/state/stop/state, five HTTP 200 responses,
+validated demo state sequence, framework Close hook hides the window, Show
+restores visibility, UI Run exits, PostShutdown confirms the synthetic server
+is still reachable before owner cancellation and then waits for its exit.
+The final probe was repeated five times successfully; no real Key/profile read.
+Profiles are retained at their reported exact temp paths, not silently deleted.
+
+The first Prism native-plan reply claimed an inaccessible main.tex edit and is
+not review evidence. A subsequent readable static source review (68.953s)
+identified the Node exit/pipe-drain race and possible early-owner-exit false
+positive: fixed by waiting for close and verifying owner liveness before cancel.
+It also requested forbidding production+nativecheck. This suggestion is not
+applied: Wails production is its asset/devtools build mode, not this repository's
+release authorization. The deliberately separate opt-in probe uses production
+assets to exercise that mode; no Go release path or published artifact exists.
+Normal builds exclude the probe source (CI go-list gate), reject nativecheck as
+a command (real CLI smoke), and npm releases exclude the entire experiment.
+Do not introduce a future Go packaging path that accepts arbitrary build tags.
+
+Evidence is intentionally narrower than desktop acceptance: no tray/menu click,
+human close-button click, screenshot/Chinese/high-DPI inspection, external
+navigation/debug listener or second-instance acceptance. The probe owns its
+server in-process: stopping that owned server does NOT prove independent daemon
+survival after normal desktop quit/crash. Existing CLI detach test is separate.
+macOS/Linux native UI acceptance remains open despite successful compile CI.

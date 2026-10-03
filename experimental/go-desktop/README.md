@@ -30,6 +30,27 @@ Use -tags nogui for CLI-only build. Linux/macOS desktop require native
 WebView/toolchain dependencies; Windows compilation does not validate those.
 No published installer or signatures are created by this spike.
 
+## Separate Windows native acceptance probe
+
+In an interactive Windows session, build the explicitly excluded probe:
+
+go build -tags nativecheck,production -trimpath -o <outside-repo-probe.exe> .
+node native-smoke.mjs <absolute-probe.exe>
+
+The probe opens a real WebView window, checks exact POST Origin through the
+same bridge, JS state/start/state/stop/state, framework Close hook/Hide/Show,
+UI quit and shutdown of its **own** synthetic demo server. A 35-second outer
+watchdog rejects hangs or missing completion evidence. Normal builds exclude
+the probe main and callback; the normal CLI rejects the nativecheck command.
+CI compiles this separate Windows binary but does not launch its window.
+
+No installed profile, session, real Key or upstream is accessed. The probe
+creates and retains one classified synthetic WebView profile in the OS temp
+directory; its exact location is reported. No automatic historical cleanup.
+Framework API Close/Show is NOT a human titlebar/tray click, visual inspection,
+crash recovery or independent-server/UI shutdown-isolation acceptance.
+Only Windows is implemented; macOS/Linux native UI gates remain open.
+
 ## Boundaries and remaining gates
 Control accepts only authenticated non-browser requests; Origin/Sec-Fetch-Site
 denied. No CORS. Wails asset handler bridges only fixed local demo actions,

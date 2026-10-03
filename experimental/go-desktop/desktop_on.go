@@ -24,15 +24,12 @@ func desktop(s control.Session) error {
 	if _, err := control.Call(context.Background(), s, "state"); err != nil {
 		return err
 	}
-	origin := "wails://localhost"
-	if runtime.GOOS == "windows" {
-		origin = "http://wails.localhost"
-	}
+	origin := desktopOrigin()
 	handler := desktopbridge.Handler(page, origin, func(ctx context.Context, action string) (control.State, error) { return control.Call(ctx, s, action) })
 	id := sha256.Sum256([]byte(s.Endpoint))
 	app := application.New(application.Options{Name: "MOMO experimental", Description: "Isolated Go desktop spike", Assets: application.AssetOptions{Handler: handler}, Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true}, SingleInstance: &application.SingleInstanceOptions{UniqueID: "us.momoapi.experimental." + hex.EncodeToString(id[:12])}})
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "MOMO experimental — NOT a proxy", Width: 760, Height: 540, URL: "/"})
-	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) { e.Cancel(); window.Hide() })
+	hideOnClose(window, nil)
 	menu := app.NewMenu()
 	menu.Add("打开实验窗口").OnClick(func(*application.Context) { window.Show() })
 	menu.Add("退出界面（不停止服务）").OnClick(func(*application.Context) { app.Quit() })
@@ -54,4 +51,21 @@ func desktop(s control.Session) error {
 	tray.SetMenu(menu)
 	tray.OnClick(func() { window.Show() })
 	return app.Run()
+}
+
+func desktopOrigin() string {
+	if runtime.GOOS == "windows" {
+		return "http://wails.localhost"
+	}
+	return "wails://localhost"
+}
+
+func hideOnClose(window *application.WebviewWindow, observed func()) {
+	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		e.Cancel()
+		window.Hide()
+		if observed != nil {
+			observed()
+		}
+	})
 }

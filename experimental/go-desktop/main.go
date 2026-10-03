@@ -1,3 +1,5 @@
+//go:build !nativecheck
+
 package main
 
 import (
