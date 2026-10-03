@@ -42,7 +42,7 @@ import { claudeRequest } from "./claude-adapter.mjs";
 export { buildClaudeMessages } from "./claude-adapter.mjs";
 import { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-adapter.mjs";
 export { buildOpenAIChatMessages, normalizeQwenSystemMessages } from "./chat-adapter.mjs";
-import { customInput, emitRememberedCall } from "./tool-call-state.mjs";
+import { emitRememberedCall } from "./tool-call-state.mjs";
 import { resolveOpenCodeSession } from "./opencode-session.mjs";
 import { initSseResponse, streamSseLines, upstreamErrorDetails, upstreamErrorMessage, writeResponsesFailure } from "./responses-transport.mjs";
 import { expandCurrentImageVisionReferences, withImageVisionReferences } from "./image-vision.mjs";
@@ -584,11 +584,7 @@ async function forwardResponses(request, response, settings, payload, calls, fet
         }
         for (const call of dsmlCalls) {
           const mapped = restoreToolName(call.name, functions);
-          if (mapped.kind === "custom") {
-            emitter.writeCustomToolCall({ name: mapped.originalName, input: customInput(call.arguments) });
-          } else {
-            emitter.writeFunctionCall({ name: mapped.originalName, arguments: call.arguments || {} });
-          }
+          emitRememberedCall(emitter, calls, mapped, call.arguments || {});
         }
         emitter.complete();
         return;
