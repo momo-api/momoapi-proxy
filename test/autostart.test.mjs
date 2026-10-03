@@ -3,7 +3,7 @@ import test from "node:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { autostartTarget, installAutostart, isAutostartInstalled, migrateWindowsAutostart, uninstallAutostart, WINDOWS_SERVICE_STARTUP, WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_SERVICE_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP } from "../src/autostart.mjs";
+import { controlInstalledLinuxService, autostartTarget, installAutostart, isAutostartInstalled, migrateWindowsAutostart, uninstallAutostart, WINDOWS_SERVICE_STARTUP, WINDOWS_TRAY_STARTUP, LEGACY_WINDOWS_SERVICE_STARTUP, LEGACY_WINDOWS_TRAY_STARTUP } from "../src/autostart.mjs";
 import { buildWindowsTaskXml, windowsTaskName, buildWindowsServiceWrapperCmd, readRuntimePort, resolveWindowsServiceBinPath, writeHeartbeat, writeRuntimePort } from "../src/service.mjs";
 
 test("Windows custom homes have independent tasks and safe launcher paths", () => {
@@ -29,14 +29,31 @@ test("Linux autostart activates and uninstalls only the selected user unit", () 
     assert.equal(result.activated, true);
     assert.match(readFileSync(result.target, "utf8"), /MOMO_PROXY_HOME=.*proxy %% space/);
     assert.match(readFileSync(result.target, "utf8"), /Restart=on-failure/);
+    assert.equal(controlInstalledLinuxService("start", { osPlatform: "linux", env, spawnSyncImpl }), true);
+    assert.equal(controlInstalledLinuxService("stop", { osPlatform: "linux", env, spawnSyncImpl }), true);
     uninstallAutostart({ osPlatform: "linux", env, deactivate: true, spawnSyncImpl });
     assert.deepEqual(calls, [
       ["systemctl", ["--user", "daemon-reload"]],
       ["systemctl", ["--user", "enable", "--now", "momo-codex-bridge.service"]],
+      ["systemctl", ["--user", "start", "momo-codex-bridge.service"]],
+      ["systemctl", ["--user", "stop", "momo-codex-bridge.service"]],
       ["systemctl", ["--user", "disable", "--now", "momo-codex-bridge.service"]],
       ["systemctl", ["--user", "daemon-reload"]],
     ]);
   } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Linux CLI refuses a user unit belonging to another configuration home", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "momo-systemd-ownership-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const oldHome = process.env.HOME; process.env.HOME = root;
+  try {
+    const env = { HOME: root, MOMO_PROXY_HOME: join(root, "one") };
+    installAutostart({}, { osPlatform: "linux", env, activate: false });
+    assert.throws(() => controlInstalledLinuxService("start", { osPlatform: "linux", env: { ...env, MOMO_PROXY_HOME: join(root, "two") },
+      spawnSyncImpl() { assert.fail("must not operate another home's unit"); },
+    }), /does not match/);
+  } finally { if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome; }
 });
 
 test("Linux activation failure preserves the previous unit file", () => {

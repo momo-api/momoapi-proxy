@@ -38,6 +38,16 @@ try {
   control(["stop", "momo-codex-bridge.service"]);
   await assert.rejects(fetch('http://127.0.0.1:' + port + '/healthz', { signal: AbortSignal.timeout(1000) }));
   control(["start", "momo-codex-bridge.service"]); await ready();
+  const cli = args => {
+    const result = spawnSync(process.execPath, ["bin/momoapi-proxy.mjs", ...args, "--no-desktop"], { env, encoding: "utf8", timeout: 20000 });
+    assert.equal(result.status, 0, "managed Linux CLI lifecycle failed");
+  };
+  cli(["restart"]); await ready(); control(["is-active", "momo-codex-bridge.service"]);
+  cli(["stop"]);
+  const stopped = spawnSync("systemctl", ["--user", "is-active", "momo-codex-bridge.service"], { encoding: "utf8", timeout: 15000 });
+  assert.notEqual(stopped.status, 0, "CLI stop must stop systemd unit");
+  cli(["start"]); await ready(); control(["is-active", "momo-codex-bridge.service"]);
+  console.log("Linux CLI start/stop/restart stay systemd-managed; no detached orphan accepted");
   console.log("Linux systemd user: enable, authenticated readiness, restart, stop and start passed");
 } finally { uninstallAutostart({ osPlatform: "linux", env }); }
 const check = spawnSync("systemctl", ["--user", "is-active", "momo-codex-bridge.service"], { encoding: "utf8", timeout: 15000 });

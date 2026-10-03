@@ -8,7 +8,7 @@ import { rotateApiKey, validateApiKey, credentialError } from "../src/credential
 import { upgradeMacInstallRuntime } from "../src/install-runtime.mjs";
 import { probeManagedRuntime, stopManagedRuntime } from "../src/runtime-control.mjs";
 import { installMacDesktop, openMacDesktop } from "../src/macos-desktop.mjs";
-import { installAutostart, uninstallAutostart } from "../src/autostart.mjs";
+import { controlInstalledLinuxService, installAutostart, uninstallAutostart } from "../src/autostart.mjs";
 import { updateSettings } from "../src/config.mjs";
 import { controlMacService } from "../src/macos-desktop.mjs";
 import { readSettings, resolveSettings, resolveDaemonSettings, appHome, daemonEnvironment } from "../src/config.mjs";
@@ -71,6 +71,11 @@ async function startDaemon(binFile, scriptDir, port) {
     if (process.platform === "win32" && !hasFlag("--no-desktop")) {
       installWindowsDesktop({ port });
     }
+    return true;
+  }
+
+  if (controlInstalledLinuxService("start")) {
+    if (!await waitForHealth(port, 4000)) throw new Error("Managed Linux user service did not become authenticated-ready. Check systemctl --user status momo-codex-bridge.service.");
     return true;
   }
 
@@ -166,6 +171,7 @@ async function main() {
   if (process.platform !== "darwin" && ["stop", "down", "restart"].includes(command)) {
     const settings = readSettings();
     await stopManagedRuntime(settings);
+    controlInstalledLinuxService("stop");
     if (command === "restart") {
       const binFile = fileURLToPath(import.meta.url);
       await startDaemon(binFile, dirname(binFile), Number(settings.port || 18789));

@@ -37,6 +37,23 @@ function systemdValue(value) {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%");
 }
 
+export function controlInstalledLinuxService(action, {
+  env = process.env, osPlatform = platform(), nodePath = process.execPath, spawnSyncImpl = spawnSync,
+} = {}) {
+  if (osPlatform !== "linux" || !["start", "stop"].includes(action)) return false;
+  if ((env.HOME || homedir()) !== (process.env.HOME || homedir())) return false;
+  const target = autostartTarget("linux", env);
+  if (!existsSync(target)) return false;
+  const unit = readFileSync(target, "utf8");
+  // Never operate another installation's user unit or a caller-customized unit.
+  const homeLine = 'Environment="MOMO_PROXY_HOME=' + systemdValue(appHome(env)) + '"';
+  const execLine = 'ExecStart="' + systemdValue(nodePath) + '" "' + systemdValue(BIN_PATH) + '" serve';
+  const lines = unit.split(/\r?\n/);
+  if (!lines.includes(homeLine) || !lines.includes(execLine)) throw new Error("Linux user service does not match this installation; no service action was taken.");
+  systemctlUser([action, "momo-codex-bridge.service"], spawnSyncImpl);
+  return true;
+}
+
 function activateMacAutostart(target, { spawnSyncImpl, userId }) {
   if (!Number.isInteger(userId) || userId < 0) throw new Error("Could not determine the macOS user id for launchd.");
   const domain = `gui/${userId}`;

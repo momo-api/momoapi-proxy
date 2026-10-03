@@ -122,6 +122,14 @@ No production deployment, version bump or release tag is part of this draft.
   systemd user manager as UID 1100. Enable, authenticated daemon readiness,
   restart, stop, start, disable, removal and reload passed. No host mounts,
   published ports or privileged flag were used (512 MiB, two CPUs, 256 PIDs).
+- Follow-up managed CLI acceptance: after authenticated shutdown the CLI stops
+  the matching systemd unit, and start/restart invoke that unit instead of
+  creating a detached orphan. Unit ownership checks require exact selected
+  configuration home and Node/CLI command; mismatched/custom units fail closed.
+  Real CLI restart/stop/start and systemd active/inactive checks passed in the
+  same isolated non-privileged container. Older/custom units without the
+  ownership markers require explicit operator review/reinstallation, not
+  guessing ownership or killing their process.
 - Not established: physical tray clicking, Windows/macOS login/reboot, or
   Linux physical login/reboot. Task registration still requires green CI and
   standard-user acceptance. Mac signing/notarization/device gates are unchanged.
