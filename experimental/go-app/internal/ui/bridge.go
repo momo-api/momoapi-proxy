@@ -76,8 +76,8 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			return
 		}
 		// OS stores may wait for unlock. Reject overlapping mutations instead of
-		// piling up handlers; status/Stop stay available while a prompt is open.
-		if r.URL.Path != "/app/state" && r.URL.Path != "/app/stop" {
+		// piling up handlers; status/Stop/Quit stay available while a prompt is open.
+		if r.URL.Path != "/app/state" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/quit" {
 			if !actionMu.TryLock() {
 				http.Error(w, "another native action is pending", 409)
 				return

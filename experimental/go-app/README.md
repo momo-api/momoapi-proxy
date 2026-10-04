@@ -38,8 +38,11 @@ record; current memory config/running proxy are unaffected. Save failure leaves
 the submitted memory config applied and displays a warning, never claims saved.
 System stores may prompt/unlock; Linux requires a running Secret Service.
 While a store action is pending, status and Stop remain available; overlapping
-mutations return 409 rather than queue. OS-store prompts are not cancellable by
-the app. Native tray Quit still owns shutdown.
+mutations return 409 rather than queue. Status/Stop/window Quit bypass the mutation
+lock; Quit dispatch is not rejected just because Save/Load/Forget is pending.
+OS-store prompts themselves are not cancellable by the app, and forced OS unlock
+dialog behavior is not proven by the injected blocking-store regression.
+Native tray Quit still owns shutdown.
 Saved JSON limited to 2400 bytes and endpoint 256 bytes for portable backend
 limits; larger valid profiles can still be used without Remember. Not sync across
 devices, secure-memory erasure, protection against malicious same-user apps or
@@ -75,6 +78,22 @@ and restart successfully; a separate test verifies 20 requests on one reused
 connection. No production workload/long-soak claim.
 
 ## Verification
+
+The page polls state every 1.5s while visible and refreshes on window focus, so
+native/tray Stop is reflected without a manual refresh. Single-flight state polls
+have a 5s abort timeout and response ordering prevents older polls overwriting
+newer action state. Controls follow running/active/pending state; Stop/Quit remain
+available while store operations wait, and duplicate UI mutations are ignored.
+Action warnings live in a separate notice area and polling does not erase them.
+The upstream input is cleared immediately on explicit Apply, and its temporary
+config reference is cleared in finally (not secure-memory erasure).
+node internal/ui/page_test.mjs exercises the shipped script with a simulated
+DOM/fetch, including locked-store controls, persistent save-failure notice,
+polling/focus, key clearing, stale responses and timeout. Native appcheck now
+invokes the shipped DOM button handlers for Apply/Load/Start/Stop, asserts disabled
+controls/key clearing and automatically observes a native Stop then restarts.
+This is real WebView scripted DOM interaction in a tagged probe, NOT physical
+clicks, actual tray click, a distributed normal-binary GUI or visual acceptance.
 
 go vet -tags nogui ./...
 go test -tags nogui -count=5 -timeout 60s ./...

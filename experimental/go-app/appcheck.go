@@ -117,7 +117,7 @@ func check() error {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView + local TCP + TLS mock Responses/Chat/models + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/models + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
@@ -126,7 +126,6 @@ func check() error {
 			LoadProfile:       func() (appcore.Config, error) { loadedProfiles.Add(1); return savedProfile, nil },
 		})
 		close(appReady)
-		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only',Remember:true}],['configure',{Endpoint:'https://other.example',APIKey:'synthetic-other'}],['load',null],['start',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-chat-passthrough')throw Error();if(name==='start'&&!s.Running)throw Error()}for(const name of ['check-proxy','check-stall','app/stop','app/state','check-done']){const r=await fetch('/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});if(!r.ok)throw Error()}}check().catch(()=>{})`
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
 				recorder := httptest.NewRecorder()
@@ -135,12 +134,12 @@ func check() error {
 					w.WriteHeader(recorder.Code)
 					return
 				}
-				page := strings.Replace(recorder.Body.String(), "action('state')</script>", script+"</script>", 1)
+				page := strings.Replace(recorder.Body.String(), "</script>", pageProbeScript+"</script>", 1)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				_, _ = io.WriteString(w, page)
 				return
 			}
-			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-done" {
+			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-native-stop" || r.URL.Path == "/check-done" {
 				validation := r.Clone(r.Context())
 				validation.URL.Path = "/app/state"
 				auth := httptest.NewRecorder()
@@ -156,6 +155,8 @@ func check() error {
 					}
 					proxied.Store(true)
 					fmt.Println("PROXY: exact Responses/Chat SSE + models over authenticated local TCP and TLS mock")
+				} else if r.URL.Path == "/check-native-stop" {
+					core.Stop() // same native operation used by tray; page polling must notice it
 				} else if r.URL.Path == "/check-stall" {
 					var err error
 					stalled, err = probeStalledUploads(core)

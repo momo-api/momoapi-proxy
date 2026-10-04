@@ -4,18 +4,23 @@ import (
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-func TestStorePromptDoesNotBlockStatusOrStop(t *testing.T) {
+func TestStorePromptDoesNotBlockStatusStopOrQuit(t *testing.T) {
 	core, _ := appcore.New()
 	defer core.Close()
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	done := make(chan struct{})
 	defer func() { close(release); <-done }()
-	h := HandlerWithActions("http://wails.localhost", core, Actions{SaveProfile: func(appcore.Config) error { close(entered); <-release; return nil }})
+	var quit atomic.Int32
+	h := HandlerWithActions("http://wails.localhost", core, Actions{
+		SaveProfile: func(appcore.Config) error { close(entered); <-release; return nil },
+		Quit:        func() { quit.Add(1) },
+	})
 	call := func(path, body string) int {
 		r := httptest.NewRequest("POST", path, strings.NewReader(body))
 		r.Header.Set("Origin", "http://wails.localhost")
@@ -34,7 +39,7 @@ func TestStorePromptDoesNotBlockStatusOrStop(t *testing.T) {
 	}
 	result := make(chan bool, 1)
 	go func() {
-		result <- call("/app/state", "") == 200 && call("/app/stop", "") == 200 && call("/app/start", "") == 409 && call("/app/quit", "") == 409
+		result <- call("/app/state", "") == 200 && call("/app/stop", "") == 200 && call("/app/start", "") == 409 && call("/app/quit", "{}") == 400 && call("/app/quit", "") == 200 && quit.Load() == 1
 	}()
 	select {
 	case ok := <-result:
