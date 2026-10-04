@@ -1,0 +1,12 @@
+# Preserve existing gitignore exclusions; never ship experimental Go apps in npm.
+node_modules/
+.momo-codex-switch/
+coverage/
+dist/
+*.log
+*.tgz
+tmp/
+.tmp-*/
+__pycache__/
+*.pyc
+experimental/
