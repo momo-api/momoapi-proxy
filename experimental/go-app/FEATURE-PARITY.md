@@ -9,8 +9,8 @@
 | 能力 | Node 版实现依据（仓库根目录相对路径） | Go 预览实际范围 |
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 仅精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses`；无无版本别名，无 compact |
-| 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 没有；只按客户端接口选择相同上游接口 |
-| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 不转换；上游必须支持请求的原协议 |
+| 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat 子集转换；未迁移协议 501 |
+| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 新增严格流式文本/function/部分 custom 子集、namespace 恢复；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
 | Claude / Gemini / Muse | `src/claude-adapter.mjs`、`src/gemini-adapter.mjs`、`src/muse-adapter.mjs` | 未迁移 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 未迁移；字段原样转交，不提供本地回放 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
@@ -21,7 +21,7 @@
 | 额度展示 | 兼容 NewAPI `GET /api/usage/token/`（非账户钱包） | 明确点击查询 Key 额度、已用/授予/到期/查询时间；不猜汇率，不获取账户登录态 |
 | 跨平台 / 跨设备 | Go `desktop_on.go`、`packaging/` | Windows X64 / macOS ARM64 / Linux X64 预览；仅 127.0.0.1，不支持跨设备共享 |
 
-现有 Node Responses 入口选路策略（不是 Go 已支持的清单；Chat 入口仍走 Chat 转发）：
+现有 Node Responses 入口分类策略（Go 已移植分类，不代表全部适配器已实现；Chat 入口仍走 Chat 转发）：
 
 - `muse-auto` → Muse；`gemini-*` → Gemini；`claude-*` → Claude。
 - `mimo-*`、`gpt-5.6-sol` / `gpt-5.6-luna`、`*-sol` / `*-luna` / `*-responses` → Responses。
@@ -39,6 +39,20 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 `appcheck_page.go` 在真实 WebView 中调用相同 DOM 事件处理器并连接本地 TCP/TLS mock。
 安装包黑盒测试见 `packaging/blackbox.py`。
 这些不是 Node 与 Go 的全量统一对照测试，也不是正式签名发行或长期稳定性结论。
+
+### 新增统一黑盒子集
+
+`routecheck.mjs` 对真实 Node/Go TCP 接口使用同一个 mock 上游、相同夹具与
+四并发，匹配可配置的请求/输出/保留预算。双方运行在同一 CI runner；没有
+CPU/RSS 容器配额隔离，不能作为性能或生产稳定性比较。Go test-only routecheck
+注入不进入发行包（build-tag 与 source-list CI 门禁）。Node 源码未修改。
+
+已测：Unicode 字节碎片、function/custom namespace、历史工具结果、Qwen 指令整理、
+四并发、上游 401/429/500（一次发送，不回退）、提前 EOF。
+发现并保留可见差异：Node 该 Chat 路径缺显式 namespace，Go 恢复；Node 会对
+干净但提前结束的流生成 completed，Go 要求 finish_reason + [DONE]，否则中止 HTTP。
+比较规范化语义输出而非随机 ID；namespace 差异单独断言，不掩饰为完全等价。
+非流式 JSON 转换、usage 映射、DSML、复杂工具/history/媒体仍是未完成门槛。
 
 ## Magpie 借鉴边界
 

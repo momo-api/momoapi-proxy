@@ -52,7 +52,7 @@ func TestStopInterruptsStalledUploadsAndAllowsRestart(t *testing.T) {
 	}
 	core.Stop()
 	waitActive(t, core, 0)
-	if err := core.Configure(Config{"https://mock.example", syntheticKey}); err != nil {
+	if err := core.Configure(Config{Endpoint: "https://mock.example", APIKey: syntheticKey}); err != nil {
 		t.Fatal("stop did not release configuration gate")
 	}
 	if err := core.Start(); err != nil {

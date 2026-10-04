@@ -27,6 +27,8 @@ const chatRequest = `{"model":"mock","stream":true,"messages":[{"role":"user","c
 const responsesStream = "event: response.output_item.added\ndata: {\"item\":{\"namespace\":\"pad\",\"input\":\"中文🙂\"},\"unknown_provider_field\":true}\r\n\r\nevent: response.completed\ndata: {\"response\":{\"output\":[{\"namespace\":\"pad\"}]}}\n\n"
 const chatStream = "data: {\"choices\":[{\"delta\":{\"content\":\"中文🙂\"}}],\"provider_extra\":true}\r\n\r\ndata: [DONE]\n\n"
 const modelsResponse = `{"data":[{"id":"mock"}]}`
+const routedProbeRequest = `{"model":"gpt-5.5","stream":true,"input":[{"role":"user","content":"hi"}]}`
+const routedProbeBody = `{"messages":[{"content":"hi","role":"user"}],"model":"gpt-5.5","stream":true}`
 
 func main() {
 	_ = os.Stdin.Close()
@@ -96,6 +98,12 @@ func check() error {
 				w.Header().Set("Content-Type", "text/event-stream")
 				body = responsesStream
 			case "/v1/chat/completions":
+				if string(data) == routedProbeBody && r.Method == "POST" {
+					upstreamRequests.Add(1)
+					w.Header().Set("Content-Type", "text/event-stream")
+					io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"routed-ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					return
+				}
 				if r.Method != "POST" || string(data) != chatRequest {
 					w.WriteHeader(400)
 					return
@@ -122,7 +130,7 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 3 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 4 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
@@ -150,7 +158,7 @@ func check() error {
 				_, _ = io.WriteString(w, page)
 				return
 			}
-			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-native-stop" || r.URL.Path == "/check-done" {
+			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-native-stop" || r.URL.Path == "/check-done" || r.URL.Path == "/check-routing" {
 				validation := r.Clone(r.Context())
 				validation.URL.Path = "/app/state"
 				auth := httptest.NewRecorder()
@@ -166,6 +174,11 @@ func check() error {
 					}
 					proxied.Store(true)
 					fmt.Println("PROXY: exact Responses/Chat SSE + models over authenticated local TCP and TLS mock")
+				} else if r.URL.Path == "/check-routing" {
+					if core.State().Mode != "momo-routing" || probeRoutedRequest(core) != nil {
+						http.Error(w, "route check failed", 500)
+						return
+					}
 				} else if r.URL.Path == "/check-native-stop" {
 					core.Stop() // same native operation used by tray; page polling must notice it
 				} else if r.URL.Path == "/check-stall" {
@@ -278,6 +291,28 @@ func probeLocalRequests(core *appcore.Core) error {
 		if readErr != nil || response.StatusCode != 200 || string(data) != tc.want {
 			return errors.New("proxy bytes mismatch")
 		}
+	}
+	return nil
+}
+
+func probeRoutedRequest(core *appcore.Core) error {
+	base, key, err := probeCredentials(core)
+	if err != nil {
+		return err
+	}
+	req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(routedProbeRequest))
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	client := http.Client{Timeout: 4 * time.Second}
+	defer client.CloseIdleConnections()
+	response, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != 200 || !strings.Contains(string(data), "response.completed") || !strings.Contains(string(data), "routed-ok") {
+		return errors.New("routed result")
 	}
 	return nil
 }

@@ -27,7 +27,7 @@ func testCore(t *testing.T, upstream http.Handler) (*Core, string, context.Cance
 	// Test-only dependency injection, no insecure endpoint flag in the product.
 	core.client = mock.Client()
 	core.client.Timeout = 2 * time.Second
-	if err := core.Configure(Config{"https://mock.example", syntheticKey}); err != nil {
+	if err := core.Configure(Config{Endpoint: "https://mock.example", APIKey: syntheticKey}); err != nil {
 		t.Fatal(err)
 	}
 	original := core.client.Transport
@@ -172,7 +172,7 @@ func TestConfigurePublicOnlyAndStopped(t *testing.T) {
 	}
 	defer core.Close()
 	for _, endpoint := range []string{"http://momoapi.us", "https://127.0.0.1", "https://10.0.0.1", "https://[::1]", "https://100.64.0.1", "https://momoapi.us/v1", "https://user@momoapi.us", "https://momoapi.us:444", "https://momoapi.us?", "https://momoapi.us#x"} {
-		if core.Configure(Config{endpoint, syntheticKey}) == nil {
+		if core.Configure(Config{Endpoint: endpoint, APIKey: syntheticKey}) == nil {
 			t.Fatal(endpoint)
 		}
 	}
@@ -187,10 +187,10 @@ func TestConfigurePublicOnlyAndStopped(t *testing.T) {
 	if core.Start() == nil {
 		t.Fatal("unconfigured started")
 	}
-	if core.Configure(Config{"https://momoapi.us", syntheticKey}) != nil || core.Start() != nil {
+	if core.Configure(Config{Endpoint: "https://momoapi.us", APIKey: syntheticKey}) != nil || core.Start() != nil {
 		t.Fatal("config rejected")
 	}
-	if core.Configure(Config{"https://momoapi.us", syntheticKey}) == nil {
+	if core.Configure(Config{Endpoint: "https://momoapi.us", APIKey: syntheticKey}) == nil {
 		t.Fatal("live reconfigure")
 	}
 }

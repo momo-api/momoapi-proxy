@@ -91,7 +91,7 @@ func TestQuotaStopAndAdmission(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { _, err := c.QueryTokenQuota(context.Background()); done <- err }()
 	<-entered
-	if c.State().Active != 1 || c.Configure(Config{"https://other.example", syntheticKey}) == nil {
+	if c.State().Active != 1 || c.Configure(Config{Endpoint: "https://other.example", APIKey: syntheticKey}) == nil {
 		t.Fatal("config changed during quota query")
 	}
 	c.Stop()

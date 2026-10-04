@@ -32,6 +32,12 @@ jobs:
       - run: python3 -B -m unittest discover -s packaging -p 'test_*.py'
       - run: node internal/ui/page_test.mjs
       - run: go test -tags nogui -count=5 -timeout 60s ./...
+      - name: Node and Go unified routing blackbox (same mock and resource settings)
+        run: |
+          suffix=
+          if [ "$RUNNER_OS" = Windows ]; then suffix=.exe; fi
+          go build -tags nogui,routecheck -o "$RUNNER_TEMP/momo-routecheck$suffix" .
+          node routecheck.mjs "$RUNNER_TEMP/momo-routecheck$suffix"
       - name: Windows and macOS synthetic native credential-store roundtrip
         if: runner.os != 'Linux'
         run: MOMO_TEST_SYSTEM_VAULT=1 go test -tags nogui -run TestSystemBackendSyntheticRoundtrip -v -count=1 -timeout 30s ./internal/vault
@@ -46,8 +52,8 @@ jobs:
         run: |
           tags=production
           if [ "$RUNNER_OS" = Linux ]; then tags=gtk3,production; fi
-          if go list -tags "$tags" -f '{{join .GoFiles " "}}' . | grep -q appcheck; then echo "Probe leaked"; exit 1; fi
-          if go list -tags "$tags" -f '{{join .GoFiles " "}}' ./internal/appcore | grep -q probe_mock; then echo "Mock transport leaked"; exit 1; fi
+          if go list -tags "$tags" -f '{{join .GoFiles " "}}' . | grep -Eq 'appcheck|routecheck'; then echo "Probe leaked"; exit 1; fi
+          if go list -tags "$tags" -f '{{join .GoFiles " "}}' ./internal/appcore | grep -Eq 'probe_mock|routecheck_mock'; then echo "Mock transport leaked"; exit 1; fi
           go vet -tags "$tags" ./...
           go build -tags "$tags" -trimpath -ldflags "-s -w" -o "$RUNNER_TEMP/momo-preview-${RUNNER_OS}-${RUNNER_ARCH}" .
       - name: Native probe compilation (never packaged)

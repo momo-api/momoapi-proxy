@@ -1,0 +1,92 @@
+// Uniform semantic blackbox: real TCP requests to Node and Go, same mock
+// upstream per case, same workload/concurrency and matched configurable budgets.
+// Test-only binary; no profiles, credentials, production or benchmark claims.
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {request as httpRequest} from 'node:http';
+import {createMomoSwitch} from '../../src/server.mjs';
+const binary=process.argv[2];assert.ok(binary);
+const tool={type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'custom',name:'write'}]};
+const payload={model:'gpt-5.5',stream:true,instructions:'Be concise.',input:[{role:'user',content:[{type:'input_text',text:'中文🙂'}]}],tools:[tool]};
+const chunk=(delta,finish_reason=null)=>({choices:[{index:0,delta,finish_reason}]});
+const sse=chunks=>chunks.map(c=>'data: '+JSON.stringify(c)+'\r\n\r\n').join('')+'data: [DONE]\r\n\r\n';
+const text=sse([chunk({content:'中文'}),chunk({content:'🙂'},'stop')]);
+const calls=sse([
+ chunk({tool_calls:[{index:0,id:'call_read',type:'function',function:{name:'pad__read',arguments:'{"x":'}}]}),
+ chunk({tool_calls:[{index:0,function:{arguments:'1}'}},{index:1,id:'call_write',type:'function',function:{name:'pad__write',arguments:'{"input":"text(\'hi\')"}'}}]}),
+ chunk({},'tool_calls')]);
+const bare=sse([chunk({tool_calls:[{index:0,id:'call_read',type:'function',function:{name:'read',arguments:'{}'}}]},'tool_calls')]);
+const cases=[
+ {name:'text Unicode fragmented',stream:text,payload},
+ {name:'function custom namespace fragmented',stream:calls,payload},
+ {name:'history function/output',stream:text,payload:{...payload,tools:tool.tools,input:[...payload.input,{type:'function_call',call_id:'history_read',name:'read',arguments:'{}'},{type:'function_call_output',call_id:'history_read',output:'done'},{role:'user',content:'continue'}]}},
+ {name:'history assistant plus parallel calls',stream:text,payload:{...payload,tools:tool.tools,input:[...payload.input,{role:'assistant',content:'checking'},{type:'function_call',call_id:'a',name:'read',arguments:'{}'},{type:'custom_tool_call',call_id:'b',name:'write',input:"text('hello')"},{type:'custom_tool_call_output',call_id:'b',output:'written'},{type:'function_call_output',call_id:'a',output:'read'},{role:'user',content:'continue'}]}},
+ {name:'Qwen system consolidation',stream:text,payload:{...payload,model:'qwen-test',input:[...payload.input,{role:'developer',content:'later instruction'}]}},
+ {name:'four concurrent same-resource requests',stream:text,payload,concurrent:4},
+ {name:'namespace absent from upstream delta',stream:bare,payload},
+ ...[401,429,500].map(status=>({name:'upstream '+status,stream:'',status,payload})),
+ {name:'truncated EOF safety difference',stream:'data: '+JSON.stringify(chunk({content:'partial'}))+'\n\n',payload,truncate:true},
+];
+async function launch(fixture){
+ const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+ let stderr='';child.stderr.on('data',b=>{stderr+=b});
+ const handoff=await new Promise((resolve,reject)=>{
+  let line='';const timer=setTimeout(()=>reject(Error('routecheck startup timeout')),10000);
+  child.once('error',reject);child.once('exit',()=>{clearTimeout(timer);reject(Error('routecheck exited before handoff'))});
+  child.stdout.on('data',b=>{line+=b;if(line.includes('\n')){clearTimeout(timer);resolve(JSON.parse(line.split('\n')[0]))}});
+  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200}));
+ });
+ return {child,handoff};
+}
+function items(body){
+ const events=body.split(/\r?\n\r?\n/).flatMap(block=>{const data=block.split(/\r?\n/).filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');if(!data||data==='[DONE]')return [];try{return [JSON.parse(data)]}catch{return []}});
+ const completed=events.find(e=>e.type==='response.completed');
+ return {events,completed,output:completed?.response?.output?.map(({id,status,...item})=>item)||[]};
+}
+async function invoke(url,token,p){
+ return new Promise((resolve,reject)=>{
+  const data=JSON.stringify(p);
+  const req=httpRequest(url+'/v1/responses',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json','content-length':Buffer.byteLength(data)}},response=>{
+   const chunks=[];let settled=false;
+   const finish=truncated=>{if(settled)return;settled=true;const body=Buffer.concat(chunks).toString('utf8');resolve({status:response.statusCode,body,truncated,...items(body)})};
+   response.on('data',b=>chunks.push(b));response.once('end',()=>finish(false));response.once('error',()=>finish(true));response.once('aborted',()=>finish(true));
+  });req.setTimeout(10000,()=>req.destroy(Error('request timeout')));req.once('error',reject);req.end(data);
+ });
+}
+for(const fixture of cases){
+ const {child,handoff}=await launch(fixture);
+ let server;
+ try{
+  const env={MOMO_PROXY_HOME:'unused-routecheck-profile',MOMO_PROXY_CONSOLE_MIRROR:'0'};
+  const loggingRuntime={env,enqueueRequest:()=>true,enqueueDiagnostic:()=>true,snapshot:()=>({})};
+  server=createMomoSwitch({endpoint:'https://mock.example',apiKey:'synthetic-unified-only',localToken:'synthetic-node-only',host:'127.0.0.1',port:0,diagnosticsEnabled:false,
+   requestAdmission:{maxConcurrent:4,maxQueued:0,maxBodyBudgetMb:4,bodyReadTimeoutMs:15000},contextPolicy:{outboundBodyHardLimitBytes:1048576,outboundBodySoftLimitBytes:1047552},outputPolicy:{maxStreamMb:16,maxRetainedMb:1}},
+   {env,loggingRuntime,assetStore:{},attachmentAssetStore:{},fetchImpl:(url,init)=>fetch(handoff.mock_url+new URL(url).pathname,init)});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const nodeURL='http://127.0.0.1:'+server.address().port;
+  const goURL=handoff.base_url.replace(/\/v1$/,'');
+  const count=fixture.concurrent||1;
+  const nodeResults=await Promise.all(Array.from({length:count},()=>invoke(nodeURL,'synthetic-node-only',fixture.payload)));
+  const goResults=await Promise.all(Array.from({length:count},()=>invoke(goURL,handoff.api_key,fixture.payload)));
+  const captures=await(await fetch(handoff.mock_url+'/capture')).json();
+  assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
+  for(let i=0;i<count;i++)assert.deepEqual(captures[count+i],captures[i],fixture.name+' upstream request mismatch');
+  for(let i=0;i<count;i++){
+   const n=nodeResults[i],g=goResults[i];assert.equal(g.status,n.status,fixture.name+' HTTP status');
+   if(fixture.status){assert.equal(g.completed,undefined);assert.equal(n.completed,undefined)}
+   else if(fixture.truncate){assert.equal(g.completed,undefined);assert.equal(g.truncated,true);assert.ok(n.completed);console.log('DIFFERENCE Node completes clean premature EOF; Go aborts without fabricated completion')}
+   else {
+    assert.ok(n.completed&&g.completed,fixture.name+' missing completion');
+    // Legacy Node drops explicit namespaces on Chat calls; Go restores them.
+    const normalized=g.output.map(({namespace,...item})=>item);
+    assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
+    if(fixture.stream===calls||fixture.stream===bare){assert.equal(g.output[0].namespace,'pad');assert.equal(n.output[0].namespace,undefined);console.log('DIFFERENCE explicit namespace restored in Go; Node Chat output lacks it')}
+   }
+  }
+  console.log('PASS uniform blackbox '+fixture.name);
+ }finally{
+  if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});
+  child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
+ }
+}
+console.log('PASS shared mock/resource routing subset; explicit namespace/truncation differences, not full parity or performance proof');

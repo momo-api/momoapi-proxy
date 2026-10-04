@@ -49,12 +49,12 @@ func TestExplicitStoreRoundtripAndBounds(t *testing.T) {
 	if m.calls != 0 {
 		t.Fatal("construction read credentials")
 	}
-	c := appcore.Config{Endpoint: "https://mock.example/", APIKey: "synthetic-key-only"}
+	c := appcore.Config{Endpoint: "https://mock.example/", APIKey: "synthetic-key-only", Mode: "momo-routing"}
 	if v.Save(c) != nil {
 		t.Fatal("save")
 	}
 	loaded, err := v.Load()
-	if err != nil || loaded.Endpoint != "https://mock.example" || loaded.APIKey != c.APIKey {
+	if err != nil || loaded.Endpoint != "https://mock.example" || loaded.APIKey != c.APIKey || loaded.Mode != c.Mode {
 		t.Fatal("roundtrip")
 	}
 	before := m.value

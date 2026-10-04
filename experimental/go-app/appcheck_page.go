@@ -27,7 +27,8 @@ async function check(){
  const deadline=Date.now()+5000;while(lastState.Running&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,100));
  ensure(!lastState.Running&&!byId('start').disabled&&!byId('configure').disabled);
  ensure(byId('status-label').textContent==='已停止');
- await button('start');await request('check-stall');await button('stop');await request('check-done');
+ byId('routing-mode').checked=true;byId('key').value='synthetic-appcheck-only';await button('configure');ensure(lastState.Mode==='momo-routing');
+ await button('start');ensure(byId('routing-mode').disabled&&byId('routing-state').textContent.includes('已启用'));await request('check-routing');await request('check-stall');await button('stop');await request('check-done');
 }
 check().catch(()=>{});
 `

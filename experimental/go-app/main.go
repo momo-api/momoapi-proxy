@@ -1,4 +1,4 @@
-//go:build !appcheck
+//go:build !appcheck && !routecheck
 
 package main
 

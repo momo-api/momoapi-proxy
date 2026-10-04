@@ -15,8 +15,13 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   POST /v1/chat/completions, using the matching upstream protocol.
 - Responses namespace/custom tools and unknown fields are passed through.
   Skill/MCP tools execute in the agent client, not inside the API proxy.
-- There is no model-based protocol conversion, history replay, compaction,
-  attachment management, image/video generation or cross-device sharing yet.
+- Default is exact same-protocol passthrough. Explicit Mode=momo-routing enables
+  Responses-entry model classification and partial streaming Chat translation:
+  text, function/custom tools (excluding exec/apply_patch), namespace restoration.
+  Strictly rejects media/history references/unknown options/non-streaming Chat;
+  Claude/Gemini/Muse adapters remain unsupported. No fallback or duplicate send.
+- History replay, compaction, attachment management, media generation and
+  cross-device sharing are not migrated. This is not full Node compatibility.
 - The built-in stdio MCP only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.
 - Token quota is not the account wallet or a currency amount. The desktop

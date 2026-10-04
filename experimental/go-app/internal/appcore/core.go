@@ -1,5 +1,5 @@
-// Package appcore owns the actual local Responses and Chat passthrough service.
-// No credential discovery, disk settings, provider conversion or Node dependency.
+// Package appcore owns the local gateway with default exact passthrough and
+// explicit partial MOMO routing. No credential discovery or Node dependency.
 package appcore
 
 import (
@@ -28,6 +28,7 @@ const Version = "0.4.0-preview"
 type Config struct {
 	Endpoint string
 	APIKey   string
+	Mode     string
 }
 type State struct {
 	Version       string
@@ -37,6 +38,7 @@ type State struct {
 	Running       bool
 	Active        int
 	Capability    string
+	Mode          string
 }
 type Core struct {
 	mu       sync.Mutex
@@ -99,6 +101,9 @@ func publicDial(ctx context.Context, network, address string) (net.Conn, error) 
 
 // ValidateConfig validates without changing state or resolving the endpoint.
 func ValidateConfig(c Config) error {
+	if c.Mode != "" && c.Mode != "passthrough" && c.Mode != "momo-routing" {
+		return errors.New("invalid routing mode")
+	}
 	u, err := url.Parse(c.Endpoint)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" || (u.Path != "" && u.Path != "/") || (u.Port() != "" && u.Port() != "443") {
 		return errors.New("use an HTTPS upstream origin on port 443")
@@ -127,7 +132,15 @@ func (c *Core) Configure(config Config) error {
 func (c *Core) State() State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return State{Version, c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, Capability}
+	mode := c.config.Mode
+	if mode == "" {
+		mode = "passthrough"
+	}
+	capability := Capability
+	if mode == "momo-routing" {
+		capability = "partial-momo-responses-chat-routing"
+	}
+	return State{Version, c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, capability, mode}
 }
 func (c *Core) Start() error {
 	c.mu.Lock()
@@ -238,6 +251,8 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stream := false
+	var routed *chatPlan
+	upstreamPath := r.URL.Path
 	if r.Method == "GET" {
 		if len(body) != 0 {
 			http.Error(w, "body denied", 400)
@@ -264,6 +279,23 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		stream = string(payload["stream"]) == "true"
+		if r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" {
+			switch resolveProtocol(model) {
+			case "chat":
+				var routeErr error
+				routed, routeErr = buildChatPlan(body)
+				if routeErr != nil {
+					http.Error(w, "unsupported routed Responses payload", 400)
+					return
+				}
+				body = routed.body
+				upstreamPath = "/v1/chat/completions"
+			case "responses": // preserve existing exact native protocol bytes
+			default:
+				http.Error(w, "model protocol not migrated", 501)
+				return
+			}
+		}
 		if r.URL.Path == "/v1/chat/completions" {
 			var messages []json.RawMessage
 			if json.Unmarshal(payload["messages"], &messages) != nil || len(messages) == 0 {
@@ -273,7 +305,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 		// Forward exact bytes: do not drop namespace or normalize provider fields.
 	}
-	upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, config.Endpoint+r.URL.Path, bytes.NewReader(body))
+	upstreamReq, err := http.NewRequestWithContext(ctx, r.Method, config.Endpoint+upstreamPath, bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "upstream unavailable", 502)
 		return
@@ -298,6 +330,16 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	typ, _, typeErr := mime.ParseMediaType(upstream.Header.Get("Content-Type"))
+	if routed != nil {
+		if typeErr != nil || typ != "text/event-stream" {
+			http.Error(w, "upstream protocol mismatch", 502)
+			return
+		}
+		if convertChatStream(ctx, w, upstream.Body, routed) != nil {
+			panic(http.ErrAbortHandler)
+		}
+		return
+	}
 	if stream {
 		if typeErr != nil || typ != "text/event-stream" {
 			http.Error(w, "upstream protocol mismatch", 502)

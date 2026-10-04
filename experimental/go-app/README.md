@@ -7,6 +7,36 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
 
+### Opt-in partial MOMO routing
+
+Default remains exact passthrough (old saved profiles retain it). Explicitly check
+the experimental routing checkbox, or submit Mode=momo-routing in private config.
+Mode is persisted only with explicit Remember and shown in State/Routing. Stop
+before reconfiguring. Responses-entry classifier matches Node: native Responses
+models remain byte-preserving; ordinary models route to a streaming Chat adapter;
+Claude/Gemini/Muse return 501 before sending. Chat entry itself remains passthrough.
+
+The adapter accepts text/instructions, ordinary function tools and custom input
+wrappers with namespaces, paired text-only tool history, string tool_choice and
+reasoning effort. It restores namespace explicitly and fails ambiguous bare names.
+It rejects unknown payload fields/options, media, history references, compaction,
+non-streaming, built-in tools, exec/apply_patch normalization, malformed/unmatched
+history and collisions instead of silently dropping them. This is intentionally
+not a drop-in Codex/Node replacement. No fallback/retry or double billing.
+
+Incremental text SSE, bounded events/arguments/text (1 MiB retained, 16 MiB wire,
+128 tool indices, 65536 events), 15s write deadline and existing Stop cancellation.
+Requires stop/tool_calls finish_reason plus [DONE]; malformed/error/truncated/length
+streams abort HTTP without fabricated completed. No usage mapping or DSML synthesis;
+only successful full output is completed, with no local history cache.
+
+Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
+then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
+configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
+Eleven cases include tools/history/Qwen/four concurrency/errors/truncation. Known
+namespace and premature-EOF differences are separately asserted/documented in
+[FEATURE-PARITY.md](FEATURE-PARITY.md). Normal build excludes this injection.
+
 The offline desktop UI takes compact navigation, quiet card/list hierarchy and
 separate settings from Magpie as design references, with original styling/icons.
 Overview shows actual running/configuration/request state; Routing explicitly
@@ -54,9 +84,10 @@ and your key deliberately. Apply then Start. Window button/tray menu explicitly 
 base_url/api_key: random LOCAL token, not upstream key. /v1/responses,
 /v1/chat/completions and /v1/models implemented. Require Bearer local token; no unauthenticated loopback
 exception, CORS, Origin or Sec-Fetch access. Request and successful SSE bytes
-kept unchanged, including namespace/unknown fields, Chat tool calls, usage and
-[DONE]. Upstream must implement the matching protocol: no Responses-to-Chat or
-Gemini/Claude conversion, compaction, attachment hosting or compatibility fallback.
+kept unchanged in default passthrough, including namespace/unknown fields, Chat tool calls, usage and
+[DONE]. In default mode upstream must implement the matching protocol. Opt-in
+partial Chat translation is described above; Gemini/Claude conversion, compaction,
+attachment hosting and compatibility fallback remain unimplemented.
 
 Windows/macOS window close hides; Linux close quits (no tray required). Window
 Quit/tray quit stops THIS process's requests/core. Native OnShutdown cancels and
