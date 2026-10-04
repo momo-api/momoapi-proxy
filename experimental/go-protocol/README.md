@@ -128,3 +128,46 @@ first-seen index ordering is intentional to match Node's Map iteration, not
 numeric sort. Added cancellation during an actual open mock body. These are
 static suggestions with local executor tests, not Prism-executed acceptance.
 The earlier design reply referred to inaccessible main.tex and is not evidence.
+
+## Linux same-resource container gate
+
+node mock-stream.mjs --container
+
+This optional mode requires a working Linux Docker daemon with cgroup v2.
+CI has a separate resource-envelope job; unsupported/missing cgroups fail, not
+skip or fall back to host-process mode. Local Windows Podman was unreachable;
+the shared VM was not restarted or changed to run this test.
+
+Only explicitly selected non-secret Go experiment sources, the pinned Node
+oracle and the test runner enter a classified temp build context. No whole-repo
+COPY, credentials, git metadata, production files or host filesystem mount.
+A single local immutable image ID is used for both runners. Builder is outside
+the measured envelope. Each of the same 18 cases runs Go then Node in fresh
+containers: 1 CPU quota, 256 MiB cgroup memory, swap disabled, 64 PIDs, non-root
+UID 65534, read-only root, 32 MiB /tmp tmpfs, all capabilities dropped and
+no-new-privileges. Docker config is inspected and the entry script verifies
+actual cpu.max/memory.max/memory.swap.max/pids.max inside every container.
+Stopped state, exit code and absence of OOMKilled are required after each run.
+
+Each case creates a disposable network-none mock container; Go then Node share
+only that network namespace using container:<owned-ID>, preserving literal
+127.0.0.1 without host networking or external networking. The mock itself has
+the same limits and is outside each runner's separate resource cgroup.
+Random mock capability matching is not protection from malicious same-user
+services in host-process mode. Use a disposable non-production CI host.
+No docker socket inside the container, no privileged mode or published port.
+Inspect also verifies cap drop/no-new-privileges/tmpfs/nonroot; entry validates
+effective capabilities, NoNewPrivs and actual read-only root/tmpfs mount flags.
+Outer 10-second watchdog stops only the recorded container ID; finally removes
+only that created disposable container, waits for stop, checks OOM and confirms
+the ID no longer exists. Temporary synthetic files/image cache
+are retained locally; CI runner disposal handles them. No broad prune/cleanup.
+
+These are equal enforced resource ceilings for this narrow fixture workload,
+not equal actual RSS, performance measurement, sustained-load/pressure/OOM
+testing, full public-API black-box acceptance or stability certification.
+
+Prism static review (59.656s) requested network namespace isolation, verification
+of security/mount flags, and stop/wait/remove evidence. Implemented those changes;
+no expert-executed container result is claimed. Historical image/cache retention
+is intentional; no automatic broad prune. The exact image ID is printed.

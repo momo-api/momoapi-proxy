@@ -12,6 +12,19 @@ permissions:
   contents: read
 
 jobs:
+  resource-envelope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Fetch immutable Node oracle
+        run: git fetch origin e78d70fb3445eaea04ca1998bb07a35d8a3f3f30
+      - name: Same mock with verified cgroup-v2 CPU/memory/PID limits
+        working-directory: experimental/go-protocol
+        run: node mock-stream.mjs --container
   offline-protocol:
     strategy:
       fail-fast: false
