@@ -4,13 +4,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('./page.go', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('./page.html', import.meta.url), 'utf8');
 const script = source.split('<script>')[1].split('</script>')[0];
 const nodes = new Map();
-for (const id of ['state','notice','endpoint','key','remember','configure','start','stop','refresh','copy','quit','load','forget']) {
-  nodes.set(id, {disabled:false,textContent:'',value:'',checked:false});
+let focused;
+for (const [,id] of source.matchAll(/\bid="([^"]+)"/g)) {
+  assert.equal(nodes.has(id),false,`Duplicate HTML id: ${id}`);
+  const attributes=new Map();
+  nodes.set(id, {disabled:false,textContent:'',value:'',checked:false,hidden:false,dataset:{},
+    setAttribute:(name,value)=>attributes.set(name,value),getAttribute:name=>attributes.get(name),
+    focus:()=>{focused=id}});
 }
-const initial = {Configured:false,Running:false,Active:0,Endpoint:''};
+const initial = {Configured:false,Running:false,Active:0,Endpoint:'',Version:'0.4.0-preview',LocalEndpoint:'http://127.0.0.1:12345'};
 let state = {...initial}, calls=[], handler;
 const response = (status, value=state) => ({ok:status===200,status,json:async()=>({...value})});
 const pending = () => {let resolve;const promise=new Promise(r=>{resolve=r});return {promise,resolve}};
@@ -30,6 +35,43 @@ await flush();
 assert.equal(nodes.get('start').disabled,true);
 assert.equal(nodes.get('configure').disabled,false);
 assert.equal(nodes.get('quit').disabled,false);
+assert.equal(nodes.get('service-state').textContent,'已停止');
+assert.equal(nodes.get('active-count').textContent,'0');
+assert.equal(nodes.get('local-url').textContent,initial.LocalEndpoint+'/v1');
+assert.equal(nodes.get('build-version').textContent,initial.Version);
+assert.match(source,/尚未对齐/);
+assert.match(source,/暂无自动转换/);
+assert.equal((source.match(/>未迁移</g)||[]).length,5);
+assert.doesNotMatch(source,/<(?:script|link|img)[^>]*(?:src|href)=/i);
+
+// Real navigation handlers and accessible keyboard tabs, not fake feature controls.
+nodes.get('nav-routing').onclick();
+assert.equal(nodes.get('view-routing').hidden,false);
+assert.equal(nodes.get('view-overview').hidden,true);
+assert.equal(nodes.get('page-title').textContent,'路由能力');
+assert.equal(nodes.get('nav-routing').getAttribute('aria-selected'),'true');
+assert.equal(nodes.get('nav-routing').tabIndex,0);
+let prevented=false;
+nodes.get('nav-routing').onkeydown({key:'ArrowRight',preventDefault:()=>{prevented=true}});
+assert.equal(prevented,true);
+assert.equal(focused,'nav-settings');
+assert.equal(nodes.get('view-settings').hidden,false);
+nodes.get('nav-settings').onkeydown({key:'Home',preventDefault:()=>{}});
+assert.equal(focused,'nav-overview');
+assert.equal(nodes.get('view-overview').hidden,false);
+nodes.get('nav-overview').onkeydown({key:'ArrowLeft',preventDefault:()=>{}});
+assert.equal(focused,'nav-settings');
+nodes.get('nav-settings').onkeydown({key:'End',preventDefault:()=>{}});
+assert.equal(focused,'nav-settings');
+
+// Explicit Load returns to the connection form, without exposing its key.
+state={...initial,Configured:true,Endpoint:'https://mock.example'};
+await nodes.get('load').onclick();
+assert.equal(nodes.get('view-overview').hidden,false);
+assert.equal(nodes.get('endpoint').value,state.Endpoint);
+assert.equal(nodes.get('key').value,'');
+state={...initial};
+await run("action('state')");
 
 // Profile saving waits: no duplicate mutations, polling/Stop/Quit still work.
 const saved=pending();
@@ -72,10 +114,13 @@ handler=()=>response(200,{...state,Running:true});
 intervals[0]();await flush();
 assert.equal(nodes.get('configure').disabled,true);
 assert.equal(nodes.get('stop').disabled,false);
+assert.equal(nodes.get('service-state').textContent,'运行中');
+assert.equal(nodes.get('status-badge').dataset.tone,'good');
 handler=()=>response(200,state);
 listeners.get('focus')();await flush();
 assert.equal(nodes.get('configure').disabled,false);
 assert.match(nodes.get('notice').textContent,/安全保存失败/);
+assert.equal(nodes.get('status-label').textContent,'已停止');
 context.document.hidden=true;
 const before=calls.length;intervals[0]();await flush();
 assert.equal(calls.length,before);
@@ -89,4 +134,4 @@ timers.at(-1)();assert.equal(options.signal.aborted,true);
 wait.resolve(response(200));await one;
 assert.equal(run('statePending'),false);
 assert.equal(calls.filter(c=>c.options.body?.includes('synthetic-page-input-only')).length,1);
-console.log('PASS shipped page: pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout');
+console.log('PASS shipped page: navigation/keyboard/status/capability gaps/Load/pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout');

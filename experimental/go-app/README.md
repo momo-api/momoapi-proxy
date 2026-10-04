@@ -7,6 +7,15 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
 
+The offline desktop UI takes compact navigation, quiet card/list hierarchy and
+separate settings from Magpie as design references, with original styling/icons.
+Overview shows actual running/configuration/request state; Routing explicitly
+lists the three passthrough endpoints and missing Node features; Settings contains
+optional OS-vault actions. No fake routing editor, historical usage, remote
+sharing or upstream-health indicator. Full gap audit and migration gates:
+[FEATURE-PARITY.md](FEATURE-PARITY.md). HTML/CSS/JS are embedded from
+`internal/ui/page.html`; no external assets, fonts or framework.
+
 Launch with no args. Enter HTTPS upstream origin (https://momoapi.us, NOT /v1)
 and your key deliberately. Apply then Start. Window button/tray menu explicitly copies JSON
 base_url/api_key: random LOCAL token, not upstream key. /v1/responses,
@@ -89,9 +98,11 @@ The upstream input is cleared immediately on explicit Apply, and its temporary
 config reference is cleared in finally (not secure-memory erasure).
 node internal/ui/page_test.mjs exercises the shipped script with a simulated
 DOM/fetch, including locked-store controls, persistent save-failure notice,
-polling/focus, key clearing, stale responses and timeout. Native appcheck now
+polling/focus, key clearing, stale responses and timeout, plus rendered status,
+navigation/keyboard tabs and explicit capability gaps. Native appcheck now
 invokes the shipped DOM button handlers for Apply/Load/Start/Stop, asserts disabled
-controls/key clearing and automatically observes a native Stop then restarts.
+controls/key clearing, navigation/Load returning to Overview, rendered status,
+and automatically observes a native Stop then restarts.
 This is real WebView scripted DOM interaction in a tagged probe, NOT physical
 clicks, actual tray click, a distributed normal-binary GUI or visual acceptance.
 

@@ -68,7 +68,7 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 		configure(&options, core)
 	}
 	app = application.New(options)
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "MOMO 本地代理 · Preview", Width: 900, Height: 780, URL: "/"})
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "MOMO · 本地网关", Width: 1080, Height: 820, URL: "/"})
 	var mu sync.Mutex
 	initial, cancelInitial := false, false
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
