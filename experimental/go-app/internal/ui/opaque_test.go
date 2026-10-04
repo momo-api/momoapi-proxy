@@ -30,7 +30,7 @@ func TestOpaqueWebKitOriginRequiresPerHandlerCapability(t *testing.T) {
 		origin, nonce string
 		code          int
 	}{
-		{"null", "", 403}, {"null", "wrong", 403}, {"", nonce, 403},
+		{"null", "", 403}, {"null", "wrong", 403}, {"", "", 403}, {"", nonce, 200},
 		{"https://evil.example", nonce, 403}, {"null", nonce, 200},
 	} {
 		r := httptest.NewRequest("POST", "/app/state", nil)

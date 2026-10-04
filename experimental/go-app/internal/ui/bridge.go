@@ -17,8 +17,8 @@ import (
 type Actions struct {
 	CopyConnection func() error
 	Quit           func()
-	// WebKit custom schemes can serialize Origin as null. Require a separate
-	// unguessable page capability; never accept null Origin by itself.
+	// WebKit custom schemes can omit Origin or serialize it as null. Require a
+	// separate unguessable page capability; never accept either by itself.
 	AllowOpaqueOrigin bool
 }
 
@@ -51,7 +51,8 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			_, _ = io.WriteString(w, page)
 			return
 		}
-		opaqueAllowed := actions.AllowOpaqueOrigin && origin == "wails://localhost" && r.Header.Get("Origin") == "null" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) == 1
+		o := r.Header.Get("Origin")
+		opaqueAllowed := actions.AllowOpaqueOrigin && origin == "wails://localhost" && (o == "null" || o == "") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) == 1
 		if r.Header.Get("Origin") != origin && !opaqueAllowed {
 			http.Error(w, "origin required", 403)
 			return

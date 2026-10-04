@@ -32,9 +32,10 @@ NOT secure-memory erasure, keychain or protection against malicious same-user
 software. Copied local token is visible to clipboard history/other apps;
 stdout accessible to parent/redirection. No automatic clipboard clearing.
 Wails/asset logs disabled; upstream errors/headers never reflected. Fixed asset
-actions require exact Origin; WebKit null Origin additionally requires a random
+actions require exact Origin; WebKit missing/null Origin instead requires a random
 per-handler page capability (not the local API token), never null Origin alone.
-Missing/foreign Origin stays denied. No CORS, WebView token-return binding or TCP control API.
+Missing/null Origin without that capability and all foreign Origins stay denied.
+This handler is native assets only, not the TCP proxy. No CORS, WebView token-return binding or TCP control API.
 
 Root HTTPS/443 only; DNS public validation and literal-IP dial pinning (original
 TLS hostname/SNI retained), no redirects/env proxy. Private/loopback/linklocal/
