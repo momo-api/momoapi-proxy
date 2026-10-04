@@ -64,18 +64,28 @@ func check() error {
 			fmt.Println("PASS real WebView bridge and owned-core shutdown")
 			os.Exit(0) // macOS Run does not necessarily return; probe only.
 		}
-		original := ui.Handler(origin, core)
+		original := ui.HandlerWithActions(origin, core, ui.Actions{AllowOpaqueOrigin: runtime.GOOS != "windows"})
 		close(appReady)
-		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only'}],['start',null],['state',null],['stop',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-passthrough-only')throw Error();if(name==='start'&&!s.Running)throw Error();if(name==='stop'&&s.Running)throw Error()}await fetch('/check-done',{method:'POST'})}check().catch(()=>{})`
-		page := strings.Replace(ui.Page, "action('state')</script>", script+"</script>", 1)
+		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only'}],['start',null],['state',null],['stop',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-passthrough-only')throw Error();if(name==='start'&&!s.Running)throw Error();if(name==='stop'&&s.Running)throw Error()}await fetch('/check-done',{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}})}check().catch(()=>{})`
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
+				recorder := httptest.NewRecorder()
+				original.ServeHTTP(recorder, r)
+				if recorder.Code != 200 {
+					w.WriteHeader(recorder.Code)
+					return
+				}
+				page := strings.Replace(recorder.Body.String(), "action('state')</script>", script+"</script>", 1)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				_, _ = io.WriteString(w, page)
 				return
 			}
 			if r.URL.Path == "/check-done" {
-				if r.Method != "POST" || r.Header.Get("Origin") != origin {
+				validation := r.Clone(r.Context())
+				validation.URL.Path = "/app/state"
+				auth := httptest.NewRecorder()
+				original.ServeHTTP(auth, validation)
+				if auth.Code != 200 {
 					http.Error(w, "denied", 403)
 					return
 				}
@@ -91,10 +101,10 @@ func check() error {
 			recorder := httptest.NewRecorder()
 			original.ServeHTTP(recorder, r)
 			if strings.HasPrefix(r.URL.Path, "/app/") {
-				if r.Header.Get("Origin") == origin && recorder.Code == 200 {
-					fmt.Println("BRIDGE: origin=expected status=200")
+				if recorder.Code == 200 {
+					fmt.Println("BRIDGE: authorized status=200")
 				} else {
-					fmt.Println("BRIDGE: rejected")
+					fmt.Printf("BRIDGE: rejected status=%d exact-origin=%t opaque-origin=%t missing-origin=%t\n", recorder.Code, r.Header.Get("Origin") == origin, r.Header.Get("Origin") == "null", r.Header.Get("Origin") == "")
 				}
 			}
 			for k, v := range recorder.Header() {

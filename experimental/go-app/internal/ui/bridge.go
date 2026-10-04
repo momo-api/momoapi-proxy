@@ -3,16 +3,23 @@ package ui
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // Native actions return no credentials to the WebView. Nil disables the action.
 type Actions struct {
 	CopyConnection func() error
 	Quit           func()
+	// WebKit custom schemes can serialize Origin as null. Require a separate
+	// unguessable page capability; never accept null Origin by itself.
+	AllowOpaqueOrigin bool
 }
 
 func Handler(origin string, core *appcore.Core) http.Handler {
@@ -20,10 +27,14 @@ func Handler(origin string, core *appcore.Core) http.Handler {
 }
 
 func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http.Handler {
+	var nonce [32]byte
+	_, nonceErr := rand.Read(nonce[:])
+	bridgeNonce := hex.EncodeToString(nonce[:])
+	page := strings.Replace(Page, "<script>", "<script>const bridgeNonce='"+bridgeNonce+"';", 1)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if origin != "http://wails.localhost" && origin != "wails://localhost" {
+		if nonceErr != nil || (origin != "http://wails.localhost" && origin != "wails://localhost") {
 			http.Error(w, "invalid origin", 503)
 			return
 		}
@@ -37,10 +48,11 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 				return
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = io.WriteString(w, Page)
+			_, _ = io.WriteString(w, page)
 			return
 		}
-		if r.Header.Get("Origin") != origin {
+		opaqueAllowed := actions.AllowOpaqueOrigin && origin == "wails://localhost" && r.Header.Get("Origin") == "null" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) == 1
+		if r.Header.Get("Origin") != origin && !opaqueAllowed {
 			http.Error(w, "origin required", 403)
 			return
 		}

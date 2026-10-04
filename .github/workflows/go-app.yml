@@ -48,7 +48,7 @@ jobs:
       - name: Linux real WebView bridge and shutdown smoke
         if: runner.os == 'Linux'
         run: |
-          timeout 40s dbus-run-session -- xvfb-run -a "$RUNNER_TEMP/momo-appcheck"
+          timeout 40s xvfb-run -a dbus-run-session -- "$RUNNER_TEMP/momo-appcheck"
       - name: Package unsigned preview
         run: |
           export PREVIEW_DIR="$RUNNER_TEMP/momo-app-preview"

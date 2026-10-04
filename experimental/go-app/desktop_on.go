@@ -51,6 +51,7 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 	}
 	var app *application.App
 	assets := ui.HandlerWithActions(origin, core, ui.Actions{
+		AllowOpaqueOrigin: runtime.GOOS != "windows",
 		CopyConnection: func() error {
 			if !app.Clipboard.SetText(core.ConnectionJSON()) {
 				return errors.New("clipboard unavailable")
