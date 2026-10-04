@@ -1,0 +1,11 @@
+FROM golang:1.26.2-bookworm AS build
+WORKDIR /build
+COPY module/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /mockchat ./cmd/mockchat
+
+FROM node:24-bookworm-slim
+COPY --from=build /mockchat /app/mockchat
+COPY oracle/ /app/oracle/
+COPY node-mockchat.mjs container-mock.mjs container-entry.sh /app/
+USER 65534:65534
+ENTRYPOINT ["/bin/sh", "/app/container-entry.sh"]
