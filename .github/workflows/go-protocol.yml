@@ -39,3 +39,5 @@ jobs:
         run: go test -race -count=5 ./...
       - name: Identical offline fixtures against Node baseline
         run: node differential.mjs
+      - name: Same loopback fragmented mock, separate Go and Node bridges
+        run: node mock-stream.mjs
