@@ -61,8 +61,8 @@ jobs:
       - name: Archive with native executable permissions
         run: |
           mkdir -p "$RUNNER_TEMP/momo-app-download"
-          tar -czf "$RUNNER_TEMP/momo-app-download/momo-preview-${RUNNER_OS}-${RUNNER_ARCH}.tar.gz" -C "$RUNNER_TEMP/momo-app-preview" .
           export DOWNLOAD_DIR="$RUNNER_TEMP/momo-app-download"
+          python3 -c 'import os,pathlib,tarfile; p=pathlib.Path(os.environ["DOWNLOAD_DIR"]); name="momo-preview-"+os.environ["RUNNER_OS"]+"-"+os.environ["RUNNER_ARCH"]+".tar.gz"; archive=tarfile.open(p/name,"w:gz"); archive.add(pathlib.Path(os.environ["RUNNER_TEMP"])/"momo-app-preview",arcname="."); archive.close()'
           python3 -c 'import os,pathlib,hashlib; p=pathlib.Path(os.environ["DOWNLOAD_DIR"]); rows=[hashlib.sha256(f.read_bytes()).hexdigest()+"  "+f.name for f in sorted(p.glob("*.tar.gz"))]; (p/"SHA256SUMS").write_text("\n".join(rows)+"\n",encoding="utf-8")'
       - uses: actions/upload-artifact@v4
         with:
