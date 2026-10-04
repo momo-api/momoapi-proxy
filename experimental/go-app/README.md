@@ -54,6 +54,9 @@ Linux GTK3/WebKit2GTK4.1; macOS Xcode tools; Windows WebView2. Headless nogui
 builds need no native libraries. CI native compilation/core+bridge on 3 OSes,
 races on Linux/macOS, unsigned preview artifacts retained 7 days in private CI.
 Artifacts include Windows exe, macOS app bundle, Linux binary and SHA256SUMS.
+Payload is tar.gz inside Actions artifact ZIP to preserve Unix execute bits.
+Extract ZIP, verify SHA256SUMS, then extract tar.gz. Windows: run exe; macOS:
+open app; Linux: ./momo-preview with WebKit/GTK runtime libraries installed.
 Only each runner's actual architecture, not every CPU architecture. These are
 not signed releases/installers; SmartScreen/Gatekeeper may block previews.
 Do not disable OS protections globally to run them.
