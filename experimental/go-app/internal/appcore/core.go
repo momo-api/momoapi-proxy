@@ -1,4 +1,4 @@
-// Package appcore owns the actual local Responses passthrough service.
+// Package appcore owns the actual local Responses and Chat passthrough service.
 // No credential discovery, disk settings, provider conversion or Node dependency.
 package appcore
 
@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -224,7 +225,8 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		if !strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/json") {
+		requestType, _, typeErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if typeErr != nil || requestType != "application/json" {
 			http.Error(w, "JSON required", 415)
 			return
 		}
@@ -238,10 +240,11 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "model required", 400)
 			return
 		}
-		if raw, ok := payload["stream"]; ok && json.Unmarshal(raw, &stream) != nil {
+		if raw, ok := payload["stream"]; ok && (string(raw) != "true" && string(raw) != "false") {
 			http.Error(w, "invalid stream flag", 400)
 			return
 		}
+		stream = string(payload["stream"]) == "true"
 		if r.URL.Path == "/v1/chat/completions" {
 			var messages []json.RawMessage
 			if json.Unmarshal(payload["messages"], &messages) != nil || len(messages) == 0 {
@@ -275,9 +278,9 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream rejected request", status)
 		return
 	}
-	typ := strings.ToLower(upstream.Header.Get("Content-Type"))
+	typ, _, typeErr := mime.ParseMediaType(upstream.Header.Get("Content-Type"))
 	if stream {
-		if !strings.HasPrefix(typ, "text/event-stream") {
+		if typeErr != nil || typ != "text/event-stream" {
 			http.Error(w, "upstream protocol mismatch", 502)
 			return
 		}
@@ -313,7 +316,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		if !strings.HasPrefix(typ, "application/json") {
+		if typeErr != nil || typ != "application/json" {
 			http.Error(w, "upstream protocol mismatch", 502)
 			return
 		}
