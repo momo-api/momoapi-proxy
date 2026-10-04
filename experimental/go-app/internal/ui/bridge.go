@@ -75,6 +75,15 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "body rejected", 413)
 			return
 		}
+		// OS stores may wait for unlock. Reject overlapping mutations instead of
+		// piling up handlers; status/Stop stay available while a prompt is open.
+		if r.URL.Path != "/app/state" && r.URL.Path != "/app/stop" {
+			if !actionMu.TryLock() {
+				http.Error(w, "another native action is pending", 409)
+				return
+			}
+			defer actionMu.Unlock()
+		}
 		if r.URL.Path == "/app/configure" {
 			var input struct {
 				appcore.Config
@@ -91,8 +100,6 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 				http.Error(w, "invalid configuration", 400)
 				return
 			}
-			actionMu.Lock()
-			defer actionMu.Unlock()
 			if core.Configure(input.Config) != nil {
 				http.Error(w, "stop service and check HTTPS origin/key", 400)
 				return
@@ -106,8 +113,6 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 				http.Error(w, "body denied", 400)
 				return
 			}
-			actionMu.Lock()
-			defer actionMu.Unlock()
 			if r.URL.Path == "/app/load" {
 				s := core.State()
 				if s.Running || s.Active != 0 || actions.LoadProfile == nil {

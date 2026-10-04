@@ -36,6 +36,9 @@ Unchecking Remember does not delete a previous record. Forget removes only that
 record; current memory config/running proxy are unaffected. Save failure leaves
 the submitted memory config applied and displays a warning, never claims saved.
 System stores may prompt/unlock; Linux requires a running Secret Service.
+While a store action is pending, status and Stop remain available; overlapping
+mutations return 409 rather than queue. OS-store prompts are not cancellable by
+the app. Native tray Quit still owns shutdown.
 Saved JSON limited to 2400 bytes and endpoint 256 bytes for portable backend
 limits; larger valid profiles can still be used without Remember. Not sync across
 devices, secure-memory erasure, protection against malicious same-user apps or
