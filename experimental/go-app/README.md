@@ -66,6 +66,14 @@ Limits: request 1 MiB, response 16 MiB, active 4, TCP 32; upload 15s, upstream
 fabricated events. Clean EOF remains upstream behavior; no completion parser.
 Reconfigure only stopped with zero active. No ordinary disk credential file.
 
+Stop also interrupts incomplete fixed-length/chunked uploads rather than waiting
+for the 15s upload deadline. A cancellation callback sets only the in-flight
+request read deadline; normal completed uploads remove/join the callback before
+continuing so later keep-alive requests are not poisoned. Regression uses real
+TCP to occupy all four admission slots, Stop, wait for zero active, reconfigure
+and restart successfully; a separate test verifies 20 requests on one reused
+connection. No production workload/long-soak claim.
+
 ## Verification
 
 go vet -tags nogui ./...
@@ -113,7 +121,8 @@ synthetic config only. Checks invalid config fails without a token handoff,
 authentication, browser/route/method/JSON/body-size boundaries, private localhost
 DNS rejection/redacted error, 120 boundary requests with four concurrent workers, separate
 ports/tokens for two instances and cross-token rejection. Terminates the first
-instance while the second stays usable, then verifies both ports closed and
+instance with two incomplete fixed-length/chunked uploads while the second stays
+usable, then verifies both ports closed and
 clean zero exits. Unix uses SIGTERM then SIGINT; Windows uses Control-Break aimed
 only at each fresh child process group. Handoff tokens stay in harness memory;
 stdout/stderr content is never printed. No real upstream, success-path protocol
@@ -124,7 +133,9 @@ Separate appcheck,production probe uses real WebView/SAME desktop/core/
 bridge, synthetic key/temp profile and an actual httptest TLS mock server. Sequence:
 WebView state/configure+remember/change-config/load/start; native client uses authenticated local TCP to
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
-checking exact namespace/unknown-field/Unicode bytes; WebView stop; native client
+checking exact namespace/unknown-field/Unicode bytes; native client
+holds incomplete fixed-length/chunked uploads before WebView Stop, verifies zero
+active without waiting for the upload timeout, then
 asserts 503 while stopped; app quit. No real upstream or production key. PostShutdown
 checks cleared core config, stopped requests and closed listener. CI runs this
 on all three OSes (Linux under Xvfb/D-Bus). This is synthetic integrated E2E,

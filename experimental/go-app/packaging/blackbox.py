@@ -106,6 +106,30 @@ class Session:
         except OSError:
             pass
 
+    def stall_uploads(self):
+        sockets = []
+        try:
+            for framing in ("Content-Length: 100", "Transfer-Encoding: chunked"):
+                conn = socket.create_connection((self.host, self.port), timeout=2)
+                sockets.append(conn)
+                prefix = "64\r\n" if framing.startswith("Transfer-Encoding") else ""
+                data = ("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer "
+                        + self.token + "\r\nContent-Type: application/json\r\n" + framing + "\r\n\r\n" + prefix + "{")
+                conn.sendall(data.encode())
+            # Confirm partial bodies produce no response before shutdown.
+            for conn in sockets:
+                conn.settimeout(0.1)
+                try:
+                    conn.recv(1)
+                except socket.timeout:
+                    continue
+                raise RuntimeError("normal binary acceptance: incomplete upload was not held")
+            return sockets
+        except Exception:
+            for conn in sockets:
+                conn.close()
+            raise
+
     def force_stop(self):
         # Emergency cleanup touches only the exact child created by this check.
         if self.process is not None:
@@ -152,6 +176,7 @@ def check_runtime(binary):
     check_invalid_inputs(binary)
     allocated_console = False
     sessions = []
+    stalled = []
     try:
         if os.name == "nt":
             # CTRL_BREAK targets only the new child process group, never the runner.
@@ -170,15 +195,18 @@ def check_runtime(binary):
         require(first.port != second.port and first.token != second.token, "multiple instances share session")
         second.request("GET", "/v1/models", 401, headers={"Authorization": "Bearer " + first.token})
         check_boundaries(first)
+        stalled.extend(first.stall_uploads())
         first.stop(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
         second.request("GET", "/v1/models", 401, authenticated=False)
         second.stop(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT)
     finally:
+        for conn in stalled:
+            conn.close()
         for session in sessions:
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/clean signals/closed ports")
+    print("PASS normal packaged binary: invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":

@@ -216,7 +216,23 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	c.active++
 	c.mu.Unlock()
 	defer func() { cancel(); c.mu.Lock(); delete(c.cancels, id); c.active--; c.mu.Unlock() }()
+	// Context cancellation alone does not unblock a server-side request-body
+	// read. Interrupt this request's socket read so Stop releases admission even
+	// when a client stalls mid-upload. Join any running callback before proceeding
+	// so it cannot later modify a connection reused by another request.
+	readCancelled := make(chan struct{})
+	interruptRead := context.AfterFunc(ctx, func() {
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now())
+		close(readCancelled)
+	})
 	body, err := io.ReadAll(io.LimitReader(r.Body, MaxRequest+1))
+	if !interruptRead() {
+		<-readCancelled
+	}
+	if ctx.Err() != nil {
+		http.Error(w, "request cancelled", 503)
+		return
+	}
 	if err != nil || len(body) > MaxRequest {
 		http.Error(w, "request body rejected", 413)
 		return
