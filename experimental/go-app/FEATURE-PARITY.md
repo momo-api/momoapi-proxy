@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 仅精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses`；无无版本别名，无 compact |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 没有；只按客户端接口选择相同上游接口 |
-| Responses ↔ Chat 兼容路径 | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 不转换；上游必须支持请求的原协议 |
+| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 不转换；上游必须支持请求的原协议 |
 | Claude / Gemini / Muse | `src/claude-adapter.mjs`、`src/gemini-adapter.mjs`、`src/muse-adapter.mjs` | 未迁移 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 未迁移；字段原样转交，不提供本地回放 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
@@ -19,7 +19,7 @@
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
 | 跨平台 / 跨设备 | Go `desktop_on.go`、`packaging/` | Windows X64 / macOS ARM64 / Linux X64 预览；仅 127.0.0.1，不支持跨设备共享 |
 
-现有 Node 选路策略（不是 Go 已支持的清单）：
+现有 Node Responses 入口选路策略（不是 Go 已支持的清单；Chat 入口仍走 Chat 转发）：
 
 - `muse-auto` → Muse；`gemini-*` → Gemini；`claude-*` → Claude。
 - `mimo-*`、`gpt-5.6-sol` / `gpt-5.6-luna`、`*-sol` / `*-luna` / `*-responses` → Responses。
