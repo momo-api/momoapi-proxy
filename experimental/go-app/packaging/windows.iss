@@ -24,7 +24,8 @@ OutputBaseFilename=momo-preview-Windows-X64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-DisableProgramGroupPage=yes
+; 'yes' ignores /GROUP and breaks isolated shortcut acceptance in CI.
+DisableProgramGroupPage=auto
 UninstallDisplayIcon={app}\momo-preview.exe
 CloseApplications=yes
 RestartApplications=no

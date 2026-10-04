@@ -40,6 +40,9 @@ def windows(preview, download, temp, version):
     assert target.is_relative_to(temp.resolve()) and not target.exists(), "unsafe/reused CI target"
     # Test only in the caller's fresh CI temp directory, never an existing install.
     group = "MOMO Preview CI " + os.urandom(8).hex()
+    shortcut_dir = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs" / group
+    shortcuts = [shortcut_dir / name for name in ("MOMO API Preview.lnk", "Uninstall MOMO API Preview.lnk")]
+    assert not shortcut_dir.exists(), "refuse to reuse a Start menu group"
     run(installer, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-",
         "/DIR=" + str(target), "/GROUP=" + group)
     try:
@@ -48,12 +51,16 @@ def windows(preview, download, temp, version):
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, uninstall_key) as key:
             assert winreg.QueryValueEx(key, "DisplayVersion")[0] == version
             assert Path(winreg.QueryValueEx(key, "InstallLocation")[0]).resolve() == target
-        shortcut = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs" / group / "MOMO API Preview.lnk"
-        assert shortcut.is_file(), "missing Start menu shortcut"
+        assert all(shortcut.is_file() for shortcut in shortcuts), "missing Start menu launch/uninstall shortcut"
     finally:
         run(target / "unins000.exe", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART")
     assert not (target / "momo-preview.exe").exists(), "uninstall left executable"
-    assert not shortcut.exists(), "uninstall left shortcut"
+    assert not any(shortcut.exists() for shortcut in shortcuts), "uninstall left shortcut"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, uninstall_key):
+            raise AssertionError("uninstall left registration")
+    except FileNotFoundError:
+        pass
     print("PASS Windows current-user setup/payload/version/uninstall (CI-only temp target)")
 
 
