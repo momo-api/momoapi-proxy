@@ -1,0 +1,200 @@
+package appcore
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type responseWriter struct {
+	w                http.ResponseWriter
+	id, model, msgID string
+	text             strings.Builder
+	output           []any
+	written          int
+	index            int
+	completed        bool
+}
+
+func newID(prefix string) (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return prefix + hex.EncodeToString(b[:]), nil
+}
+func (e *responseWriter) event(name string, p map[string]any) error {
+	p["type"] = name
+	b, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	frame := "event: " + name + "\ndata: " + string(b) + "\n\n"
+	e.written += len(frame)
+	if e.written > MaxResponse {
+		return errRouted
+	}
+	controller := http.NewResponseController(e.w)
+	if err = controller.SetWriteDeadline(time.Now().Add(15 * time.Second)); err != nil {
+		return err
+	}
+	if _, err = io.WriteString(e.w, frame); err != nil {
+		return err
+	}
+	return controller.Flush()
+}
+func (e *responseWriter) textDelta(s string) error {
+	if s == "" {
+		return nil
+	}
+	if e.msgID == "" {
+		id, err := newID("msg_")
+		if err != nil {
+			return err
+		}
+		e.msgID = id
+		if err = e.event("response.output_item.added", map[string]any{"response_id": e.id, "output_index": e.index, "item": map[string]any{"id": id, "type": "message", "role": "assistant", "status": "in_progress", "content": []any{}}}); err != nil {
+			return err
+		}
+		if err = e.event("response.content_part.added", map[string]any{"response_id": e.id, "item_id": id, "output_index": e.index, "content_index": 0, "part": map[string]string{"type": "output_text", "text": ""}}); err != nil {
+			return err
+		}
+	}
+	e.text.WriteString(s)
+	return e.event("response.output_text.delta", map[string]any{"response_id": e.id, "item_id": e.msgID, "output_index": e.index, "content_index": 0, "delta": s})
+}
+func (e *responseWriter) flushText() error {
+	if e.msgID == "" {
+		return nil
+	}
+	s := e.text.String()
+	common := func() map[string]any {
+		return map[string]any{"response_id": e.id, "item_id": e.msgID, "output_index": e.index, "content_index": 0}
+	}
+	p := common()
+	p["text"] = s
+	if err := e.event("response.output_text.done", p); err != nil {
+		return err
+	}
+	p = common()
+	p["part"] = map[string]string{"type": "output_text", "text": s}
+	if err := e.event("response.content_part.done", p); err != nil {
+		return err
+	}
+	item := map[string]any{"id": e.msgID, "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]string{"type": "output_text", "text": s}}}
+	if err := e.event("response.output_item.done", map[string]any{"response_id": e.id, "output_index": e.index, "item": item}); err != nil {
+		return err
+	}
+	e.output = append(e.output, item)
+	e.index++
+	e.msgID = ""
+	e.text.Reset()
+	return nil
+}
+func (e *responseWriter) toolCall(call streamToolCall, tool chatTool) error {
+	args, parseErr := decodeObject(call.args)
+	if parseErr != nil {
+		return errRouted
+	}
+	field, typ, prefix, event := "arguments", "function_call", "fc_", "response.function_call_arguments"
+	valueBytes, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	value := string(valueBytes)
+	if tool.kind == "custom" {
+		input, ok := obj(args)["input"].(string)
+		if !ok || !only(obj(args), "input") {
+			return errRouted
+		}
+		value = input
+		field = "input"
+		typ = "custom_tool_call"
+		prefix = "ctc_"
+		event = "response.custom_tool_call_input"
+	}
+	if err := e.flushText(); err != nil {
+		return err
+	}
+	id, err := newID(prefix)
+	if err != nil {
+		return err
+	}
+	item := map[string]any{"id": id, "type": typ, "status": "completed", "call_id": call.id, "name": tool.name, field: value}
+	if tool.namespace != "" {
+		item["namespace"] = tool.namespace
+	}
+	added := map[string]any{}
+	for k, v := range item {
+		added[k] = v
+	}
+	added["status"] = "in_progress"
+	added[field] = ""
+	if err = e.event("response.output_item.added", map[string]any{"response_id": e.id, "output_index": e.index, "item": added}); err != nil {
+		return err
+	}
+	if value != "" {
+		if err = e.event(event+".delta", map[string]any{"response_id": e.id, "item_id": id, "output_index": e.index, "delta": value}); err != nil {
+			return err
+		}
+	}
+	if err = e.event(event+".done", map[string]any{"response_id": e.id, "item_id": id, "output_index": e.index, field: value}); err != nil {
+		return err
+	}
+	if err = e.event("response.output_item.done", map[string]any{"response_id": e.id, "output_index": e.index, "item": item}); err != nil {
+		return err
+	}
+	e.output = append(e.output, item)
+	e.index++
+	return nil
+}
+
+// streamEvent is protocol neutral. Only validated tool calls reach the encoder.
+type streamToolCall struct{ id, name, args string }
+type streamEvent struct {
+	kind  string
+	text  string
+	call  streamToolCall
+	usage map[string]any
+}
+
+func newResponseWriter(w http.ResponseWriter, model string) (*responseWriter, error) {
+	id, err := newID("resp_")
+	if err != nil {
+		return nil, err
+	}
+	e := &responseWriter{w: w, id: id, model: model, output: []any{}}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	err = e.event("response.created", map[string]any{"response": map[string]any{"id": id, "object": "response", "status": "in_progress", "model": model, "output": []any{}}})
+	return e, err
+}
+func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
+	if e.completed {
+		return errRouted
+	}
+	switch ev.kind {
+	case "text":
+		return e.textDelta(ev.text)
+	case "tool":
+		tool, ok := plan.restoreTool(ev.call.name)
+		if !ok {
+			return errRouted
+		}
+		return e.toolCall(ev.call, tool)
+	case "complete":
+		e.completed = true
+		if err := e.flushText(); err != nil {
+			return err
+		}
+		r := map[string]any{"id": e.id, "object": "response", "status": "completed", "model": e.model, "output": e.output}
+		if ev.usage != nil {
+			r["usage"] = ev.usage
+		}
+		return e.event("response.completed", map[string]any{"response": r})
+	}
+	return errRouted
+}

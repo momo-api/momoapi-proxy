@@ -24,11 +24,15 @@ func main() {
 		Stream string
 		Status int
 		Mode   string
+		Path   string
 	}
 	if json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&fixture) != nil {
 		os.Exit(1)
 	}
 	var mu sync.Mutex
+	if fixture.Path == "" {
+		fixture.Path = "/v1/chat/completions"
+	}
 	captures := []any{}
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/capture" {
@@ -39,7 +43,7 @@ func main() {
 			return
 		}
 		data, err := io.ReadAll(io.LimitReader(r.Body, appcore.MaxRequest+1))
-		if err != nil || len(data) > appcore.MaxRequest || r.URL.Path != "/v1/chat/completions" || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer synthetic-unified-only" {
+		if err != nil || len(data) > appcore.MaxRequest || r.URL.Path != fixture.Path || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer synthetic-unified-only" || fixture.Path == "/v1/messages" && r.Header.Get("anthropic-version") != "2023-06-01" {
 			w.WriteHeader(400)
 			return
 		}

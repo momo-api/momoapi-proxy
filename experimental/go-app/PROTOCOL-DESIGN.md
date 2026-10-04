@@ -50,7 +50,7 @@ Magpie 的转换核心清楚，不代表整个 gateway 很小：它还包含订�
 
 ## MOMO 建议：有界小 IR + 明确能力契约
 
-目标结构（设计建议，**尚未实施**）：
+目标结构（下述比较表为 `559547a` 历史基线；本轮已实施最小请求/事件中间层）：
 
 ```text
 本地鉴权/请求预算
@@ -80,3 +80,20 @@ Magpie 的转换核心清楚，不代表整个 gateway 很小：它还包含订�
 - https://github.com/yetone/magpie/tree/23eb6c5f326b1721d560c8e5e384caa5b397cdc1/internal/gateway
 - https://github.com/lidge-jun/opencodex/tree/06841165f884a9176d701310638b2112aca7a514/src/protocols
 - https://github.com/lidge-jun/opencodex/tree/06841165f884a9176d701310638b2112aca7a514/src/adapters
+
+## 本轮实现（历史比较之后）
+
+- typed routeRequest 保存文本、角色、声明/历史工具身份；Chat 与 Claude 直接编码
+  各自 wire，不经 Chat JSON 再转 Messages。共享 decodeObject 使用 json.Number，
+  参数/Schema 大整数不因 float64 失真；函数参数只接受 JSON object。
+- Chat/Claude decoder 输出小 streamEvent，共享有生命周期门禁的 Responses encoder
+  与有界 SSE framing；文本→工具→文本会正确清空上一文本缓冲。
+- Claude 支持文本、配对 function/custom 历史、相邻角色合并、namespace 与 auto/
+  none/required tool_choice。固定 max_tokens=12240 与现有 Node 普通 Claude 默认
+  一致；不接受显式 token 上限、thinking/reasoning、签名或媒体。
+- Claude 要求 start、顺序闭合块、已支持 stop_reason 和 message_stop；校验基础
+  usage 及安全整数范围。cache read/creation 计入 input_tokens；不提供详细成本。
+  块关闭后可能已有工具 item.done，但只有整条消息终止才发 response.completed；
+  客户端不能把单个 item.done 当整条响应成功。故障中止 HTTP，不重发、不回放。
+- Node/Go 统一 mock 黑盒扩为20组，保留可见差异（见 FEATURE-PARITY.md）。
+  仍未三方统一测试，仍未功能全部对齐；Gemini 501，Muse 不迁移，默认透传不改。

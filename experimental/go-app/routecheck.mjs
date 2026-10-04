@@ -16,6 +16,14 @@ const calls=sse([
  chunk({tool_calls:[{index:0,function:{arguments:'1}'}},{index:1,id:'call_write',type:'function',function:{name:'pad__write',arguments:'{"input":"text(\'hi\')"}'}}]}),
  chunk({},'tool_calls')]);
 const bare=sse([chunk({tool_calls:[{index:0,id:'call_read',type:'function',function:{name:'read',arguments:'{}'}}]},'tool_calls')]);
+const cf=(type,fields={})=>'event: '+type+'\r\ndata: '+JSON.stringify({type,...fields})+'\r\n\r\n';
+const cs=cf('message_start',{message:{id:'msg_mock',type:'message',role:'assistant',model:'claude-sonnet-4-6',content:[],stop_reason:null,stop_sequence:null,usage:{input_tokens:3,output_tokens:1}}});
+const ce=reason=>cf('message_delta',{delta:{stop_reason:reason,stop_sequence:null},usage:{output_tokens:5}})+cf('message_stop');
+const ct=(index,text)=>cf('content_block_start',{index,content_block:{type:'text',text:''}})+cf('content_block_delta',{index,delta:{type:'text_delta',text}})+cf('content_block_stop',{index});
+const ctool=(index,id,name,partial_json)=>cf('content_block_start',{index,content_block:{type:'tool_use',id,name,input:{}}})+cf('content_block_delta',{index,delta:{type:'input_json_delta',partial_json}})+cf('content_block_stop',{index});
+const claudeText=cs+ct(0,'中文🙂')+ce('end_turn');
+const claudeCalls=cs+ctool(0,'call_read','pad__read','{"x":1}')+ctool(1,'call_write','pad__write',JSON.stringify({input:"text('hi')"}))+ce('tool_use');
+const cp={...payload,model:'claude-sonnet-4-6'};
 const cases=[
  {name:'text Unicode fragmented',stream:text,payload},
  {name:'function custom namespace fragmented',stream:calls,payload},
@@ -26,6 +34,13 @@ const cases=[
  {name:'namespace absent from upstream delta',stream:bare,payload},
  ...[401,429,500].map(status=>({name:'upstream '+status,stream:'',status,payload})),
  {name:'truncated EOF safety difference',stream:'data: '+JSON.stringify(chunk({content:'partial'}))+'\n\n',payload,truncate:true},
+ {name:'Claude Unicode fragmented',stream:claudeText,payload:cp,path:'/v1/messages'},
+ {name:'Claude function/custom namespace',stream:claudeCalls,payload:cp,path:'/v1/messages'},
+ {name:'Claude paired parallel history',stream:claudeText,payload:{...cp,input:[...cp.input,{role:'assistant',content:'checking'},{type:'function_call',call_id:'a',namespace:'pad',name:'read',arguments:'{}'},{type:'custom_tool_call',call_id:'b',namespace:'pad',name:'write',input:'hello'},{type:'function_call_output',call_id:'a',output:'read'},{type:'custom_tool_call_output',call_id:'b',output:'written'},{role:'user',content:'continue'}]},path:'/v1/messages',historyDifference:true},
+ {name:'Claude four concurrent same-resource',stream:claudeText,payload:cp,path:'/v1/messages',concurrent:4},
+ ...[401,429,500].map(status=>({name:'Claude upstream '+status,stream:'',status,payload:cp,path:'/v1/messages'})),
+ {name:'Claude truncated EOF safety difference',stream:cs+ct(0,'partial'),payload:cp,path:'/v1/messages',truncate:true},
+ {name:'Claude system/tool choice preservation',stream:claudeText,payload:{...cp,tool_choice:'required',input:[{role:'developer',content:'rules'},...cp.input]},path:'/v1/messages',systemDifference:true},
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -34,7 +49,7 @@ async function launch(fixture){
   let line='';const timer=setTimeout(()=>reject(Error('routecheck startup timeout')),10000);
   child.once('error',reject);child.once('exit',()=>{clearTimeout(timer);reject(Error('routecheck exited before handoff'))});
   child.stdout.on('data',b=>{line+=b;if(line.includes('\n')){clearTimeout(timer);resolve(JSON.parse(line.split('\n')[0]))}});
-  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200}));
+  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200,Path:fixture.path}));
  });
  return {child,handoff};
 }
@@ -70,7 +85,22 @@ for(const fixture of cases){
   const goResults=await Promise.all(Array.from({length:count},()=>invoke(goURL,handoff.api_key,fixture.payload)));
   const captures=await(await fetch(handoff.mock_url+'/capture')).json();
   assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
-  for(let i=0;i<count;i++)assert.deepEqual(captures[count+i],captures[i],fixture.name+' upstream request mismatch');
+  for(let i=0;i<count;i++){
+   const n=structuredClone(captures[i]),g=structuredClone(captures[count+i]);
+   if(fixture.path==='/v1/messages'){
+    assert.equal(g.tool_choice.type,fixture.systemDifference?'any':'auto');assert.equal(n.tool_choice,undefined);delete g.tool_choice;
+    if(fixture.systemDifference){assert.equal(g.system,'Be concise.\n\nrules');assert.equal(n.system,'Be concise.');assert.equal(g.messages.length,1);assert.deepEqual(n.messages,[{role:'user',content:[{type:'text',text:'rules'},{type:'text',text:'中文🙂'}]}]);g.system=n.system;g.messages[0].content.unshift({type:'text',text:'rules'});console.log('DIFFERENCE Go keeps system instructions and tool choice; Node Claude maps developer to user and omits choice')}
+    if(fixture.historyDifference){
+     assert.equal(g.messages.length,3);assert.equal(n.messages.length,3);
+     const gc=g.messages[1].content,nc=n.messages[1].content;
+     assert.equal(gc[1].name,'pad__read');assert.equal(nc[1].name,'read');gc[1].name=nc[1].name;
+     assert.equal(gc[2].name,'pad__write');assert.equal(nc[2].name,'write');gc[2].name=nc[2].name;
+     assert.deepEqual(gc[2].input,{input:'hello'});assert.deepEqual(nc[2].input,{raw:'hello'});gc[2].input={raw:gc[2].input.input};
+     console.log('DIFFERENCE Go Claude history uses declared namespace aliases and input schema; Node uses bare names/raw');
+    }
+   }
+   assert.deepEqual(g,n,fixture.name+' upstream request mismatch');
+  }
   for(let i=0;i<count;i++){
    const n=nodeResults[i],g=goResults[i];assert.equal(g.status,n.status,fixture.name+' HTTP status');
    if(fixture.status){assert.equal(g.completed,undefined);assert.equal(n.completed,undefined)}
@@ -80,7 +110,8 @@ for(const fixture of cases){
     // Legacy Node drops explicit namespaces on Chat calls; Go restores them.
     const normalized=g.output.map(({namespace,...item})=>item);
     assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
-    if(fixture.stream===calls||fixture.stream===bare){assert.equal(g.output[0].namespace,'pad');assert.equal(n.output[0].namespace,undefined);console.log('DIFFERENCE explicit namespace restored in Go; Node Chat output lacks it')}
+    if(fixture.stream===calls||fixture.stream===bare||fixture.stream===claudeCalls){assert.equal(g.output[0].namespace,'pad');assert.equal(n.output[0].namespace,undefined);console.log('DIFFERENCE explicit namespace restored in Go; legacy Node output lacks it')}
+    if(fixture.path==='/v1/messages'){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:8});assert.equal(n.completed.response.usage,undefined)}
    }
   }
   console.log('PASS uniform blackbox '+fixture.name);
@@ -89,4 +120,4 @@ for(const fixture of cases){
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-console.log('PASS shared mock/resource routing subset; explicit namespace/truncation differences, not full parity or performance proof');
+console.log('PASS 20 shared mock/resource routing cases; explicit namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');

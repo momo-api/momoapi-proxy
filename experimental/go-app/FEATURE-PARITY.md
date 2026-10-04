@@ -9,9 +9,10 @@
 | 能力 | Node 版实现依据（仓库根目录相对路径） | Go 预览实际范围 |
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 仅精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses`；无无版本别名，无 compact |
-| 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat 子集转换；未迁移协议 501 |
+| 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude 子集转换；未迁移协议 501 |
 | Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 新增严格流式文本/function/部分 custom 子集、namespace 恢复；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
-| Claude / Gemini | `src/claude-adapter.mjs`、`src/gemini-adapter.mjs` | 未迁移 |
+| Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
+| Gemini | `src/gemini-adapter.mjs` | 未迁移；实验模式 501 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 未迁移；字段原样转交，不提供本地回放 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
@@ -35,7 +36,7 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 ## 本次实际验证范围
 
 `internal/appcore/` 回归覆盖原协议 JSON/SSE、namespace/未知字段保留、Chat 工具调用、
-鉴权/地址策略/资源限制/取消/重启；`internal/ui/page_test.mjs` 覆盖已交付页面脚本、
+Claude Unicode/大整数/文本工具交错/usage/错误截断/取消、鉴权/地址策略/资源限制/重启；`internal/ui/page_test.mjs` 覆盖已交付页面脚本、
 导航与键盘、状态渲染、保存失败与阻塞、清空 Key、轮询排序；
 `appcheck_page.go` 在真实 WebView 中调用相同 DOM 事件处理器并连接本地 TCP/TLS mock。
 安装包黑盒测试见 `packaging/blackbox.py`。
@@ -53,7 +54,13 @@ CPU/RSS 容器配额隔离，不能作为性能或生产稳定性比较。Go tes
 发现并保留可见差异：Node 该 Chat 路径缺显式 namespace，Go 恢复；Node 会对
 干净但提前结束的流生成 completed，Go 要求 finish_reason + [DONE]，否则中止 HTTP。
 比较规范化语义输出而非随机 ID；namespace 差异单独断言，不掩饰为完全等价。
-非流式 JSON 转换、usage 映射、DSML、复杂工具/history/媒体仍是未完成门槛。
+本轮统一黑盒扩为20组：增加 Claude Unicode、function/custom、配对并行历史、
+四并发、401/429/500、提前 EOF、system/tool_choice。仅在已断言的已知差异上做
+比较规范化：Go 恢复 namespace；Claude 历史使用声明中的别名和 input 包装，Node
+用裸名和 raw；Go 保留 developer/system 指令与 tool_choice，Node 合并为用户文本
+且忽略 choice；Go 输出经校验的 token usage，Node 未输出。两种转换的 Go 都不把
+提前 EOF 当完成。每项差异有独立精确断言，不称全部等价。
+非流式 JSON 转换、Chat usage、DSML、复杂工具/history/媒体仍是未完成门槛。
 
 ## Magpie 借鉴边界
 
@@ -75,4 +82,4 @@ CPU/RSS 容器配额隔离，不能作为性能或生产稳定性比较。Go tes
 迁移期间保留 Node 完整实现；差异必须明确记录，核心验收未通过不得切换默认产品。
 
 协议架构比较与建议见 [PROTOCOL-DESIGN.md](PROTOCOL-DESIGN.md)：以紧凑、保语义的
-请求/事件中间层承载后续 Claude/Gemini，而非继续复制成对转换器；这是设计建议，尚未实施重构。
+请求/事件中间层承载后续 Claude/Gemini，而非继续复制成对转换器；已实施最小 typed request IR、共享 SSE framing 和 Responses encoder；没有引入整个参考项目。

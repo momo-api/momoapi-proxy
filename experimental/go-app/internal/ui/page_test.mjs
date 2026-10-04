@@ -45,6 +45,8 @@ assert.equal(nodes.get('routing-state').textContent,'默认原协议透传');
 assert.match(source,/尚未对齐/);
 assert.match(source,/可启用部分路由/);
 assert.match(source,/Muse 转换不在计划内/);
+assert.ok(source.includes('Chat / Claude 子集 · 实验'));
+assert.ok(source.includes('不含 thinking/签名'));
 assert.doesNotMatch(source,/Gemini \/ Claude \/ Muse 尚未迁移/);
 assert.equal((source.match(/>未迁移</g)||[]).length,3);
 assert.doesNotMatch(source,/<(?:script|link|img)[^>]*(?:src|href)=/i);

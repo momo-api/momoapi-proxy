@@ -26,6 +26,22 @@ func resolveProtocol(model string) string {
 	return "chat"
 }
 
+// routeRequest is the bounded protocol-neutral subset. It never contains client wire JSON.
+type routeCall struct{ id, wire, args string }
+type routeMessage struct {
+	role, text, resultID string
+	calls                []routeCall
+}
+type routeTool struct {
+	chatTool
+	description string
+	schema      any
+}
+type routeRequest struct {
+	model, choice, effort string
+	messages              []routeMessage
+	tools                 []routeTool
+}
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
 	body  []byte
@@ -83,12 +99,18 @@ func textParts(v any) (string, error) {
 
 // Intentionally explicit subset. Never silently discard media/history refs,
 // unsupported knobs, built-in tools or ambiguous namespace collisions.
-func buildChatPlan(data []byte) (*chatPlan, error) {
+func parseRoutedRequest(data []byte) (*routeRequest, error) {
+	if len(data) > MaxRequest || !json.Valid(data) {
+		return nil, errRouted
+	}
 	var p map[string]any
-	if json.Unmarshal(data, &p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort") || p["stream"] != true {
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort") || p["stream"] != true {
 		return nil, errRouted
 	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
+	ir := &routeRequest{model: plan.model}
 	if plan.model == "" {
 		return nil, errRouted
 	}
@@ -99,7 +121,7 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 			}
 		}
 	}
-	tools := []any{}
+	tools := []routeTool{}
 	var addTool func(map[string]any, string) error
 	addTool = func(t map[string]any, ns string) error {
 		if t == nil {
@@ -175,7 +197,7 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 			parameters = map[string]any{"type": "object", "properties": map[string]any{"input": map[string]any{"type": "string", "description": "Raw freeform input for this tool."}}, "required": []string{"input"}, "additionalProperties": false}
 		}
 		plan.tools[wire] = chatTool{wire, name, ns, kind}
-		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": wire, "description": description, "parameters": parameters}})
+		tools = append(tools, routeTool{plan.tools[wire], description, parameters})
 		return nil
 	}
 	if v, present := p["tools"]; present {
@@ -189,14 +211,14 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 			}
 		}
 	}
-	messages := []any{}
+	messages := []routeMessage{}
 	if v, present := p["instructions"]; present {
 		s, ok := v.(string)
 		if !ok {
 			return nil, errRouted
 		}
 		if s = strings.TrimSpace(s); s != "" {
-			messages = append(messages, map[string]any{"role": "system", "content": s})
+			messages = append(messages, routeMessage{role: "system", text: s})
 		}
 	}
 	input, ok := p["input"].([]any)
@@ -217,6 +239,10 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 		}
 		switch str(m["type"]) {
 		case "function_call", "custom_tool_call":
+			// A tool-use turn must finish declaring calls before returning results.
+			if len(seen) >= 128 || len(pending) > 0 && len(messages) > 0 && messages[len(messages)-1].role == "tool" {
+				return nil, errRouted
+			}
 			if !only(m, "type", "name", "namespace", "call_id", "arguments", "input") {
 				return nil, errRouted
 			}
@@ -255,19 +281,17 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 				args = string(b)
 				ok = true
 			}
-			if !ok || !json.Valid([]byte(args)) {
+			if _, err := decodeObject(args); !ok || err != nil {
 				return nil, errRouted
 			}
 			seen[id] = true
 			pending[id] = tool.kind
-			call := map[string]any{"id": id, "type": "function", "function": map[string]string{"name": wire, "arguments": args}}
-			if len(messages) > 0 && obj(messages[len(messages)-1])["role"] == "assistant" {
-				last := obj(messages[len(messages)-1])
-				prior, _ := last["tool_calls"].([]any)
-				last["tool_calls"] = append(prior, call)
-			} else {
-				messages = append(messages, map[string]any{"role": "assistant", "content": "", "tool_calls": []any{call}})
+			call := routeCall{id: id, wire: wire, args: args}
+			if len(messages) == 0 || messages[len(messages)-1].role != "assistant" {
+				messages = append(messages, routeMessage{role: "assistant"})
 			}
+			last := &messages[len(messages)-1]
+			last.calls = append(last.calls, call)
 		case "function_call_output", "custom_tool_call_output":
 			if !only(m, "type", "call_id", "output") {
 				return nil, errRouted
@@ -282,7 +306,7 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 				return nil, err
 			}
 			delete(pending, id)
-			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": id, "content": content})
+			messages = append(messages, routeMessage{role: "tool", resultID: id, text: content})
 		case "", "message":
 			if len(pending) != 0 || !only(m, "type", "role", "content") {
 				return nil, errRouted
@@ -302,7 +326,7 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 			if content == "" && role == "user" {
 				content = "Continue."
 			}
-			messages = append(messages, map[string]any{"role": role, "content": content})
+			messages = append(messages, routeMessage{role: role, text: content})
 		default:
 			return nil, errRouted
 		}
@@ -310,35 +334,15 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 	if len(pending) != 0 {
 		return nil, errRouted
 	}
-	if strings.Contains(strings.ToLower(plan.model), "qwen") {
-		system := []string{}
-		rest := []any{}
-		for _, v := range messages {
-			m := obj(v)
-			if m["role"] == "system" {
-				if s := strings.TrimSpace(str(m["content"])); s != "" {
-					system = append(system, s)
-				}
-			} else {
-				rest = append(rest, v)
-			}
-		}
-		messages = rest
-		if len(system) > 0 {
-			messages = append([]any{map[string]any{"role": "system", "content": strings.Join(system, "\n\n")}}, rest...)
-		}
-	}
-	body := map[string]any{"model": plan.model, "messages": messages, "stream": true}
+	ir.messages, ir.tools = messages, tools
 	if len(tools) > 0 {
-		body["tools"] = tools
-		choice := "auto"
+		ir.choice = "auto"
 		if v, present := p["tool_choice"]; present {
-			choice = str(v)
-			if choice != "auto" && choice != "none" && choice != "required" {
+			ir.choice = str(v)
+			if ir.choice != "auto" && ir.choice != "none" && ir.choice != "required" {
 				return nil, errRouted
 			}
 		}
-		body["tool_choice"] = choice
 	} else if _, present := p["tool_choice"]; present {
 		return nil, errRouted
 	}
@@ -355,15 +359,8 @@ func buildChatPlan(data []byte) (*chatPlan, error) {
 			effort = str(m["effort"])
 		}
 	}
-	if effort != "" {
-		body["reasoning_effort"] = strings.ToLower(effort)
-	}
-	b, err := json.Marshal(body)
-	if err != nil || len(b) > MaxRequest {
-		return nil, errRouted
-	}
-	plan.body = b
-	return plan, nil
+	ir.effort = strings.ToLower(effort)
+	return ir, nil
 }
 
 // Bare names are restored only if unambiguous; never guess between namespaces.
@@ -383,4 +380,72 @@ func (p *chatPlan) restoreTool(name string) (chatTool, bool) {
 		}
 	}
 	return match, found
+}
+
+func decodeObject(raw string) (map[string]any, error) {
+	var m map[string]any
+	d := json.NewDecoder(strings.NewReader(raw))
+	d.UseNumber()
+	if !json.Valid([]byte(raw)) || d.Decode(&m) != nil || m == nil {
+		return nil, errRouted
+	}
+	return m, nil
+}
+func buildChatPlan(data []byte) (*chatPlan, error) {
+	ir, err := parseRoutedRequest(data)
+	if err != nil {
+		return nil, err
+	}
+	return encodeChatRequest(ir)
+}
+func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
+	messages := []any{}
+	systems := []string{}
+	qwen := strings.Contains(strings.ToLower(ir.model), "qwen")
+	for _, m := range ir.messages {
+		if qwen && m.role == "system" {
+			if s := strings.TrimSpace(m.text); s != "" {
+				systems = append(systems, s)
+			}
+			continue
+		}
+		v := map[string]any{"role": m.role, "content": m.text}
+		if m.resultID != "" {
+			v["tool_call_id"] = m.resultID
+		}
+		if len(m.calls) > 0 {
+			calls := []any{}
+			for _, c := range m.calls {
+				calls = append(calls, map[string]any{"id": c.id, "type": "function", "function": map[string]string{"name": c.wire, "arguments": c.args}})
+			}
+			v["tool_calls"] = calls
+		}
+		messages = append(messages, v)
+	}
+	if len(systems) > 0 {
+		messages = append([]any{map[string]any{"role": "system", "content": strings.Join(systems, "\n\n")}}, messages...)
+	}
+	body := map[string]any{"model": ir.model, "stream": true, "messages": messages}
+	tools := []any{}
+	for _, t := range ir.tools {
+		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": t.wire, "description": t.description, "parameters": t.schema}})
+	}
+	if len(tools) > 0 {
+		body["tools"], body["tool_choice"] = tools, ir.choice
+	}
+	if ir.effort != "" {
+		body["reasoning_effort"] = ir.effort
+	}
+	return serializePlan(ir, body)
+}
+func serializePlan(ir *routeRequest, body map[string]any) (*chatPlan, error) {
+	b, err := json.Marshal(body)
+	if err != nil || len(b) > MaxRequest {
+		return nil, errRouted
+	}
+	p := &chatPlan{body: b, model: ir.model, tools: map[string]chatTool{}}
+	for _, t := range ir.tools {
+		p.tools[t.wire] = t.chatTool
+	}
+	return p, nil
 }

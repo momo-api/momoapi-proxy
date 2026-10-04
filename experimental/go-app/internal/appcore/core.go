@@ -138,7 +138,7 @@ func (c *Core) State() State {
 	}
 	capability := Capability
 	if mode == "momo-routing" {
-		capability = "partial-momo-responses-chat-routing"
+		capability = "partial-momo-responses-chat-claude-routing"
 	}
 	return State{Version, c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, capability, mode}
 }
@@ -252,6 +252,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	stream := false
 	var routed *chatPlan
+	routedProtocol := ""
 	upstreamPath := r.URL.Path
 	if r.Method == "GET" {
 		if len(body) != 0 {
@@ -282,6 +283,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" {
 			switch resolveProtocol(model) {
 			case "chat":
+				routedProtocol = "chat"
 				var routeErr error
 				routed, routeErr = buildChatPlan(body)
 				if routeErr != nil {
@@ -290,6 +292,16 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				}
 				body = routed.body
 				upstreamPath = "/v1/chat/completions"
+			case "claude":
+				routedProtocol = "claude"
+				var routeErr error
+				routed, routeErr = buildClaudePlan(body)
+				if routeErr != nil {
+					http.Error(w, "unsupported routed Responses payload", 400)
+					return
+				}
+				body = routed.body
+				upstreamPath = "/v1/messages"
 			case "responses": // preserve existing exact native protocol bytes
 			default:
 				http.Error(w, "model protocol not migrated", 501)
@@ -311,6 +323,9 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	upstreamReq.Header.Set("Authorization", "Bearer "+config.APIKey)
+	if routedProtocol == "claude" {
+		upstreamReq.Header.Set("anthropic-version", "2023-06-01")
+	}
 	if r.Method == "POST" {
 		upstreamReq.Header.Set("Content-Type", "application/json")
 	}
@@ -335,7 +350,13 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "upstream protocol mismatch", 502)
 			return
 		}
-		if convertChatStream(ctx, w, upstream.Body, routed) != nil {
+		var convertErr error
+		if routedProtocol == "claude" {
+			convertErr = convertClaudeStream(ctx, w, upstream.Body, routed)
+		} else {
+			convertErr = convertChatStream(ctx, w, upstream.Body, routed)
+		}
+		if convertErr != nil {
 			panic(http.ErrAbortHandler)
 		}
 		return

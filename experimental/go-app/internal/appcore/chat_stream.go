@@ -1,16 +1,11 @@
 package appcore
 
 import (
-	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 const maxRoutedRetained = 1 << 20
@@ -20,182 +15,41 @@ type chatCall struct {
 	id         string
 	name, args strings.Builder
 }
-type responseWriter struct {
-	w                http.ResponseWriter
-	id, model, msgID string
-	text             strings.Builder
-	output           []any
-	written          int
-	index            int
-}
-
-func newID(prefix string) (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return prefix + hex.EncodeToString(b[:]), nil
-}
-func (e *responseWriter) event(name string, p map[string]any) error {
-	p["type"] = name
-	b, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	frame := "event: " + name + "\ndata: " + string(b) + "\n\n"
-	e.written += len(frame)
-	if e.written > MaxResponse {
-		return errRouted
-	}
-	controller := http.NewResponseController(e.w)
-	if err = controller.SetWriteDeadline(time.Now().Add(15 * time.Second)); err != nil {
-		return err
-	}
-	if _, err = io.WriteString(e.w, frame); err != nil {
-		return err
-	}
-	return controller.Flush()
-}
-func (e *responseWriter) textDelta(s string) error {
-	if s == "" {
-		return nil
-	}
-	if e.msgID == "" {
-		id, err := newID("msg_")
-		if err != nil {
-			return err
-		}
-		e.msgID = id
-		if err = e.event("response.output_item.added", map[string]any{"response_id": e.id, "output_index": e.index, "item": map[string]any{"id": id, "type": "message", "role": "assistant", "status": "in_progress", "content": []any{}}}); err != nil {
-			return err
-		}
-		if err = e.event("response.content_part.added", map[string]any{"response_id": e.id, "item_id": id, "output_index": e.index, "content_index": 0, "part": map[string]string{"type": "output_text", "text": ""}}); err != nil {
-			return err
-		}
-	}
-	e.text.WriteString(s)
-	return e.event("response.output_text.delta", map[string]any{"response_id": e.id, "item_id": e.msgID, "output_index": e.index, "content_index": 0, "delta": s})
-}
-func (e *responseWriter) flushText() error {
-	if e.msgID == "" {
-		return nil
-	}
-	s := e.text.String()
-	common := func() map[string]any {
-		return map[string]any{"response_id": e.id, "item_id": e.msgID, "output_index": e.index, "content_index": 0}
-	}
-	p := common()
-	p["text"] = s
-	if err := e.event("response.output_text.done", p); err != nil {
-		return err
-	}
-	p = common()
-	p["part"] = map[string]string{"type": "output_text", "text": s}
-	if err := e.event("response.content_part.done", p); err != nil {
-		return err
-	}
-	item := map[string]any{"id": e.msgID, "type": "message", "role": "assistant", "status": "completed", "content": []any{map[string]string{"type": "output_text", "text": s}}}
-	if err := e.event("response.output_item.done", map[string]any{"response_id": e.id, "output_index": e.index, "item": item}); err != nil {
-		return err
-	}
-	e.output = append(e.output, item)
-	e.index++
-	e.msgID = ""
-	return nil
-}
-func (e *responseWriter) toolCall(call *chatCall, tool chatTool) error {
-	if err := e.flushText(); err != nil {
-		return err
-	}
-	var args any
-	if json.Unmarshal([]byte(call.args.String()), &args) != nil {
-		return errRouted
-	}
-	field, typ, prefix, event := "arguments", "function_call", "fc_", "response.function_call_arguments"
-	valueBytes, err := json.Marshal(args)
-	if err != nil {
-		return err
-	}
-	value := string(valueBytes)
-	if tool.kind == "custom" {
-		input, ok := obj(args)["input"].(string)
-		if !ok || !only(obj(args), "input") {
-			return errRouted
-		}
-		value = input
-		field = "input"
-		typ = "custom_tool_call"
-		prefix = "ctc_"
-		event = "response.custom_tool_call_input"
-	}
-	id, err := newID(prefix)
-	if err != nil {
-		return err
-	}
-	item := map[string]any{"id": id, "type": typ, "status": "completed", "call_id": call.id, "name": tool.name, field: value}
-	if tool.namespace != "" {
-		item["namespace"] = tool.namespace
-	}
-	added := map[string]any{}
-	for k, v := range item {
-		added[k] = v
-	}
-	added["status"] = "in_progress"
-	added[field] = ""
-	if err = e.event("response.output_item.added", map[string]any{"response_id": e.id, "output_index": e.index, "item": added}); err != nil {
-		return err
-	}
-	if value != "" {
-		if err = e.event(event+".delta", map[string]any{"response_id": e.id, "item_id": id, "output_index": e.index, "delta": value}); err != nil {
-			return err
-		}
-	}
-	if err = e.event(event+".done", map[string]any{"response_id": e.id, "item_id": id, "output_index": e.index, field: value}); err != nil {
-		return err
-	}
-	if err = e.event("response.output_item.done", map[string]any{"response_id": e.id, "output_index": e.index, "item": item}); err != nil {
-		return err
-	}
-	e.output = append(e.output, item)
-	e.index++
-	return nil
-}
 
 // Incremental text, bounded retained tool arguments, exact namespace restoration.
 // Never manufacture completion on malformed data/truncated EOF/length refusal.
 // Unlike the legacy Node adapter, require finish_reason and [DONE]. No replay.
 func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reader, plan *chatPlan) error {
-	id, err := newID("resp_")
+	e, err := newResponseWriter(w, plan.model)
 	if err != nil {
 		return err
 	}
-	e := &responseWriter{w: w, id: id, model: plan.model, output: []any{}}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	if err = e.event("response.created", map[string]any{"response": map[string]any{"id": id, "object": "response", "status": "in_progress", "model": plan.model, "output": []any{}}}); err != nil {
-		return err
-	}
-	scanner := bufio.NewScanner(io.LimitReader(body, MaxResponse+1))
-	scanner.Buffer(make([]byte, 4096), maxRoutedEvent)
 	calls := map[int]*chatCall{}
 	order := []int{}
-	retained, total := 0, 0
+	retained := 0
 	finished := false
-	events := 0
 	dsmlTail := ""
-	var data strings.Builder
-	consume := func(raw string) (bool, error) {
-		events++
-		if events > 65536 {
-			return false, errRouted
-		}
-		if ctx.Err() != nil {
-			return false, ctx.Err()
-		}
+	return readRoutedSSE(ctx, body, func(_ string, raw string) (bool, error) {
 		if raw == "[DONE]" {
 			if !finished {
 				return false, errRouted
 			}
-			return true, nil
+			seenIDs := map[string]bool{}
+			for _, index := range order {
+				call := calls[index]
+				_, exists := plan.restoreTool(call.name.String())
+				if !exists || call.id == "" || seenIDs[call.id] {
+					return false, errRouted
+				}
+				seenIDs[call.id] = true
+				if err = e.accept(streamEvent{kind: "tool", call: streamToolCall{call.id, call.name.String(), call.args.String()}}, plan); err != nil {
+					return false, err
+				}
+			}
+			if err = e.flushText(); err != nil {
+				return false, err
+			}
+			return true, e.accept(streamEvent{kind: "complete"}, plan)
 		}
 		var chunk map[string]json.RawMessage
 		if json.Unmarshal([]byte(raw), &chunk) != nil || chunk == nil {
@@ -243,7 +97,7 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			} else {
 				dsmlTail = joined
 			}
-			if err := e.textDelta(s); err != nil {
+			if err := e.accept(streamEvent{kind: "text", text: s}, plan); err != nil {
 				return false, err
 			}
 		}
@@ -298,53 +152,5 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			}
 		}
 		return false, nil
-	}
-	for scanner.Scan() {
-		line := scanner.Text()
-		total += len(line) + 1
-		if total > MaxResponse {
-			return errRouted
-		}
-		if line == "" {
-			if data.Len() == 0 {
-				continue
-			}
-			raw := strings.TrimSuffix(data.String(), "\n")
-			data.Reset()
-			done, err := consume(raw)
-			if err != nil {
-				return err
-			}
-			if done {
-				seenIDs := map[string]bool{}
-				for _, index := range order {
-					call := calls[index]
-					tool, exists := plan.restoreTool(call.name.String())
-					if !exists || call.id == "" || seenIDs[call.id] {
-						return errRouted
-					}
-					seenIDs[call.id] = true
-					if err = e.toolCall(call, tool); err != nil {
-						return err
-					}
-				}
-				if err = e.flushText(); err != nil {
-					return err
-				}
-				return e.event("response.completed", map[string]any{"response": map[string]any{"id": id, "object": "response", "status": "completed", "model": plan.model, "output": e.output}})
-			}
-		} else if strings.HasPrefix(line, "data:") {
-			value := strings.TrimPrefix(line, "data:")
-			value = strings.TrimPrefix(value, " ")
-			if data.Len()+len(value) > maxRoutedEvent {
-				return errRouted
-			}
-			data.WriteString(value)
-			data.WriteByte('\n')
-		}
-	}
-	if scanner.Err() != nil {
-		return scanner.Err()
-	}
-	return errors.New("incomplete Chat stream")
+	})
 }
