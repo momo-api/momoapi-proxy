@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -48,6 +49,10 @@ func main() {
 			return
 		}
 		var payload any
+		if strings.HasPrefix(fixture.Path, "/v1beta/models/") && r.URL.RawQuery != "alt=sse" {
+			w.WriteHeader(400)
+			return
+		}
 		if json.Unmarshal(data, &payload) != nil {
 			w.WriteHeader(400)
 			return

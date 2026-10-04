@@ -9,6 +9,12 @@ import (
 
 // Shared bounded SSE framing. A clean HTTP EOF is not a protocol terminal.
 func readRoutedSSE(ctx context.Context, body io.Reader, consume func(string, string) (bool, error)) error {
+	return readRoutedSSEWithEOF(ctx, body, consume, nil)
+}
+func readRoutedSSEToEOF(ctx context.Context, body io.Reader, consume func(string, string) (bool, error), terminal func() error) error {
+	return readRoutedSSEWithEOF(ctx, body, consume, terminal)
+}
+func readRoutedSSEWithEOF(ctx context.Context, body io.Reader, consume func(string, string) (bool, error), terminal func() error) error {
 	scanner := bufio.NewScanner(io.LimitReader(body, MaxResponse+1))
 	scanner.Buffer(make([]byte, 4096), maxRoutedEvent)
 	// Count physical bytes consumed, including CRLF, not normalized scanner text.
@@ -60,6 +66,12 @@ func readRoutedSSE(ctx context.Context, body io.Reader, consume func(string, str
 	}
 	if scanner.Err() != nil {
 		return scanner.Err()
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if terminal != nil && data.Len() == 0 && event == "" {
+		return terminal()
 	}
 	return errRouted
 }

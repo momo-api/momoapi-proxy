@@ -103,7 +103,7 @@ func TestRoutedPayloadRejectsWithoutSending(t *testing.T) {
 	c.Stop()
 	_ = c.Configure(Config{Endpoint: "https://mock.example", APIKey: syntheticKey, Mode: "momo-routing"})
 	_ = c.Start()
-	for _, model := range []string{"gemini-a", "muse-auto"} {
+	for _, model := range []string{"muse-auto"} {
 		status, _, _ := request(t, c, endpoint, "/v1/responses", "POST", strings.Replace(routedPayload, "gpt-5.5", model, 1), nil)
 		if status != 501 {
 			t.Fatal("unmigrated model accepted")

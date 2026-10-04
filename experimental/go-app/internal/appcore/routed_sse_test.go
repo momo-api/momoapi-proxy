@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestRoutedSSECleanEOFHook(t *testing.T) {
+	seen, terminal := 0, 0
+	consume := func(e, d string) (bool, error) { seen++; return false, nil }
+	finish := func() error { terminal++; return nil }
+	if err := readRoutedSSEToEOF(context.Background(), strings.NewReader("data: STOP\n\n"), consume, finish); err != nil || seen != 1 || terminal != 1 {
+		t.Fatal("clean framed EOF")
+	}
+	for _, body := range []string{"data: STOP\n", "data: STOP", "data: STOP\n\nevent: dangling\n"} {
+		terminal = 0
+		if readRoutedSSEToEOF(context.Background(), strings.NewReader(body), consume, finish) == nil || terminal != 0 {
+			t.Fatal("dangling frame reached EOF terminal")
+		}
+	}
+}
+
 func TestRoutedSSEFramingAndTerminal(t *testing.T) {
 	var event, data string
 	err := readRoutedSSE(context.Background(), strings.NewReader(":comment\r\nevent: empty\r\n\r\nevent: actual\r\ndata: first\r\ndata:second\r\n\r\n"), func(e, d string) (bool, error) { event, data = e, d; return true, nil })

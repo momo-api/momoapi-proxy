@@ -81,7 +81,7 @@ Magpie 的转换核心清楚，不代表整个 gateway 很小：它还包含订�
 - https://github.com/lidge-jun/opencodex/tree/06841165f884a9176d701310638b2112aca7a514/src/protocols
 - https://github.com/lidge-jun/opencodex/tree/06841165f884a9176d701310638b2112aca7a514/src/adapters
 
-## 本轮实现（历史比较之后）
+## Claude 增量（2026-10-04，后续 Gemini 增量见下节）
 
 - typed routeRequest 保存文本、角色、声明/历史工具身份；Chat 与 Claude 直接编码
   各自 wire，不经 Chat JSON 再转 Messages。共享 decodeObject 使用 json.Number，
@@ -97,3 +97,14 @@ Magpie 的转换核心清楚，不代表整个 gateway 很小：它还包含订�
   客户端不能把单个 item.done 当整条响应成功。故障中止 HTTP，不重发、不回放。
 - Node/Go 统一 mock 黑盒扩为20组，保留可见差异（见 FEATURE-PARITY.md）。
   仍未三方统一测试，仍未功能全部对齐；Gemini 501，Muse 不迁移，默认透传不改。
+
+## Gemini 增量（2026-10-05）
+
+最小 IR 现新增 Gemini 原生请求编码与 SSE decoder，同一 Responses encoder 保留。
+支持文本、function/custom 声明、无签名配对历史、namespace 与 choice，以及经校验
+prompt/candidate/total、cache/thought token 数值；不接受 thinking/签名/媒体内容。
+Gemini 无 [DONE]：只有 STOP + 干净完整 HTTP EOF 才 complete，继续读 usage 尾帧，
+拒绝后续错误、断链、部分帧、重复终止和 token 回退。既有 Chat/Claude 终端不改。
+统一 Node/Go mock 黑盒扩为30组；Node 缺 namespace/忽略 choice/历史裸名/提前 EOF
+完成等差异单独断言。未建立 Gemini 3 签名所有权和跨请求回放之前，严格拒绝签名
+比静默丢失更可靠，但覆盖有限，不可声称完整 Gemini 或 Node 对齐。Muse 不迁移。

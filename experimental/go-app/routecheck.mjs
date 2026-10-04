@@ -24,6 +24,12 @@ const ctool=(index,id,name,partial_json)=>cf('content_block_start',{index,conten
 const claudeText=cs+ct(0,'中文🙂')+ce('end_turn');
 const claudeCalls=cs+ctool(0,'call_read','pad__read','{"x":1}')+ctool(1,'call_write','pad__write',JSON.stringify({input:"text('hi')"}))+ce('tool_use');
 const cp={...payload,model:'claude-sonnet-4-6'};
+const gp={...payload,model:'gemini-2.5-flash'};
+const gpath='/v1beta/models/gemini-2.5-flash:streamGenerateContent';
+const gu={promptTokenCount:3,candidatesTokenCount:5,totalTokenCount:10,cachedContentTokenCount:2,thoughtsTokenCount:2};
+const gf=(parts,finishReason,usageMetadata)=>'data: '+JSON.stringify({...((parts||finishReason)?{candidates:[{index:0,...(parts?{content:{role:'model',parts}}:{}),...(finishReason?{finishReason}:{})}]}:{}),...(usageMetadata?{usageMetadata}:{})})+'\r\n\r\n';
+const gt=gf([{text:'中文🙂'}])+gf(null,'STOP',gu);
+const gc=gf([{functionCall:{id:'call_read',name:'pad__read',args:{x:1}}},{functionCall:{id:'call_write',name:'pad__write',args:{input:"text('hi')"}}}])+gf(null,'STOP',gu);
 const cases=[
  {name:'text Unicode fragmented',stream:text,payload},
  {name:'function custom namespace fragmented',stream:calls,payload},
@@ -41,6 +47,14 @@ const cases=[
  ...[401,429,500].map(status=>({name:'Claude upstream '+status,stream:'',status,payload:cp,path:'/v1/messages'})),
  {name:'Claude truncated EOF safety difference',stream:cs+ct(0,'partial'),payload:cp,path:'/v1/messages',truncate:true},
  {name:'Claude system/tool choice preservation',stream:claudeText,payload:{...cp,tool_choice:'required',input:[{role:'developer',content:'rules'},...cp.input]},path:'/v1/messages',systemDifference:true},
+ {name:'Gemini Unicode fragmented',stream:gt,payload:gp,path:gpath},
+ {name:'Gemini function/custom namespace',stream:gc,payload:gp,path:gpath},
+ {name:'Gemini paired function history',stream:gt,payload:{...gp,input:[...gp.input,{role:'assistant',content:'checking'},{type:'function_call',call_id:'a',namespace:'pad',name:'read',arguments:'{}'},{type:'function_call_output',call_id:'a',output:'read'},{role:'user',content:'continue'}]},path:gpath,geminiHistory:true},
+ {name:'Gemini four concurrent same-resource',stream:gt,payload:gp,path:gpath,concurrent:4},
+ ...[401,429,500].map(status=>({name:'Gemini upstream '+status,stream:'',status,payload:gp,path:gpath})),
+ {name:'Gemini premature EOF safety difference',stream:gf([{text:'partial'}]),payload:gp,path:gpath,truncate:true},
+ {name:'Gemini system/tool choice',stream:gt,payload:{...gp,tool_choice:'required',input:[{role:'developer',content:'rules'},...gp.input]},path:gpath},
+ {name:'Gemini usage-only trailer',stream:gf([{text:'中文🙂'}],'STOP')+gf(null,null,gu),payload:gp,path:gpath},
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -76,7 +90,7 @@ for(const fixture of cases){
   const loggingRuntime={env,enqueueRequest:()=>true,enqueueDiagnostic:()=>true,snapshot:()=>({})};
   server=createMomoSwitch({endpoint:'https://mock.example',apiKey:'synthetic-unified-only',localToken:'synthetic-node-only',host:'127.0.0.1',port:0,diagnosticsEnabled:false,
    requestAdmission:{maxConcurrent:4,maxQueued:0,maxBodyBudgetMb:4,bodyReadTimeoutMs:15000},contextPolicy:{outboundBodyHardLimitBytes:1048576,outboundBodySoftLimitBytes:1047552},outputPolicy:{maxStreamMb:16,maxRetainedMb:1}},
-   {env,loggingRuntime,assetStore:{},attachmentAssetStore:{},fetchImpl:(url,init)=>fetch(handoff.mock_url+new URL(url).pathname,init)});
+   {env,loggingRuntime,assetStore:{},attachmentAssetStore:{},fetchImpl:(url,init)=>{const u=new URL(url);return fetch(handoff.mock_url+u.pathname+u.search,init)}});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const nodeURL='http://127.0.0.1:'+server.address().port;
   const goURL=handoff.base_url.replace(/\/v1$/,'');
@@ -99,6 +113,17 @@ for(const fixture of cases){
      console.log('DIFFERENCE Go Claude history uses declared namespace aliases and input schema; Node uses bare names/raw');
     }
    }
+   if(fixture.path===gpath){
+    assert.deepEqual(g.toolConfig,{functionCallingConfig:{mode:fixture.payload.tool_choice==='required'?'ANY':'AUTO'}});assert.equal(n.toolConfig,undefined);delete g.toolConfig;
+    if(fixture.geminiHistory){
+     assert.equal(g.contents.length,3);assert.equal(n.contents.length,3);
+     const gcall=g.contents[1].parts[1].functionCall,ncall=n.contents[1].parts[1].functionCall;
+     assert.equal(gcall.name,'pad__read');assert.equal(ncall.name,'read');gcall.name=ncall.name;
+     const gres=g.contents[2].parts[0].functionResponse,nres=n.contents[2].parts[0].functionResponse;
+     assert.equal(gres.name,'pad__read');assert.equal(nres.name,'read');gres.name=nres.name;
+     console.log('DIFFERENCE Go Gemini history preserves declared tool alias; Node uses bare name');
+    }
+   }
    assert.deepEqual(g,n,fixture.name+' upstream request mismatch');
   }
   for(let i=0;i<count;i++){
@@ -110,8 +135,9 @@ for(const fixture of cases){
     // Legacy Node drops explicit namespaces on Chat calls; Go restores them.
     const normalized=g.output.map(({namespace,...item})=>item);
     assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
-    if(fixture.stream===calls||fixture.stream===bare||fixture.stream===claudeCalls){assert.equal(g.output[0].namespace,'pad');assert.equal(n.output[0].namespace,undefined);console.log('DIFFERENCE explicit namespace restored in Go; legacy Node output lacks it')}
+    if(fixture.stream===calls||fixture.stream===bare||fixture.stream===claudeCalls||fixture.stream===gc){for(let j=0;j<g.output.length;j++){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}console.log('DIFFERENCE explicit namespace restored in Go; legacy Node output lacks it')}
     if(fixture.path==='/v1/messages'){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:8});assert.equal(n.completed.response.usage,undefined)}
+    if(fixture.path===gpath){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:10,input_tokens_details:{cached_tokens:2},output_tokens_details:{reasoning_tokens:2}});assert.deepEqual(g.completed.response.usage,n.completed.response.usage)}
    }
   }
   console.log('PASS uniform blackbox '+fixture.name);
@@ -120,4 +146,4 @@ for(const fixture of cases){
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-console.log('PASS 20 shared mock/resource routing cases; explicit namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');
+console.log('PASS 30 shared mock/resource routing cases; explicit namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');

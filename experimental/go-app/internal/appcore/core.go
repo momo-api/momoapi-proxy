@@ -138,7 +138,7 @@ func (c *Core) State() State {
 	}
 	capability := Capability
 	if mode == "momo-routing" {
-		capability = "partial-momo-responses-chat-claude-routing"
+		capability = "partial-momo-responses-chat-claude-gemini-routing"
 	}
 	return State{Version, c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, capability, mode}
 }
@@ -303,6 +303,16 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				body = routed.body
 				upstreamPath = "/v1/messages"
 			case "responses": // preserve existing exact native protocol bytes
+			case "gemini":
+				routedProtocol = "gemini"
+				var routeErr error
+				routed, routeErr = buildGeminiPlan(body)
+				if routeErr != nil {
+					http.Error(w, "unsupported routed Responses payload", 400)
+					return
+				}
+				body = routed.body
+				upstreamPath = "/v1beta/models/" + url.PathEscape(model) + ":streamGenerateContent?alt=sse"
 			default:
 				http.Error(w, "model protocol not migrated", 501)
 				return
@@ -353,6 +363,8 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		var convertErr error
 		if routedProtocol == "claude" {
 			convertErr = convertClaudeStream(ctx, w, upstream.Body, routed)
+		} else if routedProtocol == "gemini" {
+			convertErr = convertGeminiStream(ctx, w, upstream.Body, routed)
 		} else {
 			convertErr = convertChatStream(ctx, w, upstream.Body, routed)
 		}

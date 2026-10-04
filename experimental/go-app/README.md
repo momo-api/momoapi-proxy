@@ -14,15 +14,23 @@ the experimental routing checkbox, or submit Mode=momo-routing in private config
 Mode is persisted only with explicit Remember and shown in State/Routing. Stop
 before reconfiguring. Responses-entry classifier matches Node: native Responses
 models remain byte-preserving; ordinary models route to a streaming Chat adapter;
-claude-* route to a strict Messages text/tool adapter; Gemini remains 501.
+claude-* route to a strict Messages text/tool adapter; gemini-* to a strict native
+SSE text/tool adapter at /v1beta/models/<model>:streamGenerateContent?alt=sse.
 Muse conversion is explicitly out of scope:
 the experimental classifier keeps muse-auto at 501 instead of treating it as Chat.
 Default passthrough and the existing Node Muse implementation are unchanged.
 Chat entry itself remains passthrough.
 
+Gemini tool_choice maps auto/none/required to AUTO/NONE/ANY; declared aliases are
+used by calls and paired results. Model path segments are restricted to a bounded
+alphanumeric/dot/underscore/hyphen ID, never client-controlled URLs or query text.
+Only unsigned text/tool parts are supported: thoughtSignature/thought/inlineData/
+partialArgs are rejected, not erased. This is NOT Gemini 3 signed continuation
+support; no signature bypass, replay cache or artificial signature is introduced.
+
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string tool_choice and
-reasoning effort (Chat only; Claude thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
+reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
 It rejects unknown payload fields/options, media, history references, compaction,
 non-streaming, built-in tools, exec/apply_patch normalization, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
@@ -34,13 +42,16 @@ Chat requires stop/tool_calls finish_reason plus [DONE]. Claude requires ordered
 closed blocks, end_turn/stop_sequence/tool_use and message_stop. Malformed/error/
 truncated/length streams abort HTTP without fabricated completed. Claude projects
 input (including cache read/creation) + output + total tokens; no currency mapping
-or full usage detail. Chat has no usage mapping; neither adapter synthesizes DSML tools;
+or full usage detail. Gemini requires STOP plus clean framed HTTP EOF, consumes
+usage-only trailers and rejects late errors/partial frames/physical disconnects.
+It projects prompt/candidate/total tokens plus cached/reasoning counts, without
+claiming reasoning content support. Chat has no usage mapping; no adapter synthesizes DSML tools;
 only successful full output is completed, with no local history cache.
 
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-Twenty cases include Chat/Claude tools/history/Qwen/four concurrency/errors/truncation. Known
+Thirty cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation. Known
 namespace, history schema, system/tool_choice, usage and premature-EOF differences
 are separately asserted/documented in
 [FEATURE-PARITY.md](FEATURE-PARITY.md). Normal build excludes this injection.
@@ -94,7 +105,7 @@ base_url/api_key: random LOCAL token, not upstream key. /v1/responses,
 exception, CORS, Origin or Sec-Fetch access. Request and successful SSE bytes
 kept unchanged in default passthrough, including namespace/unknown fields, Chat tool calls, usage and
 [DONE]. In default mode upstream must implement the matching protocol. Opt-in
-partial Chat/Claude translation is described above; Gemini conversion, compaction,
+partial Chat/Claude/Gemini translation is described above; signed continuation, compaction,
 attachment hosting and compatibility fallback remain unimplemented.
 
 Windows/macOS window close hides; Linux close quits (no tray required). Window
@@ -235,7 +246,7 @@ Separate appcheck,production probe uses real WebView/SAME desktop/core/
 bridge, synthetic key/temp profile and an actual httptest TLS mock server. Sequence:
 WebView state/configure+remember/change-config/load/start; native client uses authenticated local TCP to
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
-then opt-in routed Chat and Claude requests against the same core/mock,
+then opt-in routed Chat, Claude and Gemini requests against the same core/mock,
 checking exact namespace/unknown-field/Unicode bytes; native client
 holds incomplete fixed-length/chunked uploads before WebView Stop, verifies zero
 active without waiting for the upload timeout, then

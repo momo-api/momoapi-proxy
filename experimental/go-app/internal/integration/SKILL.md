@@ -16,12 +16,15 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
 - Responses namespace/custom tools and unknown fields are passed through.
   Skill/MCP tools execute in the agent client, not inside the API proxy.
 - Default is exact same-protocol passthrough. Explicit Mode=momo-routing enables
-  Responses-entry model classification and partial streaming Chat/Claude translation:
+  Responses-entry model classification and partial streaming Chat/Claude/Gemini translation:
   text, function/custom tools (excluding exec/apply_patch), namespace restoration.
   Strictly rejects media/history references/unknown options/non-streaming Chat;
   Claude Messages text/tools plus validated token usage are supported; thinking,
-  signatures, media and explicit token-limit options are not. Gemini remains
-  unsupported. Muse conversion is out of scope and
+  signatures, media and explicit token-limit options are not. Gemini text/tools,
+  paired unsigned history, tool choice and validated token usage are supported;
+  thinking/signatures/media and signed continuation remain unsupported. Gemini
+  requires STOP plus clean framed HTTP EOF; early EOF/errors abort without completed.
+  Muse conversion is out of scope and
   muse-auto is rejected in opt-in routing mode. No fallback or duplicate send.
 - History replay, compaction, attachment management, media generation and
   cross-device sharing are not migrated. This is not full Node compatibility.

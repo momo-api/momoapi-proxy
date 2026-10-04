@@ -31,6 +31,11 @@ const routedProbeRequest = `{"model":"gpt-5.5","stream":true,"input":[{"role":"u
 const routedProbeBody = `{"messages":[{"content":"hi","role":"user"}],"model":"gpt-5.5","stream":true}`
 const claudeProbeRequest = `{"model":"claude-sonnet-4-6","stream":true,"input":[{"role":"user","content":"hi"}]}`
 const claudeProbeBody = `{"max_tokens":12240,"messages":[{"content":[{"text":"hi","type":"text"}],"role":"user"}],"model":"claude-sonnet-4-6","stream":true}`
+const geminiProbeRequest = `{"model":"gemini-2.5-flash","stream":true,"input":[{"role":"user","content":"hi"}]}`
+const geminiProbeBody = `{"contents":[{"parts":[{"text":"hi"}],"role":"user"}]}`
+const geminiProbeStream = `data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"gemini-ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":5,"totalTokenCount":8}}
+
+`
 const claudeProbeStream = `data: {"type":"message_start","message":{"type":"message","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":3,"output_tokens":1}}}
 
 data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"claude-ok"}}
@@ -130,6 +135,13 @@ func check() error {
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				body = claudeProbeStream
+			case "/v1beta/models/gemini-2.5-flash:streamGenerateContent":
+				if r.Method != "POST" || string(data) != geminiProbeBody || r.URL.RawQuery != "alt=sse" {
+					w.WriteHeader(400)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				body = geminiProbeStream
 			default:
 				w.WriteHeader(404)
 				return
@@ -150,11 +162,11 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 5 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 6 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/models + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
@@ -322,7 +334,7 @@ func probeRoutedRequest(core *appcore.Core) error {
 	}
 	client := http.Client{Timeout: 4 * time.Second}
 	defer client.CloseIdleConnections()
-	for _, tc := range []struct{ payload, text string }{{routedProbeRequest, "routed-ok"}, {claudeProbeRequest, "claude-ok"}} {
+	for _, tc := range []struct{ payload, text string }{{routedProbeRequest, "routed-ok"}, {claudeProbeRequest, "claude-ok"}, {geminiProbeRequest, "gemini-ok"}} {
 		req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(tc.payload))
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set("Content-Type", "application/json")
