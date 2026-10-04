@@ -61,7 +61,8 @@ func check() error {
 		if runtime.GOOS == "windows" {
 			origin = "http://wails.localhost"
 		}
-		var upstreamRequests atomic.Int32
+		var upstreamRequests, savedProfiles, loadedProfiles atomic.Int32
+		var savedProfile appcore.Config
 		closeMock := appcore.InstallProbeMock(core, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			data, _ := io.ReadAll(io.LimitReader(r.Body, appcore.MaxRequest+1))
 			if r.Header.Get("Authorization") != "Bearer "+probeKey || r.Header.Get("Cookie") != "" || r.Header.Get("Origin") != "" {
@@ -108,16 +109,20 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || upstreamRequests.Load() != 3 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 3 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
 			fmt.Println("PASS real WebView + local TCP + TLS mock Responses/Chat/models + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
-		original := ui.HandlerWithActions(origin, core, ui.Actions{AllowOpaqueOrigin: runtime.GOOS != "windows"})
+		original := ui.HandlerWithActions(origin, core, ui.Actions{
+			AllowOpaqueOrigin: runtime.GOOS != "windows",
+			SaveProfile:       func(c appcore.Config) error { savedProfile = c; savedProfiles.Add(1); return nil },
+			LoadProfile:       func() (appcore.Config, error) { loadedProfiles.Add(1); return savedProfile, nil },
+		})
 		close(appReady)
-		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only'}],['start',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-chat-passthrough')throw Error();if(name==='start'&&!s.Running)throw Error()}for(const name of ['check-proxy','app/stop','app/state','check-done']){const r=await fetch('/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});if(!r.ok)throw Error()}}check().catch(()=>{})`
+		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only',Remember:true}],['configure',{Endpoint:'https://other.example',APIKey:'synthetic-other'}],['load',null],['start',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-chat-passthrough')throw Error();if(name==='start'&&!s.Running)throw Error()}for(const name of ['check-proxy','app/stop','app/state','check-done']){const r=await fetch('/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});if(!r.ok)throw Error()}}check().catch(()=>{})`
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
 				recorder := httptest.NewRecorder()

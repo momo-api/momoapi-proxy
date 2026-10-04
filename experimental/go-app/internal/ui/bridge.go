@@ -11,10 +11,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // Native actions return no credentials to the WebView. Nil disables the action.
 type Actions struct {
+	SaveProfile    func(appcore.Config) error
+	LoadProfile    func() (appcore.Config, error)
+	ForgetProfile  func() error
 	CopyConnection func() error
 	Quit           func()
 	// WebKit custom schemes can omit Origin or serialize it as null. Require a
@@ -31,6 +35,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 	_, nonceErr := rand.Read(nonce[:])
 	bridgeNonce := hex.EncodeToString(nonce[:])
 	page := strings.Replace(Page, "<script>", "<script>const bridgeNonce='"+bridgeNonce+"';", 1)
+	var actionMu sync.Mutex
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -61,7 +66,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" {
+		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" {
 			http.NotFound(w, r)
 			return
 		}
@@ -71,10 +76,13 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			return
 		}
 		if r.URL.Path == "/app/configure" {
-			var config appcore.Config
+			var input struct {
+				appcore.Config
+				Remember bool
+			}
 			d := json.NewDecoder(bytes.NewReader(data))
 			d.DisallowUnknownFields()
-			if d.Decode(&config) != nil {
+			if d.Decode(&input) != nil {
 				http.Error(w, "invalid configuration", 400)
 				return
 			}
@@ -83,13 +91,37 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 				http.Error(w, "invalid configuration", 400)
 				return
 			}
-			if core.Configure(config) != nil {
+			actionMu.Lock()
+			defer actionMu.Unlock()
+			if core.Configure(input.Config) != nil {
 				http.Error(w, "stop service and check HTTPS origin/key", 400)
+				return
+			}
+			if input.Remember && (actions.SaveProfile == nil || actions.SaveProfile(input.Config) != nil) {
+				http.Error(w, "configuration applied in memory; secure save failed", 503)
 				return
 			}
 		} else {
 			if len(data) != 0 {
 				http.Error(w, "body denied", 400)
+				return
+			}
+			actionMu.Lock()
+			defer actionMu.Unlock()
+			if r.URL.Path == "/app/load" {
+				s := core.State()
+				if s.Running || s.Active != 0 || actions.LoadProfile == nil {
+					http.Error(w, "stop proxy before loading profile", 409)
+					return
+				}
+				config, err := actions.LoadProfile()
+				if err != nil || core.Configure(config) != nil {
+					http.Error(w, "saved profile unavailable or invalid", 503)
+					return
+				}
+			}
+			if r.URL.Path == "/app/forget" && (actions.ForgetProfile == nil || actions.ForgetProfile() != nil) {
+				http.Error(w, "secure profile removal failed", 503)
 				return
 			}
 			if r.URL.Path == "/app/start" && core.Start() != nil {

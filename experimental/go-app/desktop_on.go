@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/ui"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/vault"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"image"
@@ -50,7 +51,9 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 		origin = "http://wails.localhost"
 	}
 	var app *application.App
+	store := vault.System() // construction does not read the credential store
 	assets := ui.HandlerWithActions(origin, core, ui.Actions{
+		SaveProfile: store.Save, LoadProfile: store.Load, ForgetProfile: store.Forget,
 		AllowOpaqueOrigin: runtime.GOOS != "windows",
 		CopyConnection: func() error {
 			if !app.Clipboard.SetText(core.ConnectionJSON()) {

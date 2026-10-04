@@ -1,4 +1,4 @@
-# MOMO native Go app — 0.2 preview
+# MOMO native Go app — 0.3 preview
 
 Actual Responses + Chat passthrough app, not the earlier demo toggle. Does NOT replace
 the Node product or claim parity. Standalone Go + Wails v3.0.0-beta.24 shared
@@ -27,9 +27,22 @@ Both modes share core/proxy/auth/admission implementation.
 
 ## Boundaries
 
-Settings/key in process memory only. GUI key passes through local WebView
+Default settings/key are process-memory-only. Optional explicit Remember saves
+one Endpoint/APIKey JSON record in Windows Credential Manager, macOS Keychain
+or Linux Secret Service. No plaintext fallback/config file. Construction/startup
+does not read the store: after relaunch click Load saved profile, then Start.
+Only this app's fixed service/account is accessed; no enumeration/import.
+Unchecking Remember does not delete a previous record. Forget removes only that
+record; current memory config/running proxy are unaffected. Save failure leaves
+the submitted memory config applied and displays a warning, never claims saved.
+System stores may prompt/unlock; Linux requires a running Secret Service.
+Saved JSON limited to 2400 bytes and endpoint 256 bytes for portable backend
+limits; larger valid profiles can still be used without Remember. Not sync across
+devices, secure-memory erasure, protection against malicious same-user apps or
+a signed-app access policy. Reconfigure/load require stopped/zero active.
+GUI key passes through local WebView
 password/JSON on explicit submission; cleared input and never returned in state.
-NOT secure-memory erasure, keychain or protection against malicious same-user
+NOT secure-memory erasure or protection against malicious same-user
 software. Copied local token is visible to clipboard history/other apps;
 stdout accessible to parent/redirection. No automatic clipboard clearing.
 Wails/asset logs disabled; upstream errors/headers never reflected. Fixed asset
@@ -47,7 +60,7 @@ acceptance NOT run. Restrictive address policy, not general-purpose proxy.
 Limits: request 1 MiB, response 16 MiB, active 4, TCP 32; upload 15s, upstream
 120s, downstream stall 15s. Over-limit/read-error SSE aborts HTTP without
 fabricated events. Clean EOF remains upstream behavior; no completion parser.
-Reconfigure only stopped with zero active. No disk credential persistence.
+Reconfigure only stopped with zero active. No ordinary disk credential file.
 
 ## Verification
 
@@ -70,7 +83,7 @@ reboot/high-DPI/Linux desktop/system shutdown acceptance.
 
 Separate appcheck,production probe uses real WebView/SAME desktop/core/
 bridge, synthetic key/temp profile and an actual httptest TLS mock server. Sequence:
-WebView state/configure/start; native client uses authenticated local TCP to
+WebView state/configure+remember/change-config/load/start; native client uses authenticated local TCP to
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 checking exact namespace/unknown-field/Unicode bytes; WebView stop; native client
 asserts 503 while stopped; app quit. No real upstream or production key. PostShutdown
@@ -80,6 +93,12 @@ not the full native acceptance list above. Never distribute; normal build exclud
 probe AND mock-transport injector via build tags, with CI source-list gates.
 NOT physical click/normal-binary/live-upstream proof. Synthetic temp profile
 retained at printed exact path, no cleanup.
+
+Vault logic tests use an injected memory backend. Opt-in native vault test creates,
+reads, updates and deletes one random synthetic record, never reads production
+profiles. CI runs Windows/macOS system backend and Linux Secret Service in a
+dedicated D-Bus session. The WebView E2E uses a synthetic memory store; actual
+OS-store roundtrip is a separate test, not proof of real-user locked-store UX.
 
 Prism design30.719s/source65.922s are static advice. Mid-event error injection
 changed to HTTP abort; credential/native acceptance limits explicit above.

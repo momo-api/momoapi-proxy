@@ -95,7 +95,9 @@ func publicDial(ctx context.Context, network, address string) (net.Conn, error) 
 	}
 	return nil, errors.New("upstream unavailable")
 }
-func validateConfig(c Config) error {
+
+// ValidateConfig validates without changing state or resolving the endpoint.
+func ValidateConfig(c Config) error {
 	u, err := url.Parse(c.Endpoint)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.RawPath != "" || (u.Path != "" && u.Path != "/") || (u.Port() != "" && u.Port() != "443") {
 		return errors.New("use an HTTPS upstream origin on port 443")
@@ -109,7 +111,7 @@ func validateConfig(c Config) error {
 	return nil
 }
 func (c *Core) Configure(config Config) error {
-	if err := validateConfig(config); err != nil {
+	if err := ValidateConfig(config); err != nil {
 		return err
 	}
 	c.mu.Lock()
@@ -124,7 +126,7 @@ func (c *Core) Configure(config Config) error {
 func (c *Core) State() State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return State{"0.2.0-preview", c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, Capability}
+	return State{"0.3.0-preview", c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, Capability}
 }
 func (c *Core) Start() error {
 	c.mu.Lock()
