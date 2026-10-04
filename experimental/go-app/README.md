@@ -8,17 +8,18 @@ autostart or production deployment. Entire experiment excluded from npm.
 ## Use
 
 Launch with no args. Enter HTTPS upstream origin (https://momoapi.us, NOT /v1)
-and your key deliberately. Apply then Start. Tray menu explicitly copies JSON
+and your key deliberately. Apply then Start. Window button/tray menu explicitly copies JSON
 base_url/api_key: random LOCAL token, not upstream key. Only /v1/responses and
 /v1/models implemented. Require Bearer local token; no unauthenticated loopback
 exception, CORS, Origin or Sec-Fetch access. Request and successful SSE bytes
 kept unchanged, including namespace/unknown fields. No Chat/Gemini/Claude
 conversion, compaction, attachment hosting or compatibility fallback.
 
-Window close hides; tray quit stops THIS process's requests/core. No separate
+Windows/macOS window close hides; Linux close quits (no tray required). Window
+Quit/tray quit stops THIS process's requests/core. Native OnShutdown cancels and
+joins the core even on macOS where Run may never return. No separate
 daemon/single-instance broker. Multiple launches create separate cores/ports.
-Without a tray, hiding may require process termination: Linux/macOS UX must be
-accepted before distribution. Headless: executable serve, Endpoint/APIKey JSON
+Other native UX must be accepted before distribution. Headless: executable serve, Endpoint/APIKey JSON
 on private stdin; base_url/api_key emitted once to stdout for deliberate parent
 handoff. Never log/tee keys or use shell literals/argv. Ctrl-C owns shutdown.
 Both modes share core/proxy/auth/admission implementation.
@@ -63,9 +64,11 @@ Do not disable OS protections globally to run them.
 Compilation NOT native lifecycle/tray/clipboard/install/signing/notarization/
 reboot/high-DPI/Linux desktop/system shutdown acceptance.
 
-Separate Windows appcheck,production probe uses real WebView/SAME desktop/core/
+Separate appcheck,production probe uses real WebView/SAME desktop/core/
 bridge, synthetic key/temp profile, no real upstream request. Sequence:
-state/configure/start/state/stop/state with real Origin, app quit. Never distribute;
+state/configure/start/state/stop/state with real Origin, app quit; PostShutdown
+checks cleared core config, stopped requests and closed listener. CI runs Linux
+under Xvfb/D-Bus; Windows/macOS probe compilation is not runtime acceptance. Never distribute;
 normal build excludes probe. NOT physical click/full normal app/live upstream
 proof. Synthetic temp profile retained at printed exact path, no cleanup.
 

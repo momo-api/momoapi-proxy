@@ -1,4 +1,4 @@
-//go:build appcheck && windows && !nogui
+//go:build appcheck && !nogui
 
 package main
 
@@ -9,9 +9,11 @@ import (
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/ui"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -31,10 +33,12 @@ func check() error {
 	}
 	fmt.Println("PROFILE: " + profile)
 	completed := make(chan struct{}, 1)
-	var passed, shutdown atomic.Bool
+	var passed atomic.Bool
+	appReady := make(chan struct{})
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
+		<-appReady
 		select {
 		case <-completed:
 		case <-time.After(20 * time.Second):
@@ -43,8 +47,25 @@ func check() error {
 	}()
 	err = desktopConfigured(func(options *application.Options, core *appcore.Core) {
 		options.Windows.WebviewUserDataPath = profile
-		options.PostShutdown = func() { shutdown.Store(true) }
-		original := ui.Handler("http://wails.localhost", core)
+		origin := "wails://localhost"
+		if runtime.GOOS == "windows" {
+			origin = "http://wails.localhost"
+		}
+		options.PostShutdown = func() {
+			s := core.State()
+			conn, dialErr := net.DialTimeout("tcp", strings.TrimPrefix(s.LocalEndpoint, "http://"), time.Second)
+			if conn != nil {
+				_ = conn.Close()
+			}
+			if !passed.Load() || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+				fmt.Println("FAIL native shutdown")
+				os.Exit(1)
+			}
+			fmt.Println("PASS real WebView bridge and owned-core shutdown")
+			os.Exit(0) // macOS Run does not necessarily return; probe only.
+		}
+		original := ui.Handler(origin, core)
+		close(appReady)
 		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only'}],['start',null],['state',null],['stop',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:body?{'content-type':'application/json'}:{},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-passthrough-only')throw Error();if(name==='start'&&!s.Running)throw Error();if(name==='stop'&&s.Running)throw Error()}await fetch('/check-done',{method:'POST'})}check().catch(()=>{})`
 		page := strings.Replace(ui.Page, "action('state')</script>", script+"</script>", 1)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +75,7 @@ func check() error {
 				return
 			}
 			if r.URL.Path == "/check-done" {
-				if r.Method != "POST" || r.Header.Get("Origin") != "http://wails.localhost" {
+				if r.Method != "POST" || r.Header.Get("Origin") != origin {
 					http.Error(w, "denied", 403)
 					return
 				}
@@ -70,7 +91,7 @@ func check() error {
 			recorder := httptest.NewRecorder()
 			original.ServeHTTP(recorder, r)
 			if strings.HasPrefix(r.URL.Path, "/app/") {
-				if r.Header.Get("Origin") == "http://wails.localhost" && recorder.Code == 200 {
+				if r.Header.Get("Origin") == origin && recorder.Code == 200 {
 					fmt.Println("BRIDGE: origin=expected status=200")
 				} else {
 					fmt.Println("BRIDGE: rejected")
@@ -85,7 +106,7 @@ func check() error {
 	})
 	// Quit is triggered by a test worker using the current framework app.
 	<-workerDone
-	if err != nil || !passed.Load() || !shutdown.Load() {
+	if err != nil || !passed.Load() {
 		return errors.New("native sequence")
 	}
 	return nil

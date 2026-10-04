@@ -32,6 +32,11 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
+	var shutdownOnce sync.Once
+	var shutdownErr error
+	shutdown := func() {
+		shutdownOnce.Do(func() { cancel(); shutdownErr = <-done })
+	}
 	ready := make(chan string, 1)
 	go func() { done <- core.Serve(ctx, func(endpoint string) { ready <- endpoint }) }()
 	select {
@@ -39,19 +44,35 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 	case err := <-done:
 		return err
 	}
+	defer shutdown()
 	origin := "wails://localhost"
 	if runtime.GOOS == "windows" {
 		origin = "http://wails.localhost"
 	}
-	options := application.Options{Name: "MOMO API Preview", Description: "Go Responses passthrough preview", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Assets: application.AssetOptions{Handler: ui.Handler(origin, core), DisableLogging: true}, Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true}}
+	var app *application.App
+	assets := ui.HandlerWithActions(origin, core, ui.Actions{
+		CopyConnection: func() error {
+			if !app.Clipboard.SetText(core.ConnectionJSON()) {
+				return errors.New("clipboard unavailable")
+			}
+			return nil
+		},
+		Quit: func() { go app.Quit() },
+	})
+	options := application.Options{Name: "MOMO API Preview", Description: "Go Responses passthrough preview", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Assets: application.AssetOptions{Handler: assets, DisableLogging: true}, OnShutdown: shutdown, Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true}}
 	if configure != nil {
 		configure(&options, core)
 	}
-	app := application.New(options)
+	app = application.New(options)
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Title: "MOMO 本地代理 · Preview", Width: 900, Height: 780, URL: "/"})
 	var mu sync.Mutex
 	initial, cancelInitial := false, false
 	window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		// Not every Linux desktop has a system tray. Close must remain an exit.
+		if runtime.GOOS == "linux" {
+			go app.Quit()
+			return
+		}
 		e.Cancel()
 		application.InvokeSync(func() { mu.Lock(); cancelInitial = true; window.Hide(); mu.Unlock() })
 	})
@@ -90,8 +111,7 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 	tray.SetMenu(menu)
 	tray.OnClick(func() { window.Show() })
 	err = app.Run()
-	cancel()
-	shutdownErr := <-done
+	shutdown()
 	if err != nil || shutdownErr != nil {
 		return errors.New("desktop stopped with an error")
 	}

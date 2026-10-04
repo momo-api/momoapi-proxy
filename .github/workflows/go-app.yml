@@ -27,7 +27,7 @@ jobs:
           cache-dependency-path: experimental/go-app/go.sum
       - name: Linux native dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev xvfb dbus-x11
       - run: go vet -tags nogui ./...
       - run: go test -tags nogui -count=5 -timeout 60s ./...
       - name: Race tests
@@ -40,9 +40,15 @@ jobs:
           if go list -tags "$tags" -f '{{join .GoFiles " "}}' . | grep -q appcheck; then echo "Probe leaked"; exit 1; fi
           go vet -tags "$tags" ./...
           go build -tags "$tags" -trimpath -ldflags "-s -w" -o "$RUNNER_TEMP/momo-preview-${RUNNER_OS}-${RUNNER_ARCH}" .
-      - name: Windows probe compilation (not UI acceptance)
-        if: runner.os == 'Windows'
-        run: go build -tags appcheck,production -trimpath -o "$RUNNER_TEMP/momo-appcheck.exe" .
+      - name: Native probe compilation (never packaged)
+        run: |
+          tags=appcheck,production
+          if [ "$RUNNER_OS" = Linux ]; then tags=appcheck,gtk3,production; fi
+          go build -tags "$tags" -trimpath -o "$RUNNER_TEMP/momo-appcheck" .
+      - name: Linux real WebView bridge and shutdown smoke
+        if: runner.os == 'Linux'
+        run: |
+          timeout 40s dbus-run-session -- xvfb-run -a "$RUNNER_TEMP/momo-appcheck"
       - name: Package unsigned preview
         run: |
           export PREVIEW_DIR="$RUNNER_TEMP/momo-app-preview"

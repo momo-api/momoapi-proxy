@@ -9,7 +9,17 @@ import (
 	"net/http"
 )
 
+// Native actions return no credentials to the WebView. Nil disables the action.
+type Actions struct {
+	CopyConnection func() error
+	Quit           func()
+}
+
 func Handler(origin string, core *appcore.Core) http.Handler {
+	return HandlerWithActions(origin, core, Actions{})
+}
+
+func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -38,7 +48,7 @@ func Handler(origin string, core *appcore.Core) http.Handler {
 			http.Error(w, "method denied", 405)
 			return
 		}
-		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" {
+		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" {
 			http.NotFound(w, r)
 			return
 		}
@@ -75,6 +85,19 @@ func Handler(origin string, core *appcore.Core) http.Handler {
 			}
 			if r.URL.Path == "/app/stop" {
 				core.Stop()
+			}
+			if r.URL.Path == "/app/copy" {
+				if actions.CopyConnection == nil || actions.CopyConnection() != nil {
+					http.Error(w, "native clipboard unavailable", 503)
+					return
+				}
+			}
+			if r.URL.Path == "/app/quit" {
+				if actions.Quit == nil {
+					http.Error(w, "native quit unavailable", 503)
+					return
+				}
+				actions.Quit()
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
