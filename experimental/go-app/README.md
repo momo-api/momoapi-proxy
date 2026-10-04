@@ -14,7 +14,10 @@ the experimental routing checkbox, or submit Mode=momo-routing in private config
 Mode is persisted only with explicit Remember and shown in State/Routing. Stop
 before reconfiguring. Responses-entry classifier matches Node: native Responses
 models remain byte-preserving; ordinary models route to a streaming Chat adapter;
-Claude/Gemini/Muse return 501 before sending. Chat entry itself remains passthrough.
+Claude/Gemini return 501 until migrated. Muse conversion is explicitly out of scope:
+the experimental classifier keeps muse-auto at 501 instead of treating it as Chat.
+Default passthrough and the existing Node Muse implementation are unchanged.
+Chat entry itself remains passthrough.
 
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string tool_choice and

@@ -19,7 +19,8 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Responses-entry model classification and partial streaming Chat translation:
   text, function/custom tools (excluding exec/apply_patch), namespace restoration.
   Strictly rejects media/history references/unknown options/non-streaming Chat;
-  Claude/Gemini/Muse adapters remain unsupported. No fallback or duplicate send.
+  Claude/Gemini adapters remain unsupported. Muse conversion is out of scope and
+  muse-auto is rejected in opt-in routing mode. No fallback or duplicate send.
 - History replay, compaction, attachment management, media generation and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The built-in stdio MCP only reports capabilities and exposes this document.

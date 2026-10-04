@@ -11,7 +11,8 @@
 | 公共 API | `src/route-dispatch.mjs` | 仅精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses`；无无版本别名，无 compact |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat 子集转换；未迁移协议 501 |
 | Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 新增严格流式文本/function/部分 custom 子集、namespace 恢复；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
-| Claude / Gemini / Muse | `src/claude-adapter.mjs`、`src/gemini-adapter.mjs`、`src/muse-adapter.mjs` | 未迁移 |
+| Claude / Gemini | `src/claude-adapter.mjs`、`src/gemini-adapter.mjs` | 未迁移 |
+| Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 未迁移；字段原样转交，不提供本地回放 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
@@ -67,8 +68,11 @@ CPU/RSS 容器配额隔离，不能作为性能或生产稳定性比较。Go tes
 1. P0：模型策略与 Responses/Chat 转换（JSON + SSE + tools + namespace），
    使用同一 mock 上游、相同请求夹具和资源配置对 Node/Go 统一黑盒。
    只移植模型分类函数却不接入转换，不能称为路由对齐。
-2. Claude/Gemini/Muse 对应夹具；错误、取消、慢流、并发与限额等价性。
+2. Claude/Gemini 对应夹具；错误、取消、慢流、并发与限额等价性。Muse 转换已按用户要求排除，不新增适配器，不改变既有 Node 实现。
 3. compact/history/provider-switch：成功才提交状态、回放语义、长度与隐私边界。
 4. 附件/媒体、客户端接入与运维；之后才考虑授权式局域网共享和正式发行。
 
 迁移期间保留 Node 完整实现；差异必须明确记录，核心验收未通过不得切换默认产品。
+
+协议架构比较与建议见 [PROTOCOL-DESIGN.md](PROTOCOL-DESIGN.md)：以紧凑、保语义的
+请求/事件中间层承载后续 Claude/Gemini，而非继续复制成对转换器；这是设计建议，尚未实施重构。
