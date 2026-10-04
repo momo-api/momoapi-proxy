@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/integration"
 	"io"
 	"os"
 	"os/signal"
@@ -22,6 +23,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "mcp" {
+		return integration.ServeMCP(os.Stdin, os.Stdout)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		fmt.Println(appcore.Version)
 		return nil // no GUI, listener, keyring read or config input
@@ -30,7 +34,7 @@ func run() error {
 		return desktop()
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("MOMO preview: desktop (no args) | --version | serve (upstream config on private stdin)")
+		return errors.New("MOMO preview: desktop (no args) | --version | mcp (read-only stdio) | serve (upstream config on private stdin)")
 	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
 	_ = os.Stdin.Close()

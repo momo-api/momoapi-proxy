@@ -14,10 +14,13 @@ async function check(){
  await button('nav-routing');ensure(!byId('view-routing').hidden&&byId('view-overview').hidden&&byId('nav-routing').getAttribute('aria-selected')==='true');
  await button('nav-settings');ensure(!byId('view-settings').hidden&&byId('view-routing').hidden);
  await button('nav-overview');ensure(!byId('view-overview').hidden);
+ await button('nav-integrations');ensure(!byId('view-integrations').hidden);await button('skill-copy');await button('mcp-copy');
+ await button('nav-overview');ensure(byId('quota-refresh').disabled);
  byId('endpoint').value='https://mock.example';byId('key').value='synthetic-appcheck-only';byId('remember').checked=true;
  await button('configure');ensure(byId('key').value===''&&lastState.Configured);
  byId('endpoint').value='https://other.example';byId('key').value='synthetic-other';byId('remember').checked=false;
  await button('configure');await button('nav-settings');await button('load');ensure(byId('endpoint').value==='https://mock.example'&&!byId('view-overview').hidden&&byId('view-settings').hidden);
+ await button('quota-refresh');ensure(byId('quota-available').textContent.includes('12,345')&&byId('quota-note').textContent.includes('非账户钱包')&&!byId('state').textContent.includes('private-do-not-render'));
  await button('start');ensure(lastState.Running&&byId('configure').disabled&&byId('load').disabled&&byId('start').disabled&&!byId('stop').disabled&&!byId('quit').disabled);
  ensure(byId('service-state').textContent==='运行中'&&byId('status-badge').dataset.tone==='good'&&byId('local-url').textContent===lastState.LocalEndpoint+'/v1');
  await request('check-proxy');await request('check-native-stop');

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/integration"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/ui"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/vault"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -16,6 +17,7 @@ import (
 	"image/png"
 	"io"
 	"log/slog"
+	"os"
 	"runtime"
 	"sync"
 )
@@ -62,6 +64,22 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 			return nil
 		},
 		Quit: func() { go app.Quit() },
+		CopySkill: func() error {
+			if !app.Clipboard.SetText(integration.Skill) {
+				return errors.New("clipboard unavailable")
+			}
+			return nil
+		},
+		CopyMCPConfig: func() error {
+			exe, err := os.Executable()
+			if err != nil {
+				return errors.New("executable unavailable")
+			}
+			if !app.Clipboard.SetText(integration.MCPConfig(exe)) {
+				return errors.New("clipboard unavailable")
+			}
+			return nil
+		},
 	})
 	options := application.Options{Name: "MOMO API Preview", Description: "Go Responses and Chat passthrough preview", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Assets: application.AssetOptions{Handler: assets, DisableLogging: true}, OnShutdown: shutdown, Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true}}
 	if configure != nil {

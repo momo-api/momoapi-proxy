@@ -35,6 +35,29 @@ def check_invalid_inputs(binary):
         require(SYNTHETIC_KEY.encode() not in result.stderr, "invalid config exposed key")
 
 
+def check_readonly_mcp(binary):
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "gateway_capabilities", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": "momo://preview/skill"}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "run_shell", "arguments": {"key": SYNTHETIC_KEY}}},
+    ]
+    data = ("\n".join(json.dumps(message) for message in messages) + "\n").encode()
+    result = subprocess.run([str(binary), "mcp"], input=data, capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b"", "read-only MCP startup")
+    require(SYNTHETIC_KEY.encode() not in result.stdout, "MCP echoed sensitive input")
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require([reply["id"] for reply in replies] == [1, 2, 3, 4, 5], "MCP IDs/notification contract")
+    require(replies[0]["result"]["protocolVersion"] == "2024-11-05", "MCP negotiation")
+    require([tool["name"] for tool in replies[1]["result"]["tools"]] == ["gateway_capabilities"], "MCP tool whitelist")
+    capability = json.loads(replies[2]["result"]["content"][0]["text"])
+    require(capability["media"] is False and capability["account_wallet"] is False, "MCP unsupported claims")
+    require("MOMO local gateway preview" in replies[3]["result"]["contents"][0]["text"], "MCP Skill resource")
+    require(replies[4]["error"]["code"] == -32602, "MCP arbitrary execution allowed")
+
+
 class Session:
     def __init__(self, binary):
         self.process = None
@@ -174,6 +197,7 @@ def check_boundaries(session):
 def check_runtime(binary):
     binary = Path(binary).resolve(strict=True)
     check_invalid_inputs(binary)
+    check_readonly_mcp(binary)
     allocated_console = False
     sessions = []
     stalled = []
@@ -206,7 +230,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":

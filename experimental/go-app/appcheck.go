@@ -61,7 +61,7 @@ func check() error {
 		if runtime.GOOS == "windows" {
 			origin = "http://wails.localhost"
 		}
-		var upstreamRequests, savedProfiles, loadedProfiles atomic.Int32
+		var upstreamRequests, savedProfiles, loadedProfiles, quotaQueries, skillCopies, mcpCopies atomic.Int32
 		var stalled []net.Conn
 		var savedProfile appcore.Config
 		closeMock := appcore.InstallProbeMock(core, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +72,15 @@ func check() error {
 			}
 			var body string
 			switch r.URL.Path {
+			case "/api/usage/token/":
+				if r.Method != "GET" || len(data) != 0 {
+					w.WriteHeader(400)
+					return
+				}
+				quotaQueries.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"code":true,"data":{"object":"token_usage","total_available":12345,"total_used":55,"total_granted":12400,"unlimited_quota":false,"expires_at":0,"name":"private-do-not-render"}}`)
+				return
 			case "/v1/models":
 				if r.Method != "GET" || len(data) != 0 {
 					w.WriteHeader(400)
@@ -113,7 +122,7 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 3 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 3 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
@@ -124,6 +133,8 @@ func check() error {
 			AllowOpaqueOrigin: runtime.GOOS != "windows",
 			SaveProfile:       func(c appcore.Config) error { savedProfile = c; savedProfiles.Add(1); return nil },
 			LoadProfile:       func() (appcore.Config, error) { loadedProfiles.Add(1); return savedProfile, nil },
+			CopySkill:         func() error { skillCopies.Add(1); return nil },
+			CopyMCPConfig:     func() error { mcpCopies.Add(1); return nil },
 		})
 		close(appReady)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

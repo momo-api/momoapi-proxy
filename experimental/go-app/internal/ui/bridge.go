@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
 	"io"
 	"net/http"
@@ -21,6 +22,8 @@ type Actions struct {
 	ForgetProfile  func() error
 	CopyConnection func() error
 	Quit           func()
+	CopySkill      func() error
+	CopyMCPConfig  func() error
 	// WebKit custom schemes can omit Origin or serialize it as null. Require a
 	// separate unguessable page capability; never accept either by itself.
 	AllowOpaqueOrigin bool
@@ -66,7 +69,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" {
+		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" {
 			http.NotFound(w, r)
 			return
 		}
@@ -111,6 +114,34 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		} else {
 			if len(data) != 0 {
 				http.Error(w, "body denied", 400)
+				return
+			}
+			if r.URL.Path == "/app/quota" {
+				quota, err := core.QueryTokenQuota(r.Context())
+				if err != nil {
+					status := 502
+					if errors.Is(err, appcore.ErrQuotaUnauthorized) {
+						status = 401
+					}
+					if errors.Is(err, appcore.ErrQuotaUnsupported) {
+						status = 404
+					}
+					if errors.Is(err, appcore.ErrQuotaBusy) {
+						status = 409
+					}
+					http.Error(w, "token quota unavailable", status)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(quota)
+				return
+			}
+			if r.URL.Path == "/app/skill" && (actions.CopySkill == nil || actions.CopySkill() != nil) {
+				http.Error(w, "skill clipboard unavailable", 503)
+				return
+			}
+			if r.URL.Path == "/app/mcp-config" && (actions.CopyMCPConfig == nil || actions.CopyMCPConfig() != nil) {
+				http.Error(w, "MCP config clipboard unavailable", 503)
 				return
 			}
 			if r.URL.Path == "/app/load" {

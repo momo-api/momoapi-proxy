@@ -16,6 +16,39 @@ sharing or upstream-health indicator. Full gap audit and migration gates:
 [FEATURE-PARITY.md](FEATURE-PARITY.md). HTML/CSS/JS are embedded from
 `internal/ui/page.html`; no external assets, fonts or framework.
 
+### Skill / MCP and quota
+
+Integrations exports a bundled, secret-free SKILL.md via the native clipboard and
+a generic mcpServers JSON configuration with this executable's absolute path and
+the `mcp` subcommand. Nothing is auto-installed or written into other clients.
+The client decides where to save/import it; paths must be re-exported after moving
+the executable. Existing Node MOMO Image/Video plugins still require Node, not Go.
+
+`momo-preview mcp` is a bounded newline-delimited stdio JSON-RPC server: initialize,
+ping, tools/list + gateway_capabilities, resources/list/read for the bundled Skill.
+It creates no core/listener, reads no keys/vault/accounts, invokes no models and
+launches no arbitrary processes. Protocol version 2024-11-05; not a universal MCP
+client/manager, HTTP MCP transport or media server. Tested normal packaged binary.
+
+Overview's explicit quota button uses only the deliberately configured key/origin
+for `GET /api/usage/token/`. No startup/polling fetch, cookie or account discovery;
+same pinned public HTTPS transport/redirect policy, 8s deadline, 8KiB response limit,
+shared four-request admission and Stop cancellation. Only numeric quota fields,
+unlimited flag and timestamps reach the page; raw names/model lists/errors/keys are
+discarded. Errors/unsupported routes remain unknown, never a fabricated zero.
+Configure/Load clears the previous snapshot. Quota is **not account wallet balance
+or money**; an unlimited key can still have an exhausted account. No currency/quota
+conversion without verified server metadata. No real-user/account acceptance run.
+
+Schema reference: QuantumNous/new-api commit
+`1a4166d8e8ba9802d2ca56fe8ecf0ed5404e80d5`, router/api-router.go and
+controller/token.go GetTokenUsage. Live MOMO support is not established by this
+source review; 404/401/403 gracefully report unsupported/unauthorized. Full wallet
+requires a separate reviewed read-only account API and explicit authorization,
+not scraping console login or storing a privileged account token.
+Unauthenticated MOMO route check on 2026-10-04 returned HTTP 401; this establishes
+an authentication boundary, not success of a real-key query or exact live schema.
+
 Launch with no args. Enter HTTPS upstream origin (https://momoapi.us, NOT /v1)
 and your key deliberately. Apply then Start. Window button/tray menu explicitly copies JSON
 base_url/api_key: random LOCAL token, not upstream key. /v1/responses,
