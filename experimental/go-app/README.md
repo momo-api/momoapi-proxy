@@ -70,8 +70,9 @@ reboot/high-DPI/Linux desktop/system shutdown acceptance.
 Separate appcheck,production probe uses real WebView/SAME desktop/core/
 bridge, synthetic key/temp profile, no real upstream request. Sequence:
 state/configure/start/state/stop/state with real Origin, app quit; PostShutdown
-checks cleared core config, stopped requests and closed listener. CI runs Linux
-under Xvfb/D-Bus; Windows/macOS probe compilation is not runtime acceptance. Never distribute;
+checks cleared core config, stopped requests and closed listener. CI runs this
+on all three OSes (Linux under Xvfb/D-Bus). This checks a synthetic WebView bridge
+sequence, not the full native acceptance list above. Never distribute;
 normal build excludes probe. NOT physical click/full normal app/live upstream
 proof. Synthetic temp profile retained at printed exact path, no cleanup.
 

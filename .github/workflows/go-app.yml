@@ -43,8 +43,13 @@ jobs:
       - name: Native probe compilation (never packaged)
         run: |
           tags=appcheck,production
+          suffix=
+          if [ "$RUNNER_OS" = Windows ]; then suffix=.exe; fi
           if [ "$RUNNER_OS" = Linux ]; then tags=appcheck,gtk3,production; fi
-          go build -tags "$tags" -trimpath -o "$RUNNER_TEMP/momo-appcheck" .
+          go build -tags "$tags" -trimpath -o "$RUNNER_TEMP/momo-appcheck$suffix" .
+      - name: Windows and macOS real WebView bridge and shutdown smoke
+        if: runner.os != 'Linux'
+        run: python3 -c 'import os,subprocess; subprocess.run([os.environ["RUNNER_TEMP"]+"/momo-appcheck"+(".exe" if os.name=="nt" else "")],check=True,timeout=40)'
       - name: Linux real WebView bridge and shutdown smoke
         if: runner.os == 'Linux'
         run: |
