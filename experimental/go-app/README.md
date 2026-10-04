@@ -22,7 +22,8 @@ joins the core even on macOS where Run may never return. No separate
 daemon/single-instance broker. Multiple launches create separate cores/ports.
 Other native UX must be accepted before distribution. Headless: executable serve, Endpoint/APIKey JSON
 on private stdin; base_url/api_key emitted once to stdout for deliberate parent
-handoff. Never log/tee keys or use shell literals/argv. Ctrl-C owns shutdown.
+handoff. Never log/tee keys or use shell literals/argv. Ctrl-C/SIGTERM own shutdown
+(Windows Control-Break is handled as Interrupt; OS-forced termination is not guaranteed graceful).
 Both modes share core/proxy/auth/admission implementation.
 
 ## Boundaries
@@ -105,6 +106,19 @@ exact binary hashes, --version and desktop/shortcut packaging. macOS checks DMG
 integrity, mounts read-only, checks app hash/version and detaches; actual drag
 install/Gatekeeper/upgrade/reboot/GUI-from-installed-binary still require native
 acceptance. --version starts no GUI/listener and reads no credential store.
+
+CI also executes packaging/blackbox.py against the actual installed Windows/Linux
+binary and macOS DMG-mounted binary, not an appcheck build. Uses private stdin and
+synthetic config only. Checks invalid config fails without a token handoff,
+authentication, browser/route/method/JSON/body-size boundaries, private localhost
+DNS rejection/redacted error, 120 boundary requests with four concurrent workers, separate
+ports/tokens for two instances and cross-token rejection. Terminates the first
+instance while the second stays usable, then verifies both ports closed and
+clean zero exits. Unix uses SIGTERM then SIGINT; Windows uses Control-Break aimed
+only at each fresh child process group. Handoff tokens stay in harness memory;
+stdout/stderr content is never printed. No real upstream, success-path protocol
+mock, GUI clicks, keyring access, long-soak or Windows forced-logoff acceptance
+is claimed by this check. Emergency failure cleanup kills only its own child.
 
 Separate appcheck,production probe uses real WebView/SAME desktop/core/
 bridge, synthetic key/temp profile and an actual httptest TLS mock server. Sequence:

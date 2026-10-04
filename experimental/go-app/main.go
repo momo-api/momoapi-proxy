@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -58,7 +59,7 @@ func run() error {
 	if err = core.Start(); err != nil {
 		return err
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	// Deliberate private stdout handoff, contains local token; never log/tee it.
 	return core.Serve(ctx, func(string) { fmt.Fprintln(os.Stdout, core.ConnectionJSON()) })

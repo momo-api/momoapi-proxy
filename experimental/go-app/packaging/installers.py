@@ -7,6 +7,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+from blackbox import check_runtime
 
 
 def run(*args, **kwargs):
@@ -48,6 +49,7 @@ def windows(preview, download, temp, version):
     try:
         same_file(target / "momo-preview.exe", preview / "momo-preview.exe")
         check_binary(target / "momo-preview.exe", version)
+        check_runtime(target / "momo-preview.exe")
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, uninstall_key) as key:
             assert winreg.QueryValueEx(key, "DisplayVersion")[0] == version
             assert Path(winreg.QueryValueEx(key, "InstallLocation")[0]).resolve() == target
@@ -84,6 +86,7 @@ def macos(preview, download, temp, version):
         executable = app / "MacOS/momo-preview"
         same_file(executable, preview / "MOMO Preview.app/Contents/MacOS/momo-preview")
         check_binary(executable, version)
+        check_runtime(executable)
         assert (mount / "Applications").is_symlink()
     finally:
         run("hdiutil", "detach", mount)
@@ -116,6 +119,7 @@ def linux(preview, download, temp, version):
     try:
         same_file(Path("/usr/bin/momo-api-preview"), preview / "momo-preview")
         check_binary(Path("/usr/bin/momo-api-preview"), version)
+        check_runtime(Path("/usr/bin/momo-api-preview"))
         assert Path("/usr/share/applications/momo-api-preview.desktop").is_file()
     finally:
         run("sudo", "dpkg", "--remove", "momo-api-preview")
