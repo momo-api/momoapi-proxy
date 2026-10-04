@@ -23,6 +23,7 @@ import (
 const MaxRequest = 1 << 20
 const MaxResponse = 16 << 20
 const Capability = "responses-chat-passthrough"
+const Version = "0.4.0-preview"
 
 type Config struct {
 	Endpoint string
@@ -126,7 +127,7 @@ func (c *Core) Configure(config Config) error {
 func (c *Core) State() State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return State{"0.3.0-preview", c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, Capability}
+	return State{Version, c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, Capability}
 }
 func (c *Core) Start() error {
 	c.mu.Lock()

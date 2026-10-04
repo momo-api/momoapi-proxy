@@ -1,8 +1,8 @@
-# MOMO native Go app — 0.3 preview
+# MOMO native Go app — 0.4 preview
 
 Actual Responses + Chat passthrough app, not the earlier demo toggle. Does NOT replace
 the Node product or claim parity. Standalone Go + Wails v3.0.0-beta.24 shared
-Windows/macOS/Linux source. No credential discovery, installed profiles, updater,
+Windows/macOS/Linux source. No credential discovery, other-app profile import, updater,
 autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
@@ -79,10 +79,32 @@ Payload is tar.gz inside Actions artifact ZIP to preserve Unix execute bits.
 Extract ZIP, verify SHA256SUMS, then extract tar.gz. Windows: run exe; macOS:
 open app; Linux: ./momo-preview with WebKit/GTK runtime libraries installed.
 Only each runner's actual architecture, not every CPU architecture. These are
-not signed releases/installers; SmartScreen/Gatekeeper may block previews.
+not signed releases; SmartScreen/Gatekeeper may block previews.
 Do not disable OS protections globally to run them.
 Compilation NOT native lifecycle/tray/clipboard/install/signing/notarization/
 reboot/high-DPI/Linux desktop/system shutdown acceptance.
+
+## Unsigned installer previews
+
+CI additionally builds Windows current-user Setup EXE, macOS DMG (drag the app
+to Applications), and Linux amd64 DEB. Verify outer SHA256SUMS before opening.
+Windows requires Windows10 1809+ and existing WebView2; installer never elevates,
+downloads a runtime, adds autostart or launches the app automatically. Uninstall
+from Settings/Apps or Start menu. macOS DMG is not notarized; move installed app
+to Trash to uninstall. Linux DEB declares GTK3/WebKit4.1 runtime dependencies;
+install with apt and remove package momo-api-preview using your package manager.
+Linux DEB baseline is the current Ubuntu runner, NOT all Linux distributions;
+portable Linux binary also needs matching shared libraries. No Fedora RPM,
+AppImage, all-CPU-architecture coverage, official store or signed release yet.
+
+Uninstall intentionally preserves saved OS credentials and WebView data. To
+remove the saved profile, explicitly Forget in the app before uninstall. No
+broad profile-directory cleanup. Quit the app before upgrading/uninstalling.
+CI installs/removes Windows and Linux only in disposable runner targets, checks
+exact binary hashes, --version and desktop/shortcut packaging. macOS checks DMG
+integrity, mounts read-only, checks app hash/version and detaches; actual drag
+install/Gatekeeper/upgrade/reboot/GUI-from-installed-binary still require native
+acceptance. --version starts no GUI/listener and reads no credential store.
 
 Separate appcheck,production probe uses real WebView/SAME desktop/core/
 bridge, synthetic key/temp profile and an actual httptest TLS mock server. Sequence:

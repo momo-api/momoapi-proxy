@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MOMO API Preview
+Comment=Local Responses and Chat passthrough proxy (unsigned preview)
+Exec=/usr/bin/momo-api-preview
+Terminal=false
+Categories=Development;Network;
+StartupNotify=true
