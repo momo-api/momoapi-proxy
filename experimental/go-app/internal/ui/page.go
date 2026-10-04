@@ -7,7 +7,7 @@ const Page = `<!doctype html>
 <title>MOMO 本地代理</title>
 <style>:root{color-scheme:light dark}body{font:15px system-ui;margin:32px;max-width:760px}h1{margin-bottom:8px}p{line-height:1.6}label{display:block;margin-top:18px}input{box-sizing:border-box;width:100%;padding:10px;font:inherit}button{padding:10px 18px;margin:18px 8px 0 0}pre{white-space:pre-wrap;padding:18px;background:#8882;border-radius:8px}.note{color:#888;font-size:13px}</style>
 <h1>MOMO 本地代理 · Preview</h1>
-<p>原生 Go 服务 + Wails v3。支持原协议 Responses / 模型列表；暂不支持 Chat、Gemini、Claude 协议转换。</p>
+<p>原生 Go 服务 + Wails v3。支持原协议 Responses、Chat Completions 和模型列表；上游必须支持相应接口，暂不做协议转换。</p>
 <label>HTTPS 上游地址（根域名，不带 /v1）<input id="endpoint" value="https://momoapi.us" autocomplete="off" spellcheck="false"></label>
 <label>上游 API Key（本次进程内存保存）<input id="key" type="password" autocomplete="off" spellcheck="false"></label>
 <button id="configure">应用配置</button><button id="start">启动代理</button><button id="stop">停止代理</button><button id="refresh">刷新状态</button>

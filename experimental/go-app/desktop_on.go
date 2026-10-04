@@ -60,7 +60,7 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 		},
 		Quit: func() { go app.Quit() },
 	})
-	options := application.Options{Name: "MOMO API Preview", Description: "Go Responses passthrough preview", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Assets: application.AssetOptions{Handler: assets, DisableLogging: true}, OnShutdown: shutdown, Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true}}
+	options := application.Options{Name: "MOMO API Preview", Description: "Go Responses and Chat passthrough preview", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Assets: application.AssetOptions{Handler: assets, DisableLogging: true}, OnShutdown: shutdown, Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true}}
 	if configure != nil {
 		configure(&options, core)
 	}

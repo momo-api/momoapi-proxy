@@ -38,6 +38,7 @@ jobs:
           tags=production
           if [ "$RUNNER_OS" = Linux ]; then tags=gtk3,production; fi
           if go list -tags "$tags" -f '{{join .GoFiles " "}}' . | grep -q appcheck; then echo "Probe leaked"; exit 1; fi
+          if go list -tags "$tags" -f '{{join .GoFiles " "}}' ./internal/appcore | grep -q probe_mock; then echo "Mock transport leaked"; exit 1; fi
           go vet -tags "$tags" ./...
           go build -tags "$tags" -trimpath -ldflags "-s -w" -o "$RUNNER_TEMP/momo-preview-${RUNNER_OS}-${RUNNER_ARCH}" .
       - name: Native probe compilation (never packaged)
@@ -47,10 +48,10 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then suffix=.exe; fi
           if [ "$RUNNER_OS" = Linux ]; then tags=appcheck,gtk3,production; fi
           go build -tags "$tags" -trimpath -o "$RUNNER_TEMP/momo-appcheck$suffix" .
-      - name: Windows and macOS real WebView bridge and shutdown smoke
+      - name: Windows and macOS WebView TCP TLS-mock E2E and shutdown
         if: runner.os != 'Linux'
         run: python3 -c 'import os,subprocess; subprocess.run([os.environ["RUNNER_TEMP"]+"/momo-appcheck"+(".exe" if os.name=="nt" else "")],check=True,timeout=40)'
-      - name: Linux real WebView bridge and shutdown smoke
+      - name: Linux WebView TCP TLS-mock E2E and shutdown
         if: runner.os == 'Linux'
         run: |
           timeout 40s xvfb-run -a dbus-run-session -- "$RUNNER_TEMP/momo-appcheck"

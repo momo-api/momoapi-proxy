@@ -141,7 +141,7 @@ func TestBoundaryAndUpstreamRedaction(t *testing.T) {
 		{"/v1/models", "GET", "", map[string]string{"Origin": "http://evil.example"}, 403},
 		{"/v1/models", "GET", "", map[string]string{"Sec-Fetch-Site": "same-origin"}, 403},
 		{"/v1/models?x=1", "GET", "", nil, 400},
-		{"/v1/chat/completions", "POST", "{}", nil, 404},
+		{"/v1/unsupported", "POST", "{}", nil, 404},
 		{"/v1/responses", "GET", "", nil, 405},
 		{"/v1/responses", "POST", "null", nil, 400},
 		{"/v1/responses", "POST", "{}", nil, 400},

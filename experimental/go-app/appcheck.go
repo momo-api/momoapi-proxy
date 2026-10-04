@@ -3,11 +3,9 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
-	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/ui"
-	"github.com/wailsapp/wails/v3/pkg/application"
 	"io"
 	"net"
 	"net/http"
@@ -17,7 +15,18 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/ui"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+const probeKey = "synthetic-appcheck-only"
+const responsesRequest = `{"model":"mock","stream":true,"tools":[{"type":"namespace","name":"pad","tools":[{"type":"custom","name":"write"}]}],"input":"中文🙂","unknown_provider_field":true}`
+const chatRequest = `{"model":"mock","stream":true,"messages":[{"role":"user","content":"中文🙂"}],"provider_extra":{"namespace":"pad"}}`
+const responsesStream = "event: response.output_item.added\ndata: {\"item\":{\"namespace\":\"pad\",\"input\":\"中文🙂\"},\"unknown_provider_field\":true}\r\n\r\nevent: response.completed\ndata: {\"response\":{\"output\":[{\"namespace\":\"pad\"}]}}\n\n"
+const chatStream = "data: {\"choices\":[{\"delta\":{\"content\":\"中文🙂\"}}],\"provider_extra\":true}\r\n\r\ndata: [DONE]\n\n"
+const modelsResponse = `{"data":[{"id":"mock"}]}`
 
 func main() {
 	_ = os.Stdin.Close()
@@ -26,6 +35,7 @@ func main() {
 		os.Exit(1)
 	}
 }
+
 func check() error {
 	profile, err := os.MkdirTemp("", "momo-go-app-check-")
 	if err != nil {
@@ -33,7 +43,7 @@ func check() error {
 	}
 	fmt.Println("PROFILE: " + profile)
 	completed := make(chan struct{}, 1)
-	var passed atomic.Bool
+	var passed, proxied atomic.Bool
 	appReady := make(chan struct{})
 	workerDone := make(chan struct{})
 	go func() {
@@ -41,7 +51,7 @@ func check() error {
 		<-appReady
 		select {
 		case <-completed:
-		case <-time.After(20 * time.Second):
+		case <-time.After(25 * time.Second):
 		}
 		application.Get().Quit()
 	}()
@@ -51,22 +61,63 @@ func check() error {
 		if runtime.GOOS == "windows" {
 			origin = "http://wails.localhost"
 		}
+		var upstreamRequests atomic.Int32
+		closeMock := appcore.InstallProbeMock(core, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, _ := io.ReadAll(io.LimitReader(r.Body, appcore.MaxRequest+1))
+			if r.Header.Get("Authorization") != "Bearer "+probeKey || r.Header.Get("Cookie") != "" || r.Header.Get("Origin") != "" {
+				w.WriteHeader(400)
+				return
+			}
+			var body string
+			switch r.URL.Path {
+			case "/v1/models":
+				if r.Method != "GET" || len(data) != 0 {
+					w.WriteHeader(400)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				body = modelsResponse
+			case "/v1/responses":
+				if r.Method != "POST" || string(data) != responsesRequest {
+					w.WriteHeader(400)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				body = responsesStream
+			case "/v1/chat/completions":
+				if r.Method != "POST" || string(data) != chatRequest {
+					w.WriteHeader(400)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				body = chatStream
+			default:
+				w.WriteHeader(404)
+				return
+			}
+			upstreamRequests.Add(1)
+			for _, b := range []byte(body) {
+				_, _ = w.Write([]byte{b})
+				w.(http.Flusher).Flush()
+			}
+		}))
 		options.PostShutdown = func() {
 			s := core.State()
 			conn, dialErr := net.DialTimeout("tcp", strings.TrimPrefix(s.LocalEndpoint, "http://"), time.Second)
 			if conn != nil {
 				_ = conn.Close()
 			}
-			if !passed.Load() || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
-				fmt.Println("FAIL native shutdown")
+			closeMock()
+			if !passed.Load() || !proxied.Load() || upstreamRequests.Load() != 3 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView bridge and owned-core shutdown")
-			os.Exit(0) // macOS Run does not necessarily return; probe only.
+			fmt.Println("PASS real WebView + local TCP + TLS mock Responses/Chat/models + owned shutdown")
+			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{AllowOpaqueOrigin: runtime.GOOS != "windows"})
 		close(appReady)
-		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only'}],['start',null],['state',null],['stop',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-passthrough-only')throw Error();if(name==='start'&&!s.Running)throw Error();if(name==='stop'&&s.Running)throw Error()}await fetch('/check-done',{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}})}check().catch(()=>{})`
+		script := `async function check(){for(const [name,body] of [['state',null],['configure',{Endpoint:'https://mock.example',APIKey:'synthetic-appcheck-only'}],['start',null],['state',null]]){const r=await fetch('/app/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error();const s=await r.json();if(s.Capability!=='responses-chat-passthrough')throw Error();if(name==='start'&&!s.Running)throw Error()}for(const name of ['check-proxy','app/stop','app/state','check-done']){const r=await fetch('/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});if(!r.ok)throw Error()}}check().catch(()=>{})`
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
 				recorder := httptest.NewRecorder()
@@ -80,7 +131,7 @@ func check() error {
 				_, _ = io.WriteString(w, page)
 				return
 			}
-			if r.URL.Path == "/check-done" {
+			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-done" {
 				validation := r.Clone(r.Context())
 				validation.URL.Path = "/app/state"
 				auth := httptest.NewRecorder()
@@ -89,11 +140,24 @@ func check() error {
 					http.Error(w, "denied", 403)
 					return
 				}
-				s := core.State()
-				passed.Store(s.Configured && !s.Running && s.Active == 0)
-				select {
-				case completed <- struct{}{}:
-				default:
+				if r.URL.Path == "/check-proxy" {
+					if !core.State().Running || probeLocalRequests(core) != nil {
+						http.Error(w, "probe failed", 500)
+						return
+					}
+					proxied.Store(true)
+					fmt.Println("PROXY: exact Responses/Chat SSE + models over authenticated local TCP and TLS mock")
+				} else {
+					s := core.State()
+					if !proxied.Load() || !s.Configured || s.Running || s.Active != 0 || probeStopped(core) != nil {
+						http.Error(w, "probe stop failed", 500)
+						return
+					}
+					passed.Store(true)
+					select {
+					case completed <- struct{}{}:
+					default:
+					}
 				}
 				w.WriteHeader(204)
 				return
@@ -101,11 +165,7 @@ func check() error {
 			recorder := httptest.NewRecorder()
 			original.ServeHTTP(recorder, r)
 			if strings.HasPrefix(r.URL.Path, "/app/") {
-				if recorder.Code == 200 {
-					fmt.Println("BRIDGE: authorized status=200")
-				} else {
-					fmt.Printf("BRIDGE: rejected status=%d exact-origin=%t opaque-origin=%t missing-origin=%t\n", recorder.Code, r.Header.Get("Origin") == origin, r.Header.Get("Origin") == "null", r.Header.Get("Origin") == "")
-				}
+				fmt.Printf("BRIDGE: status=%d\n", recorder.Code)
 			}
 			for k, v := range recorder.Header() {
 				w.Header()[k] = v
@@ -114,10 +174,65 @@ func check() error {
 			_, _ = w.Write(recorder.Body.Bytes())
 		})
 	})
-	// Quit is triggered by a test worker using the current framework app.
 	<-workerDone
 	if err != nil || !passed.Load() {
 		return errors.New("native sequence")
+	}
+	return nil
+}
+
+func probeCredentials(core *appcore.Core) (string, string, error) {
+	var c struct {
+		URL string `json:"base_url"`
+		Key string `json:"api_key"`
+	}
+	if json.Unmarshal([]byte(core.ConnectionJSON()), &c) != nil || c.URL == "" || c.Key == "" {
+		return "", "", errors.New("connection")
+	}
+	return c.URL, c.Key, nil
+}
+func probeLocalRequests(core *appcore.Core) error {
+	base, key, err := probeCredentials(core)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 4 * time.Second}
+	defer client.CloseIdleConnections()
+	for _, tc := range []struct{ path, method, body, want string }{
+		{"/models", "GET", "", modelsResponse}, {"/responses", "POST", responsesRequest, responsesStream}, {"/chat/completions", "POST", chatRequest, chatStream},
+	} {
+		r, _ := http.NewRequest(tc.method, base+tc.path, strings.NewReader(tc.body))
+		r.Header.Set("Authorization", "Bearer "+key)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Cookie", "synthetic-client-cookie")
+		response, err := client.Do(r)
+		if err != nil {
+			return errors.New("local proxy request")
+		}
+		data, readErr := io.ReadAll(io.LimitReader(response.Body, 65537))
+		_ = response.Body.Close()
+		if readErr != nil || response.StatusCode != 200 || string(data) != tc.want {
+			return errors.New("proxy bytes mismatch")
+		}
+	}
+	return nil
+}
+func probeStopped(core *appcore.Core) error {
+	base, key, err := probeCredentials(core)
+	if err != nil {
+		return err
+	}
+	r, _ := http.NewRequest("GET", base+"/models", nil)
+	r.Header.Set("Authorization", "Bearer "+key)
+	client := &http.Client{Timeout: time.Second}
+	defer client.CloseIdleConnections()
+	response, err := client.Do(r)
+	if err != nil {
+		return errors.New("stopped listener")
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != 503 {
+		return errors.New("stop ineffective")
 	}
 	return nil
 }

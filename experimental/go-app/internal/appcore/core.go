@@ -21,6 +21,7 @@ import (
 
 const MaxRequest = 1 << 20
 const MaxResponse = 16 << 20
+const Capability = "responses-chat-passthrough"
 
 type Config struct {
 	Endpoint string
@@ -122,7 +123,7 @@ func (c *Core) Configure(config Config) error {
 func (c *Core) State() State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return State{"0.1.0-preview", c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, "responses-passthrough-only"}
+	return State{"0.2.0-preview", c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, Capability}
 }
 func (c *Core) Start() error {
 	c.mu.Lock()
@@ -180,11 +181,11 @@ func (c *Core) Handler() http.Handler {
 			http.Error(w, "invalid route", 400)
 			return
 		}
-		if r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" {
+		if r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Path == "/v1/models" && r.Method != "GET" || r.URL.Path == "/v1/responses" && r.Method != "POST" {
+		if r.URL.Path == "/v1/models" && r.Method != "GET" || r.URL.Path != "/v1/models" && r.Method != "POST" {
 			http.Error(w, "method denied", 405)
 			return
 		}
@@ -240,6 +241,13 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		if raw, ok := payload["stream"]; ok && json.Unmarshal(raw, &stream) != nil {
 			http.Error(w, "invalid stream flag", 400)
 			return
+		}
+		if r.URL.Path == "/v1/chat/completions" {
+			var messages []json.RawMessage
+			if json.Unmarshal(payload["messages"], &messages) != nil || len(messages) == 0 {
+				http.Error(w, "messages required", 400)
+				return
+			}
 		}
 		// Forward exact bytes: do not drop namespace or normalize provider fields.
 	}

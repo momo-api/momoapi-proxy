@@ -1,6 +1,6 @@
-# MOMO native Go app — 0.1 preview
+# MOMO native Go app — 0.2 preview
 
-Actual Responses passthrough app, not the earlier demo toggle. Does NOT replace
+Actual Responses + Chat passthrough app, not the earlier demo toggle. Does NOT replace
 the Node product or claim parity. Standalone Go + Wails v3.0.0-beta.24 shared
 Windows/macOS/Linux source. No credential discovery, installed profiles, updater,
 autostart or production deployment. Entire experiment excluded from npm.
@@ -9,11 +9,12 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 Launch with no args. Enter HTTPS upstream origin (https://momoapi.us, NOT /v1)
 and your key deliberately. Apply then Start. Window button/tray menu explicitly copies JSON
-base_url/api_key: random LOCAL token, not upstream key. Only /v1/responses and
-/v1/models implemented. Require Bearer local token; no unauthenticated loopback
+base_url/api_key: random LOCAL token, not upstream key. /v1/responses,
+/v1/chat/completions and /v1/models implemented. Require Bearer local token; no unauthenticated loopback
 exception, CORS, Origin or Sec-Fetch access. Request and successful SSE bytes
-kept unchanged, including namespace/unknown fields. No Chat/Gemini/Claude
-conversion, compaction, attachment hosting or compatibility fallback.
+kept unchanged, including namespace/unknown fields, Chat tool calls, usage and
+[DONE]. Upstream must implement the matching protocol: no Responses-to-Chat or
+Gemini/Claude conversion, compaction, attachment hosting or compatibility fallback.
 
 Windows/macOS window close hides; Linux close quits (no tray required). Window
 Quit/tray quit stops THIS process's requests/core. Native OnShutdown cancels and
@@ -68,13 +69,17 @@ Compilation NOT native lifecycle/tray/clipboard/install/signing/notarization/
 reboot/high-DPI/Linux desktop/system shutdown acceptance.
 
 Separate appcheck,production probe uses real WebView/SAME desktop/core/
-bridge, synthetic key/temp profile, no real upstream request. Sequence:
-state/configure/start/state/stop/state with real Origin, app quit; PostShutdown
+bridge, synthetic key/temp profile and an actual httptest TLS mock server. Sequence:
+WebView state/configure/start; native client uses authenticated local TCP to
+GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
+checking exact namespace/unknown-field/Unicode bytes; WebView stop; native client
+asserts 503 while stopped; app quit. No real upstream or production key. PostShutdown
 checks cleared core config, stopped requests and closed listener. CI runs this
-on all three OSes (Linux under Xvfb/D-Bus). This checks a synthetic WebView bridge
-sequence, not the full native acceptance list above. Never distribute;
-normal build excludes probe. NOT physical click/full normal app/live upstream
-proof. Synthetic temp profile retained at printed exact path, no cleanup.
+on all three OSes (Linux under Xvfb/D-Bus). This is synthetic integrated E2E,
+not the full native acceptance list above. Never distribute; normal build excludes
+probe AND mock-transport injector via build tags, with CI source-list gates.
+NOT physical click/normal-binary/live-upstream proof. Synthetic temp profile
+retained at printed exact path, no cleanup.
 
 Prism design30.719s/source65.922s are static advice. Mid-event error injection
 changed to HTTP abort; credential/native acceptance limits explicit above.
