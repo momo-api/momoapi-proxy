@@ -403,6 +403,12 @@ def check_boundaries(session):
         session.request("POST", "/v1/responses", 400,
                         body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}',
                         headers={"X-MOMO-Tool-Text": policy})  # passthrough cannot opt into text synthesis
+    for policy in ("replay-v1", "unknown"):
+        session.request("POST", "/v1/responses", 400,
+                        body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}',
+                        headers={"X-MOMO-History": policy})  # only explicit converted model replay
+    session.request("POST", "/v1/responses/compact", 400,
+                    body=b'{"model":"gpt-5.5","input":[]}',headers={"X-MOMO-History":"replay-v1"})
     session.request("POST", "/v1/chat/completions", 400,
                     body=b'{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}',
                     headers={"X-MOMO-Tool-Text": "dsml-v1"})

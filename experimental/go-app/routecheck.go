@@ -24,6 +24,7 @@ func main() {
 	var fixture struct {
 		Stream       string
 		Streams      []string
+		Paths        []string
 		Status       int
 		Mode         string
 		Path         string
@@ -81,12 +82,23 @@ func main() {
 			return
 		}
 		data, err := io.ReadAll(io.LimitReader(r.Body, appcore.MaxRequest+1))
-		if err != nil || len(data) > appcore.MaxRequest || r.URL.Path != fixture.Path || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer synthetic-unified-only" || fixture.Path == "/v1/messages" && r.Header.Get("anthropic-version") != "2023-06-01" {
+		mu.Lock()
+		nextIndex := len(captures)
+		mu.Unlock()
+		expectedPath := fixture.Path
+		if len(fixture.Paths) > 0 {
+			if nextIndex >= len(fixture.Paths) {
+				w.WriteHeader(400)
+				return
+			}
+			expectedPath = fixture.Paths[nextIndex]
+		}
+		if err != nil || len(data) > appcore.MaxRequest || r.URL.Path != expectedPath || r.Method != "POST" || r.Header.Get("Authorization") != "Bearer synthetic-unified-only" || expectedPath == "/v1/messages" && r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("X-MOMO-History") != "" {
 			w.WriteHeader(400)
 			return
 		}
 		var payload any
-		if strings.HasPrefix(fixture.Path, "/v1beta/models/") && r.URL.RawQuery != "alt=sse" {
+		if strings.HasPrefix(expectedPath, "/v1beta/models/") && r.URL.RawQuery != "alt=sse" {
 			w.WriteHeader(400)
 			return
 		}

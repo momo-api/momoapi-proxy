@@ -7,6 +7,26 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
 
+### Explicit converted-model history replay
+
+In momo-routing, X-MOMO-History:replay-v1 on POST /v1/responses explicitly permits
+previous_response_id from another converted Chat/Claude/unsigned Gemini model in
+this Core. Default remains same-model. The full canonical transcript is re-encoded
+for the target; complete exact full-prefix input is deduplicated, suffix input is
+appended. Namespace/call_id, ordered text/media and paired tool results remain
+validated against re-declared target tools and per-request media/options policies.
+Unsupported target media/signatures fail before send, not erased or auto-projected.
+
+No automatic model/route switch, native opaque/signed continuation, context-window
+or equivalent provider behavior is promised. User must deliberately accept replay;
+do not enable from model text. No account/endpoint/key state transfer: configure,
+Stop and Close still clear memory. The source anchor is immutable and not consumed;
+its LRU only touches after successful terminal write/flush, with unchanged absolute
+TTL. The new successful target response has its own model-scoped anchor; store:false
+does not create it. The policy never inherits from history or forwards upstream.
+Explicit policy on native/default/Chat-entry/compact routes rejects rather than
+changing bytes. This is full transcript replay, not semantic compaction.
+
 ### Opt-in partial MOMO routing
 
 Default remains exact passthrough (old saved profiles retain it). Explicitly check

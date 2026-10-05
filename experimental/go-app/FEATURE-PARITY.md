@@ -15,7 +15,7 @@
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
-| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
+| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或签名供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询，编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
@@ -35,6 +35,27 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 这些不是“兼容性改进”，不能直接替代 Node 的策略与附件限制。
 
 ## 本次实际验证范围
+
+### 显式跨转换模型历史回放（2026-10-06；本地通过，当前提交三平台待验收）
+
+逐请求X-MOMO-History:replay-v1仅momo-routing Responses的Chat/Claude/unsigned
+Gemini。默认同模型；明确接受后跨转换模型previous_response_id回放整个canonical
+transcript并按target编码，不猜线程ID或自动切换、不forward/继承策略。声明身份、
+namespace/call_id/工具配对/原始custom与媒体顺序保留；target工具/选项/投影需重声明。
+不支持的目标media/signature拒绝，不抹除。源anchor不消耗/不改model、不延TTL；
+成功terminal write/flush才touch旧LRU并保存target新anchor，store:false只touch。
+不同Core/过期/Stop/configure/无策略切换拒绝。非原生opaque/signed续接、账户/Key/
+端点迁移、语义压缩或模型等价。新24组跨4model/2返回格式先红400再绿，覆盖并行
+function/custom和full/suffix一致；补真实TCP畸形终端无history、写失败/取消/LRU/
+并发独立分支/target媒体显式策略。317同mock/resource统一TCP通过（新增12跨三协议
+SSE/JSON，双方相同完整input，Node忽略converted anchor；Chat历史裸名read与Go
+pad__read差异先各自独立断言，再仅规范化该字段比较）。125实际TLSmock原生探针
+通过（新增Chat源→Claude/Gemini配对result SSE/JSON），全量nogui单测5遍、两种
+tag的vet、页面/打包测试、普通production binary完整黑盒及官方MCP SDK1.32.1
+图片/视频连接通过。首次新增媒体回归用escaped JSON字符串比较marker而误失败，
+改为解析字段精确比较后5遍通过；Gemini mock误要求body.model也已修正为URL模型。
+不削弱断言/增加重试；此前失败保留。Prism审查任务启动失败，无专家批准证据。
+当前提交三平台CI/产物需独立验收，不以旧HEAD的305/119替代。
 
 ### DSML 工具文本转换（2026-10-06；核心62312f2已验收，界面增量待新HEAD验收）
 

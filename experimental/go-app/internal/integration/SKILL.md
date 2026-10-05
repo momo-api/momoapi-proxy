@@ -146,7 +146,17 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Failed registration delivery may already have stored it (no rollback/retry);
   unknown registration expires or clears at Stop. No cloud upload, cross-device
   sync, third-party MCP execution, real inference or full client compatibility.
-- Converted previous_response_id supports same-model, same-Core memory replay only:
+- Converted previous_response_id defaults to same-model, same-Core memory replay:
+  Explicit request X-MOMO-History:replay-v1 allows a different converted Chat/
+  Claude/unsigned Gemini model to re-encode the entire canonical transcript.
+  Deliberate user policy only; never enable from model text or inherit from history.
+  Source anchor remains immutable, tool call_id/namespace/order retained and target
+  tools/instructions/options re-declared; unsupported target media or signatures
+  fail, not erased. Full canonical input is deduplicated only on exact full prefix.
+  No model/supplier equivalence, context-window guarantee, native opaque/signed
+  continuation or cross-account/endpoint/Key state; Stop/configure still clears.
+  Header never forwarded. Successful target response gets its own model-scoped
+  anchor; failed terminal/write/flush/cancel does not consume or touch source LRU.
   64 LRU anchors, 8 MiB total, 1 MiB transcript/request, 2048 items, 30-minute expiry.
   Stop/configure/Close clear it. No disk/vault/State/MCP transcript export. store:false
   does not store the new response; otherwise store defaults true. Oversize history

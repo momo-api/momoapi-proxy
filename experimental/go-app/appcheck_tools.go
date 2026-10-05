@@ -102,5 +102,8 @@ func probeNamedRequests(core *appcore.Core) error {
 	if err := probeDSMLRequests(core); err != nil {
 		return err
 	}
+	if err := probeProviderReplayRequests(core); err != nil {
+		return err
+	}
 	return probeHistoryRequests(core)
 }

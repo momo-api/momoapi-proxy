@@ -225,6 +225,11 @@ func (c *Core) Handler() http.Handler {
 	})
 }
 func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
+	replay, validReplay := providerReplayRequested(r)
+	if !validReplay {
+		http.Error(w, "invalid history replay policy", 400)
+		return
+	}
 	dsml, validDSML := dsmlRequested(r)
 	if !validDSML {
 		http.Error(w, "invalid tool text policy", 400)
@@ -334,13 +339,17 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		stream = string(payload["stream"]) == "true"
 		protocol := resolveProtocol(model)
 		converted := r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" && (protocol == "chat" || protocol == "claude" || protocol == "gemini")
+		if replay && !converted {
+			http.Error(w, "history replay policy requires converted routing", 400)
+			return
+		}
 		if dsml && (!converted || protocol != "chat") {
 			http.Error(w, "tool text policy requires converted Chat routing", 400)
 			return
 		}
-		if dsml {
+		if dsml || replay {
 			if _, err := decodeVideoObject(body); err != nil {
-				http.Error(w, "invalid tool text request", 400)
+				http.Error(w, "invalid explicit conversion request", 400)
 				return
 			}
 		}
@@ -382,7 +391,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			protocol := resolveProtocol(model)
 			if protocol == "chat" || protocol == "claude" || protocol == "gemini" {
 				var historyErr error
-				body, seed, historyErr = c.prepareRoutedHistory(body, model)
+				body, seed, historyErr = c.prepareRoutedHistoryPolicy(body, model, replay)
 				if historyErr != nil {
 					http.Error(w, "unsupported or expired routed history", 400)
 					return
@@ -425,6 +434,9 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if routed != nil {
+				if replay {
+					w.Header().Set("X-MOMO-History", "replay-v1")
+				}
 				if dsml {
 					if routed.loading != nil {
 						http.Error(w, "tool text policy cannot combine client search", 400)

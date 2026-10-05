@@ -50,6 +50,15 @@ Magpie 的转换核心清楚，不代表整个 gateway 很小：它还包含订�
 
 ## MOMO 建议：有界小 IR + 明确能力契约
 
+### 2026-10-06：跨转换模型的完整canonical回放
+
+X-MOMO-History:replay-v1明确解除同模型anchor门禁，只对本Core里已经由严格转换
+产生的canonical input/output。不要由线程ID/模型text猜授权；源不变，target重新
+声明工具/选项并经过同一IR/encoder校验。失败没有新的anchor、没有源LRU副作用；
+Stop/configure/TTL/预算仍生效。无需另建provider状态机或复制历史算法，但不能
+迁移原生encrypted/signed状态，不能宣称供应商语义、context窗口或工具约束等价。
+这是完整历史而非摘要/自动checkpoint；媒体目标的投影信任变化仍需每请求策略。
+
 目标结构（下述比较表为 `559547a` 历史基线；本轮已实施最小请求/事件中间层）：
 
 ```text

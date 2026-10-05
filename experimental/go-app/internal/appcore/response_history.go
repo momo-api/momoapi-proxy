@@ -130,6 +130,9 @@ func normalizedHistory(items []json.RawMessage) ([]json.RawMessage, error) {
 // Only converted Responses paths use local anchors; native/default bytes bypass
 // this entirely. Instructions/knobs are per-turn, never silently inherited.
 func (c *Core) prepareRoutedHistory(data []byte, model string) ([]byte, *historySeed, error) {
+	return c.prepareRoutedHistoryPolicy(data, model, false)
+}
+func (c *Core) prepareRoutedHistoryPolicy(data []byte, model string, replay bool) ([]byte, *historySeed, error) {
 	var body map[string]json.RawMessage
 	if json.Unmarshal(data, &body) != nil {
 		return nil, nil, errRouted
@@ -162,9 +165,16 @@ func (c *Core) prepareRoutedHistory(data []byte, model string) ([]byte, *history
 	generation := c.history.generation
 	if previous != "" {
 		entry, ok := c.history.entries[previous]
-		if !ok || entry.model != model {
+		if !ok || entry.model != model && !replay {
 			c.mu.Unlock()
 			return nil, nil, errRouted
+		}
+		if entry.model != model {
+			source, target := resolveProtocol(entry.model), resolveProtocol(model)
+			if !includes([]string{"chat", "claude", "gemini"}, source) || !includes([]string{"chat", "claude", "gemini"}, target) {
+				c.mu.Unlock()
+				return nil, nil, errRouted
+			}
 		}
 		// Drop no partial overlap and no repeated-turn content. Only a complete exact
 		// semantic prefix is already present; otherwise input is a new suffix.
