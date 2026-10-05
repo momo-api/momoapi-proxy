@@ -410,7 +410,7 @@ sharing or upstream-health indicator. Full gap audit and migration gates:
 
 ### Explicit image generation API subset
 
-Authenticated non-browser API plus a desktop image workbench (not media MCP). First
+Authenticated non-browser API plus a desktop image workbench. First
 GET /internal/images/capabilities, explicitly select a catalog-authorized model,
 then POST /internal/images/generate with model/prompt/n and supported controls.
 No automatic model choice/fallback/retry; generation can bill. Permission is valid
@@ -433,7 +433,7 @@ one GET /v1/tasks/<id>, no auto-poll or alternate endpoint fallback. 64 slots
 reserved before generation (pending included), absolute30minTTL, no refresh.
 Stop/configure clears local catalog/tasks, not remote jobs or billed effects;
 delivery failure can leave submitted/tracked task, no rollback or auto-retry.
-No edits/video/cloud assets/filepicker/disk assets/media MCP in this subset.
+No edits/video/cloud assets/filepicker/disk assets in this subset.
 Readonly MCP exposes this contract as image_generation; media:false still means
 the full Node media suite is not implemented. Node remains primary.
 
@@ -477,6 +477,29 @@ ping, tools/list + gateway_capabilities, resources/list/read for the bundled Ski
 It creates no core/listener, reads no keys/vault/accounts, invokes no models and
 launches no arbitrary processes. Protocol version 2024-11-05; not a universal MCP
 client/manager, HTTP MCP transport or media server. Tested normal packaged binary.
+
+Separate opt-in `momo-preview mcp-images` owns a Core with image_capabilities,
+image_generate and image_task tools, plus existing capability/Skill reads. Its
+first stdin line MUST be private JSON config (exact Endpoint/APIKey/optional Mode,
+8192 bytes before newline); later lines are MCP. No listener, connection token
+handoff, env/vault/account discovery or config file read. A trusted launcher must
+inject the prelude; ordinary generic MCP configs cannot directly launch this
+mode. Do not place keys in argv/config exports/tool arguments/logs/shell history.
+Existing desktop copied MCP config remains read-only, not silently upgraded.
+
+Catalog first, explicit model, generate arguments
+`{confirmed:true,request:{model,prompt,...supportedControls}}`. Client affirmation
+is NOT verified human consent; obtain user intent before a possibly billed call.
+Task arguments `{task_id}` allow only this process's returned IDs/absolute TTL.
+160KiB lines/64 nesting/duplicate JSON rejection; exact IDs retained without float
+rounding; bounded JSON as text only (not MCP image blocks), no downloads/files.
+No auto selection/poll/retry/fallback. Sequential requests, EOF observed between
+operations: peer disconnect during one is not immediate cancellation; Core300s
+generation/120s other deadlines still bound it. Signal closes private stdin/stdout
+and cancels local calls, not remote jobs or billed effects. Output failure exits
+without replay; task may already be submitted. No edit/video, third-party MCP
+manager, account wallet or transcript export. Mock/native stream and normal
+packaged CLI tests are not real agent/plugin/live upstream acceptance.
 
 Overview's explicit quota button uses only the deliberately configured key/origin
 for `GET /api/usage/token/`. No startup/polling fetch, cookie or account discovery;

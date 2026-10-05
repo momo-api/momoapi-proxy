@@ -187,11 +187,28 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   data-only preview. URLs are text, not auto-loaded. Stop/Apply/Load clears UI
   state and fences late results; remote effects cannot be undone. Native actions
   require origin+page capability and never return tokens to the page.
-  No edit/video/disk assets/media MCP in this subset.
+  No edit/video/disk assets in this subset.
 - Semantic/local summarization, full attachment management, full media suite and
   cross-device sharing are not migrated. This is not full Node compatibility.
-- The built-in stdio MCP only reports capabilities and exposes this document.
+- The default `mcp` stdio mode only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.
+- Separate explicit `mcp-images` supports image_capabilities, image_generate and
+  image_task through an owned Core. A trusted launcher must write one private
+  config JSON line (exact Endpoint/APIKey/optional Mode) to stdin BEFORE normal
+  newline MCP; this is not direct generic client config compatibility. Never put
+  keys in argv, client config, tool arguments, logs or shell history. No env,
+  vault/account discovery, listener, token handoff or automatic installation.
+  Read-only desktop MCP export remains unchanged. Query catalog first, explicitly
+  choose model, pass {confirmed:true,request:{model,prompt,...supportedControls}}.
+  confirmed:true is client affirmation, NOT verified human consent or a billing
+  authorization UI: client must obtain user intent. Max160KiB request lines, no
+  duplicate members, 64 nesting, bounded text JSON results, no image blocks or
+  downloads. One image_task {task_id} call queries only IDs this process returned.
+  No auto-poll/retry/fallback. Failed delivery may already submit/bill. Sequential
+  calls: EOF observed between operations; disconnect during one is not immediate
+  cancellation (Core deadlines still bound it); signal cancels local operations,
+  not remote jobs. No history/quota/key export, edit/video/disk assets or general
+  third-party MCP runner.
 - Token quota is not the account wallet or a currency amount. The desktop
   queries it only on explicit refresh and does not export it to this MCP.
 - Existing Node MOMO Image/Video plugins still require their Node proxy;

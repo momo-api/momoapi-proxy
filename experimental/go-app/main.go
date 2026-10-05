@@ -23,6 +23,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "mcp-images" {
+		return runImageMCP()
+	}
 	if len(os.Args) == 2 && os.Args[1] == "mcp" {
 		return integration.ServeMCP(os.Stdin, os.Stdout)
 	}
@@ -34,7 +37,7 @@ func run() error {
 		return desktop()
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("MOMO preview: desktop (no args) | --version | mcp (read-only stdio) | serve (upstream config on private stdin)")
+		return errors.New("MOMO preview: desktop (no args) | --version | mcp (read-only stdio) | mcp-images (opt-in private config line then stdio) | serve (upstream config on private stdin)")
 	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
 	_ = os.Stdin.Close()

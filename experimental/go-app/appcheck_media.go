@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/integration"
 )
 
 func probeMediaUpstream(w http.ResponseWriter, r *http.Request, data []byte) bool {
@@ -23,22 +26,30 @@ func probeMediaUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"models":[{"id":"momoapi-gpt-image-2-5-flare","modality":"image","available":true,"operations":["generate"],"parameters":{}}]}`)
 	case "/v1/images/generations":
-		if r.Method != "POST" || (string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"media-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"gui-inline-probe"}`) {
+		if r.Method != "POST" || (string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"media-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"gui-inline-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"mcp-probe"}`) {
 			w.WriteHeader(400)
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(data), "mcp-probe") {
+			io.WriteString(w, `{"task_id":"task_mcp_probe","status":"submitted"}`)
+			return true
+		}
 		if strings.Contains(string(data), "gui-inline-probe") {
 			io.WriteString(w, `{"data":[{"b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}]}`)
 			return true
 		}
 		io.WriteString(w, `{"data":[{"status":"submitted","task_id":"task_media_probe"}]}`)
-	case "/v1/tasks/task_media_probe":
+	case "/v1/tasks/task_media_probe", "/v1/tasks/task_mcp_probe":
 		if r.Method != "GET" || len(data) != 0 {
 			w.WriteHeader(400)
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "task_mcp_probe") {
+			io.WriteString(w, `{"task_id":"task_mcp_probe","status":"completed","url":"https://images.example/mcp.png"}`)
+			return true
+		}
 		io.WriteString(w, `{"data":{"id":"task_media_probe","status":"completed","result":{"images":[{"url":["https://images.example/probe.png"]}]}}}`)
 	default:
 		return false
@@ -73,6 +84,16 @@ func probeMediaRequests(core *appcore.Core) error {
 		if strings.Contains(tc.path, "/tasks/") && (result["terminal"] != true || !strings.Contains(string(data), "https://images.example/probe.png")) {
 			return errors.New("media completion probe")
 		}
+	}
+	// Native runner exercises the same opt-in MCP stream against real TLS mock,
+	// not a stubbed dispatcher. Normal shipped-binary tests cover CLI ownership.
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"image_capabilities","arguments":{}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"image_generate","arguments":{"confirmed":true,"request":{"model":"momoapi-gpt-image-2-5-flare","prompt":"mcp-probe"}}}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"image_task","arguments":{"task_id":"task_mcp_probe"}}}
+`
+	var output bytes.Buffer
+	if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &output, core.DesktopImages) != nil || strings.Count(output.String(), "\n") != 3 || strings.Contains(output.String(), `"isError":true`) || !strings.Contains(output.String(), "https://images.example/mcp.png") || strings.Contains(output.String(), "synthetic-appcheck-only") || strings.Contains(output.String(), key) {
+		return errors.New("image MCP native probe")
 	}
 	return nil
 }

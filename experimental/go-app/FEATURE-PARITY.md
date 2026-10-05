@@ -17,10 +17,10 @@
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
-| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成子集：显式查询目录、选模型、单次请求，URL/Base64/本进程任务手动查询；不自动下载/保存/轮询，新增图片工作台（确认生成 / 手动最新任务 / 显式内联预览）；编辑、视频、媒体 MCP 未迁移 |
+| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成子集：显式目录/选模型/单次请求，URL/Base64/本进程任务手动查询；图片工作台与独立 opt-in 图片 MCP；不自动下载/保存/轮询，编辑、视频、完整媒体插件未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
-| Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | Go 新增可复制 Skill、只读 stdio 能力工具/Skill 资源；媒体 MCP 和通用第三方管理仍未迁移 |
+| Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有配置首行后目录/生成/任务工具，需可信 launcher，不是现有插件直接兼容；视频/完整媒体/通用第三方管理未迁移 |
 | 额度展示 | 兼容 NewAPI `GET /api/usage/token/`（非账户钱包） | 明确点击查询 Key 额度、已用/授予/到期/查询时间；不猜汇率，不获取账户登录态 |
 | 跨平台 / 跨设备 | Go `desktop_on.go`、`packaging/` | Windows X64 / macOS ARM64 / Linux X64 预览；仅 127.0.0.1，不支持跨设备共享 |
 
@@ -438,6 +438,21 @@ Prism有效静态审查指出按原始长度逐前缀加delta使合法空白输�
 非PDF、附件UI选择器、媒体插件或真实客户端/真实模型完整兼容声明。
 
 ## Magpie 借鉴边界
+
+### 独立显式图片 MCP 增量（2026-10-05）
+
+新增 mcp-images CLI，私有 stdin 首行配置，后续 bounded newline MCP，保留 buffered
+read-ahead；默认 mcp/桌面复制配置仍只读。单独拥有 Core，无监听端口/Token handoff/
+自动读凭据库或账号/env；exact Endpoint/APIKey/Mode，8192字节且拒绝重复/别名字段。
+图片工具目录→明确模型生成→本进程任务手动查询，确认 true 仅客户端声明，不是
+真人确认或计费授权证明。复用核心并发/目录/任务/Stop/超时/结果门禁，不重复协议。
+160KiB行/64 nesting/duplicate rejection，ID精度保留，错误脱敏，短写失败直接退出
+不重发，结果仅text JSON，不下载或生成image content块。顺序执行EOF只在两操作间
+观察；pending断线不是即时取消，Core期限仍有效；signal关闭流并取消本地操作，
+不取消远端。通用MCP客户端须可信launcher注入私有首行，未实现自动launcher/UI导出。
+原生runner探针新增3次真实TLS mock调用，共102；统一Node/Go TCP仍275，不把MCP
+注入Core单测称为双方插件兼容。普通发行CLI另验首行/EOF/idle signal/DNS门禁。
+编辑/视频/真实agent/生产推理/跨设备/签名发行未完成。当前增量CI回执需重新验收。
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`
 （本地审阅提交 `2e3fffe794764afa5f40401aeef45a20f6a87f27`）：

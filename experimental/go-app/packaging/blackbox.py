@@ -58,6 +58,66 @@ def check_readonly_mcp(binary):
     require(replies[4]["error"]["code"] == -32602, "MCP arbitrary execution allowed")
 
 
+def check_image_mcp(binary):
+    config = json.dumps(CONFIG).encode()
+    for data in (b"", config, b"{}\n", config + b"{}\n", b"x" * 8194 + b"\n",
+                 json.dumps({**CONFIG, "extra": True}).encode() + b"\n"):
+        result = subprocess.run([str(binary), "mcp-images"], input=data,
+                                capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b"", "image MCP invalid prelude")
+        require(SYNTHETIC_KEY.encode() not in result.stderr, "image MCP prelude reflection")
+    messages = [
+        {"jsonrpc": "2.0", "id": 9007199254740993, "method": "initialize"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "image_generate", "arguments": {"confirmed": False, "request": {}}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "image_generate", "arguments": {"confirmed": True, "request": {"model": "momoapi-gpt-image-2-5-flare", "prompt": "synthetic"}}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "image_task", "arguments": {"task_id": "foreign"}}},
+        # Normal binary publicDial rejects localhost before connection, no public call.
+        {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "image_capabilities", "arguments": {}}},
+    ]
+    data = config + b"\n" + ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
+    result = subprocess.run([str(binary), "mcp-images"], input=data, capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b"", "image MCP EOF shutdown")
+    require(SYNTHETIC_KEY.encode() not in result.stdout and b'"api_key"' not in result.stdout
+            and b'"base_url"' not in result.stdout, "image MCP credential handoff")
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require([r["id"] for r in replies] == [m["id"] for m in messages], "image MCP buffered input/ID precision")
+    require([t["name"] for t in replies[1]["result"]["tools"]] ==
+            ["gateway_capabilities", "image_capabilities", "image_generate", "image_task"], "image MCP whitelist")
+    require(replies[2]["error"]["code"] == -32602 and
+            all(r["result"]["isError"] for r in replies[3:]), "image MCP confirmation/catalog/task/DNS gates")
+
+
+def check_image_mcp_idle_signal(binary):
+    options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
+               else {"start_new_session": True})
+    if os.name == "nt":
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = 0
+        options["startupinfo"] = startup
+    process = subprocess.Popen([str(binary), "mcp-images"], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
+    try:
+        process.stdin.write(json.dumps(CONFIG).encode() + b"\n" +
+                            b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n')
+        process.stdin.flush()
+        reply = queue.Queue(maxsize=1)
+        reader = threading.Thread(target=lambda: reply.put(process.stdout.readline()), daemon=True)
+        reader.start()
+        require(json.loads(reply.get(timeout=8))["id"] == 1, "image MCP idle readiness")
+        process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
+        require(process.wait(timeout=8) == 0, "image MCP idle signal shutdown")
+        reader.join(timeout=1)
+        require(process.stdout.read() == b"" and process.stderr.read() == b"", "image MCP signal output")
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=8)
+        for pipe in (process.stdin, process.stdout, process.stderr):
+            pipe.close()
+
+
 class Session:
     def __init__(self, binary):
         self.process = None
@@ -206,6 +266,7 @@ def check_runtime(binary):
     binary = Path(binary).resolve(strict=True)
     check_invalid_inputs(binary)
     check_readonly_mcp(binary)
+    check_image_mcp(binary)
     allocated_console = False
     sessions = []
     stalled = []
@@ -221,6 +282,7 @@ def check_runtime(binary):
                 require(kernel.AllocConsole() != 0, "cannot create private test console")
                 allocated_console = True
                 ctypes.WinDLL("user32").ShowWindow(ctypes.c_void_p(kernel.GetConsoleWindow()), 0)
+        check_image_mcp_idle_signal(binary)
         for _ in range(2):
             sessions.append(Session(binary))
         first, second = sessions
@@ -238,7 +300,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: read-only MCP/Skill + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle signal + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":
