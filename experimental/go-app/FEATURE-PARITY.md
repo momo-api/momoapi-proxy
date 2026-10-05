@@ -16,9 +16,9 @@
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
-| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 新增有序 user 图片输入/同模型历史，三协议明确转换；已增配对工具结果图片（Claude/Gemini原生子集、Chat显式投影）；已增有界 PDF 输入/配对结果；非 PDF 文件、上传/资产存储未迁移；不是完整附件管理 |
+| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
-| Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 手动复制本地连接配置；新增明确点击的 Key 模型列表检查/本地筛选，不代表推理验证；无自动接入或更新 |
+| Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
 | Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | Go 新增可复制 Skill、只读 stdio 能力工具/Skill 资源；媒体 MCP 和通用第三方管理仍未迁移 |
 | 额度展示 | 兼容 NewAPI `GET /api/usage/token/`（非账户钱包） | 明确点击查询 Key 额度、已用/授予/到期/查询时间；不猜汇率，不获取账户登录态 |
@@ -388,6 +388,38 @@ mutationPending；现在这些操作10s请求期限、poll仍5s，超时明确�
 仍允许等待系统解锁，Stop/Quit不阻断。test-only watchdog记录固定最近阶段标签，
 不输出状态/Key/错误/账户，25s门禁保留。这个回归不是原mac失败的根因证明，新提交
 必须重新跑全部验收，保留失败回执，不同提交绿灯不替代当前证据。
+
+### 显式本地内存附件增量（2026-10-05）
+
+新增 /internal/attachments POST 注册单个 canonical inline 图片/PDF，随机 att_ ID；
+GET /internal/attachments/<id> 仅元数据，DELETE 删除，无列表/内容导出。每 Core64条、
+8MiB canonical JSON（含Base64）、绝对30分钟TTL，访问惰性清理，满507不自动淘汰。
+沿用鉴权/拒绝浏览器、4并发/32TCP/120s/1MiB body/15s写入/Stop中断上传；Stop/
+configure/Close清空，generation守卫禁止迟到注册与跨代展开，零上游注册。
+非Node云上传/磁盘metadata store，非provider file_id/对象存储/重签名/跨设备/生成。
+
+每请求明确 X-MOMO-Attachments:inline，仅转换 Responses/localcompact；user.content
+或function/custom.output直接数组中的 {type:momo_attachment,asset_id:att_...} 保序展开。
+未知角色/类型不改写；配对/声明与投影策略由共享严格IR在发送前验证（包括anchor
+历史中调用），不能宣称展开函数单独已经证明配对。工具schema/参数/指令不递归重写。
+默认/native带header拒绝、无header精确透传不变，header不转发/不继承。转换无header/
+foreign/deleted/expired/额外字段/完整展开超预算拒绝；1MiB full JSON/history/共享媒体
+预算继续权威。先展开后存history：已提交anchor/checkpoint含独立 inline，删除附件不
+撤回已发送历史；suffix仍可续接，含删除引用的full replay失败，匹配inline full可去重。
+Stop清空两种存储，非安全内存擦除/远端删除。注册写出失败可能已存，不保证回滚或重试。
+
+统一实际TCP黑盒新增16组（共251）：Node相同canonical PDF vs Go先显式注册引用，
+同mock/资源，注册零上游，然后SSE/JSON/用户/配对工具发送与既有wire精确断言。
+不是两方同附件API，也不是Node云上传等价性。真实WebView路径原92次物理上游保持，
+其中8组JSON用户/工具PDF改用显式注册/引用/删除，无新增上游；不是文件选择器验收。
+单测覆元数据不含bytes、权限/模式、TTL/64条/8MiB、独立Core、并发快照删除、停机
+中断固定/分块上传、代次、续聊删除后snapshot/full去重、checkpoint保留、共享count/
+detail/配对门禁、未知位置、short/error/flush/deadline/取消不假装回滚。
+Prism有效静态审查指出按原始长度逐前缀加delta使合法空白输入与引用顺序相关，独立
+红测试复现后改为展开part累计上限+最终完整JSON上限；补跨代守卫和精确类型/角色。
+初始咨询仅返回Searched，无有效审查；后续静态意见不是执行/批准。
+本增量本地与三平台CI需针对当前commit重新验收，不引用旧绿灯替代。无云上传、
+非PDF、附件UI选择器、媒体插件或真实客户端/真实模型完整兼容声明。
 
 ## Magpie 借鉴边界
 

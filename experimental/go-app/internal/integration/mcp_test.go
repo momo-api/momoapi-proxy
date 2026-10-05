@@ -66,6 +66,9 @@ func TestMCPAndSkillExports(t *testing.T) {
 	if !strings.Contains(out.String(), "client_config") || !strings.Contains(Skill, "MOMO_LOCAL_API_KEY") {
 		t.Fatal("stale manual client config export boundaries")
 	}
+	if !strings.Contains(out.String(), "attachments") || !strings.Contains(Skill, "X-MOMO-Attachments:inline") || !strings.Contains(Skill, "deletion does NOT erase") {
+		t.Fatal("stale attachment capability/skill")
+	}
 	if !json.Valid([]byte(config)) || !strings.Contains(config, "mcpServers") || strings.Contains(config, "api_key") {
 		t.Fatal("config export")
 	}

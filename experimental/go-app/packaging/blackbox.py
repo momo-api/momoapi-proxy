@@ -172,6 +172,11 @@ def check_boundaries(session):
         session.request("GET", "/v1/models", 403, headers=headers)
     session.request("OPTIONS", "/v1/responses", 403, headers={"Origin": "https://foreign.invalid"})
     session.request("GET", "/app/state", 404)
+    session.request("POST", "/internal/attachments", 401, body=b"{}", authenticated=False)
+    session.request("POST", "/internal/attachments", 403, body=b"{}", headers={"Origin": "https://foreign.invalid"})
+    session.request("POST", "/internal/attachments", 400, body=b"{}")  # default passthrough mode
+    session.request("GET", "/internal/attachments", 405)  # no listing
+    session.request("POST", "/v1/responses", 400, body=b'{"model":"gpt-5.6-sol"}', headers={"X-MOMO-Attachments":"inline"})
     session.request("GET", "/v1/responses/compact", 405)
     session.request("POST", "/v1/responses/compact", 501,
                     body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}')

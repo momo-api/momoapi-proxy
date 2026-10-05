@@ -132,6 +132,7 @@ cases.push(...toolImageFixtures.flatMap(f=>[true,false].flatMap(stream=>['functi
  payload:{model:f.model,stream,...(f.policy?{momo_tool_images:f.policy}:{}),tools:[kind==='function'?{type:'function',name:'read',parameters:{type:'object',properties:{}}}:{type:'custom',name:'write'}],input:[{role:'user',content:'inspect'},kind==='function'?{type:'function_call',name:'read',call_id:'image_call',arguments:'{}'}:{type:'custom_tool_call',name:'write',call_id:'image_call',input:'raw'}, {type:kind==='function'?'function_call_output':'custom_tool_call_output',call_id:'image_call',output:imageInput.slice(0,3)},{role:'user',content:'CURRENT'}]}
 })))));
 cases.push(...fileCases(toolImageFixtures));
+cases.push(...fileCases(toolImageFixtures).map(f=>({...f,name:f.name+' registered memory snapshot',attachment:true})));
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  let stderr='';child.stderr.on('data',b=>{stderr+=b});
@@ -174,7 +175,24 @@ for(const fixture of cases){
   const goURL=handoff.base_url.replace(/\/v1$/,'');
   const count=fixture.concurrent||1;
   const nodeResults=await Promise.all(Array.from({length:count},()=>invoke(nodeURL,'synthetic-node-only',fixture.payload)));
-  const goResults=await Promise.all(Array.from({length:count},()=>invoke(goURL,handoff.api_key,fixture.payload)));
+  let goPayload=fixture.payload, goHeaders={};
+  if(fixture.attachment){
+   goPayload=structuredClone(fixture.payload);
+   let registered=0;
+   for(const item of goPayload.input)for(const field of ['content','output']){
+    if(!Array.isArray(item[field]))continue;
+    for(let i=0;i<item[field].length;i++)if(item[field][i].type==='input_file'){
+     const registration=await invoke(goURL,handoff.api_key,{part:item[field][i]},'/internal/attachments');
+     assert.equal(registration.status,200);const meta=JSON.parse(registration.body);assert.match(meta.asset_id,/^att_[a-f0-9]{64}$/);
+     assert.equal(meta.mime_type,'application/pdf');assert.equal(meta.filename,'report.pdf');assert.ok(meta.decoded_bytes>0);
+     assert.ok(!registration.body.includes('file_data'));assert.ok(!registration.body.includes('base64'));
+     item[field][i]={type:'momo_attachment',asset_id:meta.asset_id};registered++;
+    }
+   }
+   assert.equal(registered,1);goHeaders={'X-MOMO-Attachments':'inline'};
+   assert.equal((await(await fetch(handoff.mock_url+'/capture')).json()).length,count,'local registration must make zero upstream calls');
+  }
+  const goResults=await Promise.all(Array.from({length:count},()=>invoke(goURL,handoff.api_key,goPayload,'/v1/responses',goHeaders)));
   const captures=await(await fetch(handoff.mock_url+'/capture')).json();
   assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
   // Independently assert the actual Go wire before normalizing this one known
@@ -416,4 +434,4 @@ for(const status of [200,404]){
   console.log('PASS uniform blackbox explicit native compact '+status+'; one upstream request, no fallback/local envelope, synthetic capability only');
  }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
 }
-console.log('PASS '+(cases.length+8)+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+console.log('PASS '+(cases.length+8)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

@@ -41,16 +41,17 @@ type State struct {
 	Mode          string
 }
 type Core struct {
-	mu       sync.Mutex
-	config   Config
-	running  bool
-	active   int
-	cancels  map[uint64]context.CancelFunc
-	serial   uint64
-	token    string
-	endpoint string
-	client   *http.Client
-	history  responseHistory
+	mu          sync.Mutex
+	config      Config
+	running     bool
+	active      int
+	cancels     map[uint64]context.CancelFunc
+	serial      uint64
+	token       string
+	endpoint    string
+	client      *http.Client
+	history     responseHistory
+	attachments attachmentStore
 }
 
 func New() (*Core, error) {
@@ -129,6 +130,7 @@ func (c *Core) Configure(config Config) error {
 	config.Endpoint = strings.TrimSuffix(config.Endpoint, "/")
 	c.config = config
 	c.history.clear()
+	c.attachments.clear()
 	return nil
 }
 func (c *Core) State() State {
@@ -158,6 +160,7 @@ func (c *Core) Stop() {
 	defer c.mu.Unlock()
 	c.running = false
 	c.history.clear()
+	c.attachments.clear()
 	for _, cancel := range c.cancels {
 		cancel()
 	}
@@ -201,11 +204,12 @@ func (c *Core) Handler() http.Handler {
 			http.Error(w, "invalid route", 400)
 			return
 		}
-		if r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/v1/responses/compact" {
+		attachmentRoute, attachmentMethod := attachmentRoute(r.URL.Path, r.Method)
+		if !attachmentRoute && r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/v1/responses/compact" {
 			http.NotFound(w, r)
 			return
 		}
-		if r.URL.Path == "/v1/models" && r.Method != "GET" || r.URL.Path != "/v1/models" && r.Method != "POST" {
+		if attachmentRoute && !attachmentMethod || !attachmentRoute && (r.URL.Path == "/v1/models" && r.Method != "GET" || r.URL.Path != "/v1/models" && r.Method != "POST") {
 			http.Error(w, "method denied", 405)
 			return
 		}
@@ -216,6 +220,11 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	nativeCompact, validCompactHeader := nativeCompactRequested(r)
 	if !validCompactHeader {
 		http.Error(w, "invalid compact policy", 400)
+		return
+	}
+	attachmentInline, validAttachmentHeader := attachmentInlineRequested(r)
+	if !validAttachmentHeader {
+		http.Error(w, "invalid attachment policy", 400)
 		return
 	}
 	c.mu.Lock()
@@ -230,6 +239,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	config := c.config
+	generation := c.history.generation
 	c.serial++
 	id := c.serial
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
@@ -256,6 +266,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil || len(body) > MaxRequest {
 		http.Error(w, "request body rejected", 413)
+		return
+	}
+	if local, _ := attachmentRoute(r.URL.Path, r.Method); local {
+		c.attachmentRequest(ctx, w, r, body, config, generation)
 		return
 	}
 	stream := false
@@ -288,6 +302,18 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		stream = string(payload["stream"]) == "true"
+		if attachmentInline {
+			protocol := resolveProtocol(model)
+			if config.Mode != "momo-routing" || nativeCompact || protocol != "chat" && protocol != "claude" && protocol != "gemini" {
+				http.Error(w, "attachment policy requires converted routing", 400)
+				return
+			}
+			body, err = c.expandAttachments(ctx, body, generation)
+			if err != nil {
+				http.Error(w, "unsupported or expired attachment", 400)
+				return
+			}
+		}
 		if r.URL.Path == "/v1/responses/compact" {
 			if !nativeCompact {
 				c.localCheckpoint(ctx, w, body, config)

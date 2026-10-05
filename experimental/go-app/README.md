@@ -72,7 +72,7 @@ than silently removing the requested contract.
 
 User images and explicitly paired tool image results are converted. Bounded PDF
 inputs/results are described below; file_id, non-PDF files/audio/video,
-assistant/system images, asset uploads/storage and image generation are not
+assistant/system images, cloud asset uploads and image generation are not
 implemented. Invalid input returns fixed unsupported_image_input without echoing
 image bytes/URLs; no fallback or local fetching. Local compact retains every
 image-bearing user turn, including its assistant interpretation, without replacing
@@ -116,7 +116,48 @@ for history/compact replay. Fixed unsupported_file_input/unsupported_tool_file_o
 errors do not echo content. Failed delivery does not commit history. Same-model
 suffix/full history retains original input; local checkpoint protects whole
 file-bearing turns including interpretation, not just PDF bytes. Native/default
-Responses remains byte-preserving, including provider file IDs; no assets or generation.
+Responses remains byte-preserving, including provider file IDs; no cloud upload or generation.
+
+### Explicit local attachment snapshots
+
+This is a separate bounded in-memory API, NOT Node's cloud upload/metadata store.
+With Mode=momo-routing, an authenticated nonbrowser loopback client can POST
+`/internal/attachments` with `{"part":<one canonical inline input_image or PDF
+input_file>}`. It uses the same validators described above (not full integrity or
+content-safety validation). The response contains random `asset_id` (`att_` plus
+64 hex digits), MIME, decoded byte count, optional filename and absolute timestamps,
+never bytes/paths/keys. GET `/internal/attachments/<asset_id>` reads only metadata;
+DELETE removes it. No listing, file content export, disk persistence, URL fetching,
+provider file ID, object storage, re-signing, cross-device sharing or generation.
+
+One Core stores <=64 entries and <=8MiB canonical part JSON (including Base64),
+with absolute30-minute expiry, no TTL refresh/automatic eviction. Expiry is removed
+lazily on attachment access; Stop/configure/Close clear all entries. Full storage
+returns507 rather than silently dropping another asset. Duplicate contents have
+distinct random IDs. Auth/browser denial, 1MiB request, four admitted operations,
+32TCP connections, 120s context, stalled-body Stop interruption and15s writes are
+shared with normal gateway requests; registration makes zero upstream calls.
+Registration precedes response delivery: failed delivery may leave an unknown ID
+until expiry/Stop, not transactional rollback; do not automatically retry.
+
+In converted Responses or local compact, replace a part with
+`{"type":"momo_attachment","asset_id":"att_..."}` and explicitly send
+`X-MOMO-Attachments: inline`. Only user.content and paired function/custom.output
+arrays are expanded, preserving original order. Tools/schemas/arguments/instructions
+are never recursively rewritten. Header is not forwarded/inherited. Default/native
+with this header reject before sending, while without it their exact byte passthrough
+is unchanged. Converted references without the header, wrong locations/extra fields,
+foreign/deleted/expired IDs or expanded over-budget JSON reject before sending.
+Expanded whole JSON/history still <=1MiB, image/file aggregate and tool projection
+policies still apply; references do not bypass those limits.
+
+Expansion occurs BEFORE history preparation. Anchors and checkpoints own independent
+inline snapshots: deleting/expiring an asset does NOT retract already-submitted
+history. Suffix continuation replays saved bytes; full replay using deleted IDs
+fails, while matching full INLINE replay can deduplicate. Stop clears BOTH stores;
+this is neither secure memory erasure nor deletion from the upstream. Checkpoints
+return inline PDF/image bytes, not dangling references. No attachment UI picker,
+third-party client automatic integration or real-model acceptance is claimed.
 
 Official wire references (not inference tests):
 - https://developers.openai.com/api/docs/guides/pdf-files

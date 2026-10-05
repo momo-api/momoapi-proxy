@@ -92,6 +92,14 @@ func probeFileRequests(core *appcore.Core) error {
 		for _, stream := range []bool{true, false} {
 			for _, tool := range []bool{false, true} {
 				parts := []any{map[string]any{"type": "input_text", "text": "before-pdf"}, map[string]any{"type": "input_file", "filename": "report.pdf", "file_data": probePDF}, map[string]any{"type": "input_text", "text": "after-pdf"}}
+				asset := ""
+				if !stream {
+					asset, err = probeRegisterAttachment(client, base, key, parts[1])
+					if err != nil {
+						return err
+					}
+					parts[1] = map[string]any{"type": "momo_attachment", "asset_id": asset}
+				}
 				p := map[string]any{"model": model, "stream": stream, "input": []any{map[string]any{"role": "user", "content": parts}}}
 				if tool {
 					p["tools"] = []any{map[string]any{"type": "function", "name": "read"}}
@@ -106,6 +114,9 @@ func probeFileRequests(core *appcore.Core) error {
 				req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(string(b)))
 				req.Header.Set("Authorization", "Bearer "+key)
 				req.Header.Set("Content-Type", "application/json")
+				if asset != "" {
+					req.Header.Set("X-MOMO-Attachments", "inline")
+				}
 				resp, err := client.Do(req)
 				if err != nil {
 					return err
@@ -115,8 +126,43 @@ func probeFileRequests(core *appcore.Core) error {
 				if err != nil || resp.StatusCode != 200 || !strings.Contains(string(data), "pdf-ok") || stream && !strings.Contains(string(data), "response.completed") {
 					return errors.New("ordered PDF probe")
 				}
+				if asset != "" {
+					deleteReq, _ := http.NewRequest("DELETE", strings.TrimSuffix(base, "/v1")+"/internal/attachments/"+asset, nil)
+					deleteReq.Header.Set("Authorization", "Bearer "+key)
+					deleted, err := client.Do(deleteReq)
+					if err != nil {
+						return err
+					}
+					io.Copy(io.Discard, deleted.Body)
+					deleted.Body.Close()
+					if deleted.StatusCode != 200 {
+						return errors.New("attachment deletion probe")
+					}
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func probeRegisterAttachment(client http.Client, base, key string, part any) (string, error) {
+	b, _ := json.Marshal(map[string]any{"part": part})
+	r, _ := http.NewRequest("POST", strings.TrimSuffix(base, "/v1")+"/internal/attachments", strings.NewReader(string(b)))
+	r.Header.Set("Authorization", "Bearer "+key)
+	r.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(r)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 4097))
+	var meta map[string]any
+	if err != nil || response.StatusCode != 200 || len(data) > 4096 || json.Unmarshal(data, &meta) != nil || meta["mime_type"] != "application/pdf" || meta["filename"] != "report.pdf" || strings.Contains(string(data), "base64") {
+		return "", errors.New("attachment registration probe")
+	}
+	id, _ := meta["asset_id"].(string)
+	if len(id) != 68 || !strings.HasPrefix(id, "att_") {
+		return "", errors.New("attachment id probe")
+	}
+	return id, nil
 }

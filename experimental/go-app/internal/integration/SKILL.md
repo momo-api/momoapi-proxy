@@ -74,7 +74,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Disclosed untrusted-data marker with JSON-quoted call_id, NOT native trust/role
   equivalence or injection protection. Fixed unsupported_tool_image_output before
   send. Re-declare policy each turn/compact replay; never forwarded/inherited.
-  Policy forbidden on Claude. No file_id, uploads/assets or generation. Local compact
+  Policy forbidden on Claude. No provider file_id, cloud uploads or generation. Local compact
   retains whole image-bearing turns including assistant interpretation; no useful
   safe reduction rejects instead of dropping required images. Fixed
   unsupported_image_input error; native/default bytes unchanged.
@@ -112,6 +112,28 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   calls still fail. Terminal/usage/physical byte limits remain mandatory.
   Muse conversion is out of scope and
   muse-auto is rejected in opt-in routing mode. No fallback or duplicate send.
+- Explicit memory attachments (not Node cloud offloading): routing mode only.
+  POST /internal/attachments with {part:<one canonical inline input_image or PDF
+  input_file>} registers a validated snapshot. GET/DELETE
+  /internal/attachments/att_<random64hex> reads metadata/deletes it; no listing,
+  file contents export, disk, URL fetching or provider file IDs. Local-token auth
+  and browser denial apply, sharing four admission slots/120s/1MiB body limits.
+  At most64 entries/8MiB canonical JSON with Base64; absolute30min expiry, no LRU
+  eviction. Full store returns507; Stop/configure/Close clear. No model call.
+  Use {type:"momo_attachment",asset_id:"att_..."} only in user.content or paired
+  function/custom.output arrays, preserving order. Every reference-bearing request
+  requires X-MOMO-Attachments:inline on converted Responses/localcompact; header
+  never forwarded/inherited. Default/native with header rejects before sending;
+  without header default/native exact bytes remain unchanged. Converted paths
+  reject unsupported locations/foreign/deleted/expired references before sending.
+  The expanded whole JSON/history remains1MiB; all image/PDF/tool projection gates
+  still apply. Anchors/checkpoints contain independent INLINE snapshots: asset
+  deletion does NOT erase submitted history. A suffix can replay its saved bytes;
+  a full replay with deleted references fails, but matching inline full replay can
+  deduplicate. Stop clears both stores; not secure memory erasure/remote deletion.
+  Failed registration delivery may already have stored it (no rollback/retry);
+  unknown registration expires or clears at Stop. No cloud upload, cross-device
+  sync, third-party MCP execution, real inference or full client compatibility.
 - Converted previous_response_id supports same-model, same-Core memory replay only:
   64 LRU anchors, 8 MiB total, 1 MiB transcript/request, 2048 items, 30-minute expiry.
   Stop/configure/Close clear it. No disk/vault/State/MCP transcript export. store:false
