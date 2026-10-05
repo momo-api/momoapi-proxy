@@ -47,9 +47,14 @@ jobs:
           timeout 40s dbus-run-session -- bash -c 'printf "%s\n" "synthetic-ci-keyring-only" | gnome-keyring-daemon --unlock --components=secrets; MOMO_TEST_SYSTEM_VAULT=1 go test -tags nogui -run TestSystemBackendSyntheticRoundtrip -v -count=1 -timeout 30s ./internal/vault'
       - name: Race tests
         if: runner.os != 'Windows'
-        # Repeated full-size transcript budget fixtures are slower under race
-        # instrumentation. Keep all five repetitions and per-request bounds.
-        run: go test -tags nogui -race -count=5 -timeout 120s ./...
+        # Go's timeout covers the whole package across -count, not each pass.
+        # Run all five complete passes with independent 120s watchdogs. This
+        # is not a retry: any failed pass aborts, and no test/fixture is skipped.
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "Race acceptance pass $pass/5 (no retries)"
+            go test -tags nogui -race -count=1 -timeout 120s ./... || exit "$?"
+          done
       - name: Native application compilation
         run: |
           tags=production

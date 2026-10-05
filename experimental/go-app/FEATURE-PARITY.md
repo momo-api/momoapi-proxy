@@ -352,6 +352,16 @@ https://developers.openai.com/api/docs/guides/pdf-files
 https://platform.claude.com/docs/en/build-with-claude/pdf-support
 https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
 
+### Race 验收累积超时修正（2026-10-05）
+
+779da1b PR 三平台首轮通过，但 push macOS 五轮 race 在 package 累积120s超时，
+当时 TestRoutedHistoryBudgetFailureBeforeCompletion 才运行5s；不能称全部18项通过。
+PR macOS 同项117.526s，也已失去合理余量。未重跑掩盖、未减小真实预算夹具，
+未降低重复次数、未变更代理请求/写入时限。CI 改为五次独立完整 -race -count=1，
+每次 package watchdog 仍120s，任何一次失败立即停止，不是重试；全部原测试保留。
+这是测试进程累计预算配置修正，不声称改善产品性能或证明原失败测试无业务问题。
+新提交仍需全部首轮 CI/产物验收，779da1b 仅作为历史证据。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`
