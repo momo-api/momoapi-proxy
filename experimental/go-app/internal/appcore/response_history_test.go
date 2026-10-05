@@ -401,13 +401,15 @@ func TestRoutedHistoryBudgetFailureBeforeCompletion(t *testing.T) {
 			fmt.Fprint(w, chatSSE(choice(map[string]any{"content": strings.Repeat("b", 300000)}, "stop")))
 		}))
 		p, _ := decodeObject(historyPayload("gpt-5.5", []any{map[string]string{"role": "user", "content": strings.Repeat("a", 800000)}}, "", stream))
+		client := http.Client{Timeout: 5 * time.Second}
+		defer client.CloseIdleConnections()
 		for _, store := range []bool{true, false} {
 			p["store"] = store
 			raw, _ := json.Marshal(p)
 			req, _ := http.NewRequest("POST", endpoint+"/v1/responses", strings.NewReader(string(raw)))
 			req.Header.Set("Authorization", "Bearer "+c.token)
 			req.Header.Set("Content-Type", "application/json")
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := client.Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}

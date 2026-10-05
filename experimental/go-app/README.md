@@ -79,6 +79,8 @@ normalized prefix is not duplicated; partial overlaps are not guessed or removed
 Completed id/status metadata is validated then stripped for request IR, preserving
 arguments/namespace/number precision. Redeclare matching tools; results stay paired;
 instructions/knobs are per-turn, not inherited. Branches do not consume anchors.
+Claude/Gemini replay retains text/tool/text block order within one assistant turn.
+Chat only has content+tool_calls, so it cannot express block-level interleaving.
 Native/default passthrough delegates history unchanged. Cross-model/provider
 continuation, compact and signed Gemini history remain unsupported.
 
@@ -96,7 +98,7 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-Eighty-nine cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+Ninety-three cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
 and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
 and named function/custom selectors with forbidden/wrong-call rejection. Legacy Node
 emits SSE for converted JSON requests, does not request/map Chat usage, retains a flat
