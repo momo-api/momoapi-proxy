@@ -707,7 +707,7 @@ Do not disable OS protections globally to run them.
 Compilation NOT native lifecycle/tray/clipboard/install/signing/notarization/
 reboot/high-DPI/Linux desktop/system shutdown acceptance.
 
-## Video API and desktop workbench subset (not video MCP yet)
+## Video API and desktop workbench subset
 
 Explicit authenticated non-browser GET /internal/videos/capabilities queries
 token-scoped /v1/models: only MiniMax-H3-Max and seedance-2.5 APIMart JSON
@@ -738,7 +738,7 @@ model/duration/resolution/ratio manually (no automatic selection), enter prompt
 and optional HTTPS reference/frame JSON, then confirm each potentially billed
 generation. Query only the latest returned task manually; output URLs are text
 only, never video/iframe/link playback or download. Stop/configure/load clear
-catalog, consent, task and results and fence late responses. No video MCP or
+catalog, consent, task and results and fence late responses. No
 complete Node media plugin compatibility claim.
 
 12 additional same-mock TCP Node/Go cases compare exact generation/task wire,
@@ -748,7 +748,33 @@ not forced equivalence. Native probe adds3 actual video API TLS-mock calls
 (108 total). The workbench adds3 physical catalog/generation/task mock calls
 (111 total), exercising shipped DOM handlers in a real WebView and Stop clear.
 This is not ordinary installed GUI physical-click or real generation proof.
-Current CI must verify this commit, not reuse prior287/108 acceptance.
+This workbench-only historical verification is not the video MCP acceptance below.
+
+## Explicit video MCP subset
+
+Separate `mcp-videos` uses an exact private stdin first-line config, followed by
+bounded MCP JSON lines. It owns its Core, no listener/token handoff, and needs a
+trusted launcher (not automatic generic-client setup). `mcp-videos-connect
+--endpoint http://127.0.0.1:<currentPort>` instead connects to an already-running
+gateway using only intentionally inherited `MOMO_LOCAL_API_KEY`: a LOCAL full
+API session token, NOT upstream key or video-only scope. Trust the inheriting
+client; never put its value in shared config/argv/tool input/logs. Desktop can
+separately copy credential-free generic config. No client files/accounts/vault/
+Node discovery/install; normal read-only and image modes stay isolated.
+
+Tools: `video_capabilities`, `video_generate`, `video_task`. Catalog first,
+explicit model and `confirmed:true` with a request object. Confirmation is
+client affirmation, NOT independently verified human consent; obtain user
+intent for each potentially billed request. Shared Core APIMart controls,
+catalog5min,64slots/absolute30min tasks,4admission/Stop clear remain authoritative.
+No queries at init/list, no retries/model substitution/poll/play/download. Fixed
+paths,160KiB duplicate-free depth64 input/16MiB text JSON/fixed redacted errors/
+shortwrite abort. Connected catalog20s/generation+task65s deadlines. Sequential
+EOF observed between calls; pending disconnect remains deadline-bounded. Signal
+cancels local IO/work, not remote task or billing; connector exit never stops
+gateway. This is not the existing Node plugin or full media/actual agent/live
+model acceptance. Local normalbinary and native117 mock requests are separate
+evidence; current commit three-platform CI must be verified anew.
 
 ## Unsigned installer previews
 

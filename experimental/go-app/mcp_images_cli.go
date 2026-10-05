@@ -21,6 +21,14 @@ import (
 // First private stdin line is config, all later lines are MCP. Never read vault,
 // environment, account files or argv credentials; never emit a local token.
 func runImageMCP() error {
+	return runOwnedMediaMCP(false)
+}
+
+func runVideoMCP() error {
+	return runOwnedMediaMCP(true)
+}
+
+func runOwnedMediaMCP(video bool) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	input, output, err := imageMCPStreams()
@@ -60,7 +68,11 @@ func runImageMCP() error {
 		return errors.New("image MCP unavailable")
 	}
 	// No Serve/listener: direct bounded dispatch through the owned Core.
-	err = integration.ServeImageMCP(ctx, reader, output, core.DesktopImages)
+	if video {
+		err = integration.ServeVideoMCP(ctx, reader, output, core.DesktopVideos)
+	} else {
+		err = integration.ServeImageMCP(ctx, reader, output, core.DesktopImages)
+	}
 	if ctx.Err() != nil {
 		return nil
 	}

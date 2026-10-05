@@ -3,6 +3,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/integration"
 )
 
 func probeVideoUpstream(w http.ResponseWriter, r *http.Request, data []byte) bool {
@@ -20,6 +23,13 @@ func probeVideoUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 		return true
 	}
 	if r.URL.Path == "/v1/video/generations" {
+		for prompt, id := range map[string]string{"video-mcp-probe": "task_video_mcp", "video-connected-probe": "task_video_connected"} {
+			if r.Method == "POST" && string(data) == `{"aspect_ratio":"adaptive","duration":4,"model":"seedance-2.5","prompt":"`+prompt+`","resolution":"480p"}` {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]any{"task_id": id, "status": "submitted"})
+				return true
+			}
+		}
 		if r.Method == "POST" && string(data) == `{"aspect_ratio":"adaptive","duration":4,"model":"seedance-2.5","prompt":"video-gui-probe","resolution":"480p"}` {
 			w.Header().Set("Content-Type", "application/json")
 			io.WriteString(w, `{"task_id":"task_video_gui_probe","status":"submitted"}`)
@@ -33,7 +43,7 @@ func probeVideoUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 		io.WriteString(w, `{"task_id":"task_video_probe","status":"submitted"}`)
 		return true
 	}
-	if r.URL.Path == "/v1/videos/task_video_probe" || r.URL.Path == "/v1/videos/task_video_gui_probe" {
+	if r.URL.Path == "/v1/videos/task_video_probe" || r.URL.Path == "/v1/videos/task_video_gui_probe" || r.URL.Path == "/v1/videos/task_video_mcp" || r.URL.Path == "/v1/videos/task_video_connected" {
 		if r.Method != "GET" || len(data) != 0 {
 			w.WriteHeader(400)
 			return true
@@ -78,6 +88,26 @@ func probeVideoRequests(core *appcore.Core) error {
 		}
 		if strings.Contains(tc.path, "/tasks/") && (result["status"] != "completed" || result["terminal"] != true || result["remote_url"] != "https://video.example/probe.mp4") {
 			return errors.New("video completion probe")
+		}
+	}
+	for _, connected := range []bool{false, true} {
+		dispatch := integration.ImageDispatch(core.DesktopVideos)
+		prompt, id := "video-mcp-probe", "task_video_mcp"
+		if connected {
+			var closeClient func()
+			dispatch, closeClient, err = integration.NewLocalVideoDispatch(strings.TrimSuffix(base, "/v1"), key)
+			if err != nil {
+				return errors.New("video MCP connector probe")
+			}
+			defer closeClient()
+			prompt, id = "video-connected-probe", "task_video_connected"
+		}
+		input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"video_capabilities","arguments":{}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"video_generate","arguments":{"confirmed":true,"request":{"model":"seedance-2.5","prompt":"` + prompt + `"}}}}` + "\n" +
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"video_task","arguments":{"task_id":"` + id + `"}}}` + "\n"
+		var output bytes.Buffer
+		if integration.ServeVideoMCP(context.Background(), strings.NewReader(input), &output, dispatch) != nil || strings.Count(output.String(), "\n") != 3 || strings.Contains(output.String(), `"isError":true`) || !strings.Contains(output.String(), "https://video.example/probe.mp4") || strings.Contains(output.String(), key) || strings.Contains(output.String(), probeKey) {
+			return errors.New("video MCP native TCP probe")
 		}
 	}
 	return nil

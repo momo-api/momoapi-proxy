@@ -23,11 +23,17 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 4 && os.Args[1] == "mcp-videos-connect" && os.Args[2] == "--endpoint" {
+		return runConnectedVideoMCP(os.Args[3])
+	}
 	if len(os.Args) == 4 && os.Args[1] == "mcp-images-connect" && os.Args[2] == "--endpoint" {
 		return runConnectedImageMCP(os.Args[3])
 	}
 	if len(os.Args) == 2 && os.Args[1] == "mcp-images" {
 		return runImageMCP()
+	}
+	if len(os.Args) == 2 && os.Args[1] == "mcp-videos" {
+		return runVideoMCP()
 	}
 	if len(os.Args) == 2 && os.Args[1] == "mcp" {
 		return integration.ServeMCP(os.Stdin, os.Stdout)
@@ -40,7 +46,7 @@ func run() error {
 		return desktop()
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("MOMO preview: desktop (no args) | --version | mcp (read-only stdio) | mcp-images (opt-in private config line then stdio) | mcp-images-connect --endpoint <local-origin> (explicit local key environment) | serve (upstream config on private stdin)")
+		return errors.New("MOMO preview: desktop (no args) | --version | mcp (read-only stdio) | mcp-videos (opt-in private config line) | mcp-videos-connect --endpoint <local-origin> (explicit local key environment) | mcp-images (opt-in private config line then stdio) | mcp-images-connect --endpoint <local-origin> (explicit local key environment) | serve (upstream config on private stdin)")
 	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
 	_ = os.Stdin.Close()

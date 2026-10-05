@@ -188,7 +188,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   state and fences late results; remote effects cannot be undone. Native actions
   require origin+page capability and never return tokens to the page.
   No edit/video/disk assets in this subset.
-- Video API + desktop workbench subset (NOT video MCP or full plugin compatibility):
+- Video API + desktop workbench + explicit MCP subset (NOT full plugin compatibility):
   explicitly GET /internal/videos/capabilities with the local bearer token.
   This queries token-scoped /v1/models only, authorizing known MiniMax-H3-Max /
   seedance-2.5 availability; parameter constraints are documented static Node
@@ -211,7 +211,27 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   billed generation and manually queries the latest task. URLs remain text, no
   playback/link/download/save. Origin + page capability and shared mutation gate
   protect native actions; Stop/configure/load clear UI and fence late results.
-  Video MCP/legacy Adobe not yet migrated; no live-inference acceptance claim.
+  Legacy Adobe not migrated; no live-inference acceptance claim.
+- Video MCP is separately opt-in, never added to default read-only/image modes.
+  `mcp-videos` needs the same exact private first-line Endpoint/APIKey/Mode config
+  as owned image mode, trusted launcher only. `mcp-videos-connect --endpoint
+  http://127.0.0.1:<currentPort>` attaches to the running Core using explicitly
+  inherited MOMO_LOCAL_API_KEY, a LOCAL 64hex full-session token (NOT upstream
+  key or video-only scope). Only trust the inheriting client; never place token
+  in argv/tool input/shared MCP config/logs. Desktop separately copies no-Key
+  config, no client file edits/auto install/account/vault/Node discovery.
+  Tools: video_capabilities {}, video_generate {confirmed:true,request:{model,
+  prompt,...supportedControls}}, video_task {task_id}. Catalog first, explicit
+  known model, per-Core returned tasks/absolute30minTTL only. confirmed:true is
+  client affirmation, NOT verified human consent: client obtains user intent
+  for potentially billed generation. Initialization/list never query upstream.
+  One send/no retries/poll/download/play; fixed Core paths and model controls,
+  text JSON only, no authenticated-content URL/video blocks. 160KiB lines,
+  duplicate-free depth64 JSON; connected20s catalog/65s generation and task.
+  EOF between calls; pending disconnect bounded by deadlines, signal cancels
+  local work/IO, not remote billing. Connector exit never stops gateway; Stop/
+  configure clears shared session, restart changes port/key. No full existing
+  plugin compatibility, actual agent or live inference acceptance claim.
 - Semantic/local summarization, full attachment management, full media suite and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The default `mcp` stdio mode only reports capabilities and exposes this document.

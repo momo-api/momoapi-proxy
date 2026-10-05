@@ -36,10 +36,22 @@ func ValidateLocalEndpoint(endpoint string) error {
 // MOMO_LOCAL_API_KEY, copied privately from the desktop's local connection.
 // No upstream API key, env value, private prelude, profile or auto-install.
 func ImageMCPConfig(executable, endpoint string) (string, error) {
+	return mediaMCPConfig(executable, endpoint, false)
+}
+
+func VideoMCPConfig(executable, endpoint string) (string, error) {
+	return mediaMCPConfig(executable, endpoint, true)
+}
+
+func mediaMCPConfig(executable, endpoint string, video bool) (string, error) {
 	if executable == "" || strings.ContainsAny(executable, "\r\n\x00") || ValidateLocalEndpoint(endpoint) != nil {
 		return "", errors.New("local MCP export unavailable")
 	}
-	data, err := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"momo-images-preview": map[string]any{"command": executable, "args": []string{"mcp-images-connect", "--endpoint", endpoint}}}}, "", "  ")
+	mode := "images"
+	if video {
+		mode = "videos"
+	}
+	data, err := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"momo-" + mode + "-preview": map[string]any{"command": executable, "args": []string{"mcp-" + mode + "-connect", "--endpoint", endpoint}}}}, "", "  ")
 	return string(data), err
 }
 
@@ -47,6 +59,14 @@ func ImageMCPConfig(executable, endpoint string) (string, error) {
 // attaches to an already running desktop/serve process. No health/catalog query
 // at initialization; no generic URLs, proxies, redirects, retries or downloads.
 func NewLocalImageDispatch(endpoint, token string) (ImageDispatch, func(), error) {
+	return newLocalMediaDispatch(endpoint, token, false)
+}
+
+func NewLocalVideoDispatch(endpoint, token string) (ImageDispatch, func(), error) {
+	return newLocalMediaDispatch(endpoint, token, true)
+}
+
+func newLocalMediaDispatch(endpoint, token string, video bool) (ImageDispatch, func(), error) {
 	if ValidateLocalEndpoint(endpoint) != nil || !validLocalSessionToken(token) {
 		return nil, nil, errors.New("local MCP connection unavailable")
 	}
@@ -58,16 +78,26 @@ func NewLocalImageDispatch(endpoint, token string) (ImageDispatch, func(), error
 		}
 		return dialer.DialContext(ctx, "tcp4", address)
 	}}
+	if video {
+		transport.ResponseHeaderTimeout = 65 * time.Second
+	}
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("local redirect denied") }}
 	dispatch := func(parent context.Context, path string, body []byte) ([]byte, int) {
 		method, timeout := "GET", 125*time.Second
+		modality := "images"
+		if video {
+			modality, timeout = "videos", 65*time.Second
+		}
 		switch {
-		case path == "/internal/images/capabilities":
+		case path == "/internal/"+modality+"/capabilities":
 			timeout = 20 * time.Second
-		case path == "/internal/images/generate":
+		case path == "/internal/"+modality+"/generate":
 			method, timeout = "POST", 305*time.Second
-		case strings.HasPrefix(path, "/internal/images/tasks/"):
-			id := strings.TrimPrefix(path, "/internal/images/tasks/")
+			if video {
+				timeout = 65 * time.Second
+			}
+		case strings.HasPrefix(path, "/internal/"+modality+"/tasks/"):
+			id := strings.TrimPrefix(path, "/internal/"+modality+"/tasks/")
 			if len(id) == 0 || len(id) > 256 || id == "." || id == ".." || strings.Trim(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-") != "" {
 				return nil, 400
 			}

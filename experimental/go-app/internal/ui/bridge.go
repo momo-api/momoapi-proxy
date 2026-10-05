@@ -26,6 +26,7 @@ type Actions struct {
 	CopySkill          func() error
 	CopyMCPConfig      func() error
 	CopyImageMCPConfig func() error
+	CopyVideoMCPConfig func() error
 	CopyCodexConfig    func() error
 	// WebKit custom schemes can omit Origin or serialize it as null. Require a
 	// separate unguessable page capability; never accept either by itself.
@@ -74,11 +75,11 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		}
 		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/task"
 		videoAction := r.URL.Path == "/app/videos/catalog" || r.URL.Path == "/app/videos/generate" || r.URL.Path == "/app/videos/task"
-		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
+		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config" || r.URL.Path == "/app/video-mcp-config") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
 			return
 		}
-		if !videoAction && !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" && r.URL.Path != "/app/image-mcp-config" {
+		if !videoAction && !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" && r.URL.Path != "/app/image-mcp-config" && r.URL.Path != "/app/video-mcp-config" {
 			http.NotFound(w, r)
 			return
 		}
@@ -235,6 +236,16 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 				}
 				if actions.CopyImageMCPConfig == nil || actions.CopyImageMCPConfig() != nil {
 					http.Error(w, "image MCP config clipboard unavailable", 503)
+					return
+				}
+			}
+			if r.URL.Path == "/app/video-mcp-config" {
+				if !core.State().Running {
+					http.Error(w, "start gateway before video MCP export", 409)
+					return
+				}
+				if actions.CopyVideoMCPConfig == nil || actions.CopyVideoMCPConfig() != nil {
+					http.Error(w, "video MCP config clipboard unavailable", 503)
 					return
 				}
 			}

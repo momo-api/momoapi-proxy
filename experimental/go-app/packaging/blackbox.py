@@ -89,7 +89,7 @@ def check_image_mcp(binary):
             all(r["result"]["isError"] for r in replies[3:]), "image MCP confirmation/catalog/task/DNS gates")
 
 
-def check_image_mcp_idle_signal(binary, blocked_output=False, connection=None):
+def check_image_mcp_idle_signal(binary, blocked_output=False, connection=None, video=False):
     options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
                else {"start_new_session": True})
     if os.name == "nt":
@@ -97,10 +97,10 @@ def check_image_mcp_idle_signal(binary, blocked_output=False, connection=None):
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = 0
         options["startupinfo"] = startup
-    command = [str(binary), "mcp-images"]
+    command = [str(binary), "mcp-videos" if video else "mcp-images"]
     if connection:
         endpoint, token = connection
-        command = [str(binary), "mcp-images-connect", "--endpoint", endpoint]
+        command = [str(binary), "mcp-videos-connect" if video else "mcp-images-connect", "--endpoint", endpoint]
         options["env"] = {**os.environ, "MOMO_LOCAL_API_KEY": token}
     process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
@@ -166,6 +166,73 @@ def check_connected_image_mcp(binary, session):
         require(result.returncode == 1 and result.stdout == b"", "connected MCP remote/invalid endpoint")
     check_image_mcp_idle_signal(binary, connection=(endpoint, session.token))
     check_image_mcp_idle_signal(binary, blocked_output=True, connection=(endpoint, session.token))
+    session.request("GET", "/v1/models", 401, authenticated=False)  # connector never stops gateway
+
+
+def check_video_mcp(binary):
+    config = json.dumps(CONFIG).encode()
+    for data in (b"", config, b"{}\n", config + b"{}\n", b"x" * 8194 + b"\n",
+                 json.dumps({**CONFIG, "extra": True}).encode() + b"\n"):
+        result = subprocess.run([str(binary), "mcp-videos"], input=data,
+                                capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b"", "video MCP invalid prelude")
+        require(SYNTHETIC_KEY.encode() not in result.stderr, "video MCP prelude reflection")
+    messages = [
+        {"jsonrpc": "2.0", "id": 9007199254740993, "method": "initialize"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "video_generate", "arguments": {"confirmed": False, "request": {}}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "video_generate", "arguments": {"confirmed": True, "request": {"model": "seedance-2.5", "prompt": "synthetic"}}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "video_task", "arguments": {"task_id": "foreign"}}},
+        # Normal binary publicDial rejects localhost before connection, no public call.
+        {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "video_capabilities", "arguments": {}}},
+    ]
+    data = config + b"\n" + ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
+    result = subprocess.run([str(binary), "mcp-videos"], input=data, capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b"", "video MCP EOF shutdown")
+    require(SYNTHETIC_KEY.encode() not in result.stdout and b'"api_key"' not in result.stdout
+            and b'"base_url"' not in result.stdout, "video MCP credential handoff")
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require([r["id"] for r in replies] == [m["id"] for m in messages], "video MCP buffered input/ID precision")
+    require([t["name"] for t in replies[1]["result"]["tools"]] ==
+            ["gateway_capabilities", "video_capabilities", "video_generate", "video_task"], "video MCP whitelist")
+    require(replies[2]["error"]["code"] == -32602 and
+            all(r["result"]["isError"] for r in replies[3:]), "video MCP confirmation/catalog/task/DNS gates")
+
+
+def check_connected_video_mcp(binary, session):
+    endpoint = "http://127.0.0.1:" + str(session.port)
+    messages = [
+        {"jsonrpc": "2.0", "id": 9007199254740993, "method": "initialize"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "video_capabilities", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "video_generate", "arguments": {"confirmed": True, "request": {"model": "seedance-2.5", "prompt": "synthetic"}}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "video_task", "arguments": {"task_id": "foreign"}}},
+    ]
+    data = ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
+    command = [str(binary), "mcp-videos-connect", "--endpoint", endpoint]
+    env = {**os.environ, "MOMO_LOCAL_API_KEY": session.token}
+    result = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b"", "connected MCP startup/EOF")
+    require(session.token.encode() not in result.stdout and SYNTHETIC_KEY.encode() not in result.stdout,
+            "connected MCP secret reflection")
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require([r["id"] for r in replies] == [m["id"] for m in messages], "connected MCP ID order")
+    require(all(r["result"]["isError"] for r in replies[2:]), "connected MCP real Core catalog/task/DNS gates")
+    for key in ("", SYNTHETIC_KEY):
+        result = subprocess.run(command, input=data, env={**env, "MOMO_LOCAL_API_KEY": key},
+                                capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b"", "connected MCP missing/invalid key")
+        require(not key or key.encode() not in result.stderr, "connected MCP key error reflection")
+    result = subprocess.run(command, input=data, env={**env, "MOMO_LOCAL_API_KEY": "0" * 64},
+                            capture_output=True, timeout=8)
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require(result.returncode == 0 and all(r["result"]["isError"] for r in replies[2:]), "connected MCP wrong session key")
+    for url in ("http://localhost:1", "https://127.0.0.1:1", endpoint + "/", "http://example.com:1"):
+        result = subprocess.run([str(binary), "mcp-videos-connect", "--endpoint", url], input=data,
+                                env=env, capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b"", "connected MCP remote/invalid endpoint")
+    check_image_mcp_idle_signal(binary, video=True, connection=(endpoint, session.token))
+    check_image_mcp_idle_signal(binary, video=True, blocked_output=True, connection=(endpoint, session.token))
     session.request("GET", "/v1/models", 401, authenticated=False)  # connector never stops gateway
 
 
@@ -330,6 +397,7 @@ def check_runtime(binary):
     check_invalid_inputs(binary)
     check_readonly_mcp(binary)
     check_image_mcp(binary)
+    check_video_mcp(binary)
     allocated_console = False
     sessions = []
     stalled = []
@@ -347,10 +415,13 @@ def check_runtime(binary):
                 ctypes.WinDLL("user32").ShowWindow(ctypes.c_void_p(kernel.GetConsoleWindow()), 0)
         check_image_mcp_idle_signal(binary)
         check_image_mcp_idle_signal(binary, blocked_output=True)
+        check_image_mcp_idle_signal(binary, video=True)
+        check_image_mcp_idle_signal(binary, video=True, blocked_output=True)
         for _ in range(2):
             sessions.append(Session(binary))
         first, second = sessions
         check_connected_image_mcp(binary, first)
+        check_connected_video_mcp(binary, first)
         require(first.port != second.port and first.token != second.token, "multiple instances share session")
         second.request("GET", "/v1/models", 401, headers={"Authorization": "Bearer " + first.token})
         check_boundaries(first)
@@ -365,7 +436,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + video API auth/browser/catalog/foreign-ID/private-DNS/method/duplicate-JSON gates + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + owned and connected video MCP whitelist/confirmation/Core gates/EOF/idle and blocked-output signals/gateway survival + video API auth/browser/catalog/foreign-ID/private-DNS/method/duplicate-JSON gates + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":

@@ -17,10 +17,10 @@
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
-| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询，编辑、video MCP、旧视频路线与完整媒体插件未迁移 |
+| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询，编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
-| Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有首行，另有可复制无Key配置的 mcp-images-connect（客户端显式local session env）接入当前gateway；非现有插件直接兼容，视频/完整媒体/通用第三方管理未迁移 |
+| Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有首行，另有可复制无Key配置的 mcp-images-connect（客户端显式local session env）接入当前gateway；独立显式视频 MCP 私有配置/连接现有 gateway 子集；非现有插件直接兼容，完整媒体/通用第三方管理未迁移 |
 | 额度展示 | 兼容 NewAPI `GET /api/usage/token/`（非账户钱包） | 明确点击查询 Key 额度、已用/授予/到期/查询时间；不猜汇率，不获取账户登录态 |
 | 跨平台 / 跨设备 | Go `desktop_on.go`、`packaging/` | Windows X64 / macOS ARM64 / Linux X64 预览；仅 127.0.0.1，不支持跨设备共享 |
 
@@ -35,6 +35,27 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 这些不是“兼容性改进”，不能直接替代 Node 的策略与附件限制。
 
 ## 本次实际验证范围
+
+### 独立显式视频 MCP 增量（2026-10-05；本增量 CI 待验收）
+
+新增 mcp-videos 私有配置首行模式（独立 owned Core、无listener/token handoff），
+mcp-videos-connect --endpoint 当前精确IPv4 loopback（仅显式本地session env，
+无上游/账号/Node/凭据库读取）。桌面单独复制无Key配置，Running + Origin +
+页capability；不修改客户端文件或安装。复用已有MCP严格解析/stream生命周期/
+本地固定TCP transport，image与readonly工具不混入。客户端confirmed只表示声明，
+不是已核验真人授权；可信客户端先取得用户生成意图，可能已提交/计费不回滚。
+
+video_capabilities/generate/task共用Core约束，不另做协议转换；init/list零查询，
+一次发送/无retry/poll/download/play。160KiB重复JSON/深度64/ID精度、16MiB文本
+JSON/fixed错误/短写abort；connected20s目录/65s生成任务，Core15/60s不变。
+gateway目录5min/tasks64slots/绝对30min/shared4/Stop清空；connector EOF/signal
+不关gateway，signal取消本地IO/工作，EOF两调用间观察，pending断线仍期限有界。
+本地完整native新增6物理TLS mock请求（共117），两模式目录/生成/手动完成；
+普通productionbinary另验私有首行/模式工具隔离/确认/Core DNS/catalog/task门禁/
+缺错Key/endpoint/EOF/idle+blocked-output signal/gateway存活。回归另验无初始化
+查询、exact路径方法、response MIME/UTF8/预算/token反射、redirect无跟随、
+无retry、cancel/短写无重发。不是既有Node插件/完整媒体/actualagent/liveinference。
+本轮当前HEAD三平台CI/产物待验证，不用4e068c4的287/111回执代替287/117。
 
 ### 视频工作台增量（2026-10-05；本增量 CI 待验收）
 

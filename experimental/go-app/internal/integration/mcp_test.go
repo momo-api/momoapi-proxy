@@ -8,7 +8,10 @@ import (
 )
 
 func TestMCPAndSkillExports(t *testing.T) {
-	if Capabilities()["video_generation"] == nil || !strings.Contains(Skill, "Video API + desktop workbench subset") || !strings.Contains(Skill, "NOT video MCP") || !strings.Contains(Skill, "Desktop video workbench") || !strings.Contains(Capabilities()["video_generation"].(string), "Desktop video workbench") || strings.Contains(Skill, "GUI/video MCP/legacy Adobe not yet migrated") {
+	if Capabilities()["video_mcp"] == nil || !strings.Contains(Skill, "mcp-videos-connect") || !strings.Contains(Skill, "NOT verified human consent") || strings.Contains(Capabilities()["video_generation"].(string), "No video MCP yet") {
+		t.Fatal("stale explicit video MCP boundary")
+	}
+	if Capabilities()["video_generation"] == nil || !strings.Contains(Skill, "Video API + desktop workbench + explicit MCP subset") || !strings.Contains(Skill, "NOT full plugin compatibility") || !strings.Contains(Skill, "Desktop video workbench") || !strings.Contains(Capabilities()["video_generation"].(string), "Desktop video workbench") || strings.Contains(Skill, "GUI/video MCP/legacy Adobe not yet migrated") {
 		t.Fatal("stale video API support boundary")
 	}
 	if !strings.Contains(Capabilities()["image_mcp"].(string), "NOT verified human consent") || !strings.Contains(Skill, "mcp-images") || !strings.Contains(Skill, "trusted launcher") {

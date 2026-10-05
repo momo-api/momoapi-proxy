@@ -13,12 +13,25 @@ import (
 )
 
 func runConnectedImageMCP(endpoint string) error {
+	return runConnectedMediaMCP(endpoint, false)
+}
+
+func runConnectedVideoMCP(endpoint string) error {
+	return runConnectedMediaMCP(endpoint, true)
+}
+
+func runConnectedMediaMCP(endpoint string, video bool) error {
 	if integration.ValidateLocalEndpoint(endpoint) != nil {
 		return errors.New("local MCP endpoint unavailable")
 	}
 	// Explicit mode reads exactly this intentional local session env value, never
 	// upstream keys, client/account files or system credential stores. No echo.
-	dispatch, closeClient, err := integration.NewLocalImageDispatch(endpoint, os.Getenv(integration.LocalMCPKeyEnv))
+	connect := integration.NewLocalImageDispatch
+	serve := integration.ServeImageMCP
+	if video {
+		connect, serve = integration.NewLocalVideoDispatch, integration.ServeVideoMCP
+	}
+	dispatch, closeClient, err := connect(endpoint, os.Getenv(integration.LocalMCPKeyEnv))
 	if err != nil {
 		return err
 	}
@@ -41,7 +54,7 @@ func runConnectedImageMCP(endpoint string) error {
 		case <-done:
 		}
 	}()
-	err = integration.ServeImageMCP(ctx, input, output, dispatch)
+	err = serve(ctx, input, output, dispatch)
 	if ctx.Err() != nil {
 		return nil
 	}

@@ -12,6 +12,7 @@ import (
 )
 
 const ImageMCPLineLimit = 160 << 10
+const VideoMCPLineLimit = ImageMCPLineLimit
 
 // ImageDispatch is bound by the owner to its Core, never supplied over MCP.
 type ImageDispatch func(context.Context, string, []byte) ([]byte, int)
@@ -20,6 +21,15 @@ type ImageDispatch func(context.Context, string, []byte) ([]byte, int)
 // files or environment itself. Sequential calls; no retries/automatic polling.
 // EOF is observed between calls; disconnect during a call is not remote cancel.
 func ServeImageMCP(ctx context.Context, input io.Reader, output io.Writer, dispatch ImageDispatch) error {
+	return serveMediaMCP(ctx, input, output, dispatch, false)
+}
+
+// ServeVideoMCP is separately opt-in; it never adds tools to image/read-only modes.
+func ServeVideoMCP(ctx context.Context, input io.Reader, output io.Writer, dispatch ImageDispatch) error {
+	return serveMediaMCP(ctx, input, output, dispatch, true)
+}
+
+func serveMediaMCP(ctx context.Context, input io.Reader, output io.Writer, dispatch ImageDispatch, video bool) error {
 	if dispatch == nil {
 		return errors.New("image MCP unavailable")
 	}
@@ -54,7 +64,7 @@ func ServeImageMCP(ctx context.Context, input io.Reader, output io.Writer, dispa
 			}
 			continue
 		}
-		result, code, message := imageMCPResult(ctx, method, req["params"], dispatch)
+		result, code, message := mediaMCPResult(ctx, method, req["params"], dispatch, video)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -71,7 +81,15 @@ func ServeImageMCP(ctx context.Context, input io.Reader, output io.Writer, dispa
 	return nil
 }
 
-func imageMCPResult(ctx context.Context, method string, params json.RawMessage, dispatch ImageDispatch) (any, int, string) {
+func mediaMCPResult(ctx context.Context, method string, params json.RawMessage, dispatch ImageDispatch, video bool) (any, int, string) {
+	modality, title, promptLimit := "image", "Image", 32000
+	catalogDescription := "Explicit upstream catalog query. No generation or automatic selection."
+	generationDescription := "May bill. Query catalog first, choose model explicitly. confirmed:true is client affirmation, NOT verified human consent. One send, no retry. URLs/Base64 returned as text, not downloaded. Failed delivery/Stop cannot undo submission."
+	if video {
+		modality, title, promptLimit = "video", "Video", 7000
+		catalogDescription += " Model-list availability is not live inference or advanced-control proof."
+		generationDescription = "May bill. Query catalog first, choose model explicitly. confirmed:true is client affirmation, NOT verified human consent. One send, no retry. Output URL returned as text only, not downloaded or played. Failed delivery/Stop cannot undo submission."
+	}
 	if method == "tools/list" {
 		base, _, _ := mcpResult(method, params)
 		tools := base.(map[string]any)["tools"].([]any)
@@ -81,9 +99,9 @@ func imageMCPResult(ctx context.Context, method string, params json.RawMessage, 
 			required          []string
 			read              bool
 		}{
-			{"image_capabilities", "Explicit upstream catalog query. No generation or automatic selection.", map[string]any{}, nil, true},
-			{"image_generate", "May bill. Query catalog first, choose model explicitly. confirmed:true is client affirmation, NOT verified human consent. One send, no retry. URLs/Base64 returned as text, not downloaded. Failed delivery/Stop cannot undo submission.", map[string]any{"confirmed": map[string]any{"type": "boolean", "const": true}, "request": map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string", "maxLength": 32000}}, "required": []string{"model", "prompt"}}}, []string{"confirmed", "request"}, false},
-			{"image_task", "One manual query for an ID returned by the current gateway session. Absolute 30min TTL; no auto-poll, import or remote cancellation.", map[string]any{"task_id": map[string]any{"type": "string", "maxLength": 256}}, []string{"task_id"}, true},
+			{modality + "_capabilities", catalogDescription, map[string]any{}, nil, true},
+			{modality + "_generate", generationDescription, map[string]any{"confirmed": map[string]any{"type": "boolean", "const": true}, "request": mediaMCPRequestSchema(video, promptLimit)}, []string{"confirmed", "request"}, false},
+			{modality + "_task", "One manual query for an ID returned by the current gateway session. Absolute 30min TTL; no auto-poll, import or remote cancellation.", map[string]any{"task_id": map[string]any{"type": "string", "maxLength": 256}}, []string{"task_id"}, true},
 		} {
 			schema := map[string]any{"type": "object", "properties": spec.properties, "additionalProperties": false}
 			if spec.required != nil {
@@ -110,33 +128,51 @@ func imageMCPResult(ctx context.Context, method string, params json.RawMessage, 
 	}
 	path, body := "", []byte(nil)
 	switch name {
-	case "image_capabilities":
+	case modality + "_capabilities":
 		if len(args) != 0 {
 			return nil, -32602, "Unsupported tool or arguments"
 		}
-		path = "/internal/images/capabilities"
-	case "image_generate":
+		path = "/internal/" + modality + "s/capabilities"
+	case modality + "_generate":
 		var confirmed bool
 		var request map[string]json.RawMessage
 		if len(args) != 2 || !mcpFields(args, "confirmed", "request") || json.Unmarshal(args["confirmed"], &confirmed) != nil || !confirmed || json.Unmarshal(args["request"], &request) != nil || request == nil {
 			return nil, -32602, "Explicit generation confirmation and request required"
 		}
-		path, body = "/internal/images/generate", args["request"]
-	case "image_task":
+		path, body = "/internal/"+modality+"s/generate", args["request"]
+	case modality + "_task":
 		var id string
 		if len(args) != 1 || !mcpFields(args, "task_id") || json.Unmarshal(args["task_id"], &id) != nil || len(id) == 0 || len(id) > 256 || id == "." || id == ".." || strings.Trim(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-") != "" {
 			return nil, -32602, "Unsupported task ID"
 		}
-		path = "/internal/images/tasks/" + id
+		path = "/internal/" + modality + "s/tasks/" + id
 	default:
 		return nil, -32602, "Unsupported tool or arguments"
 	}
 	data, status := dispatch(ctx, path, body)
 	if status != 200 || len(data) > 16<<20 || !utf8.Valid(data) || !json.Valid(data) {
 		// Never reflect arbitrary upstream/HTTP errors, keys or request bodies.
-		return map[string]any{"isError": true, "content": []any{map[string]string{"type": "text", "text": "Image action rejected or unavailable; submitted upstream effects may already exist. No automatic retry."}}}, 0, ""
+		return map[string]any{"isError": true, "content": []any{map[string]string{"type": "text", "text": title + " action rejected or unavailable; submitted upstream effects may already exist. No automatic retry."}}}, 0, ""
 	}
 	return map[string]any{"content": []any{map[string]string{"type": "text", "text": string(data)}}}, 0, ""
+}
+
+func mediaMCPRequestSchema(video bool, promptLimit int) map[string]any {
+	properties := map[string]any{"model": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string", "maxLength": promptLimit}}
+	schema := map[string]any{"type": "object", "properties": properties, "required": []string{"model", "prompt"}}
+	if video {
+		properties["model"] = map[string]any{"type": "string", "enum": []string{"MiniMax-H3-Max", "seedance-2.5"}}
+		properties["prompt"] = map[string]any{"type": "string", "maxLength": 7000, "description": "Core also enforces 7000 UTF-16 units, not only JSON Schema code points."}
+		properties["duration"] = map[string]any{"type": "integer", "minimum": 4, "maximum": 30, "description": "Model-specific permitted values require a fresh explicit catalog."}
+		properties["resolution"] = map[string]any{"type": "string", "enum": []string{"480P", "768P", "1080P", "480p", "720p", "1080p"}}
+		properties["aspect_ratio"] = map[string]any{"type": "string", "enum": []string{"21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"}}
+		properties["reference_images"] = map[string]any{"type": "array", "maxItems": 30, "items": map[string]any{"type": "string", "maxLength": 8192}, "description": "Public HTTPS URLs; catalog-specific count cap. Cannot mix with frames; Seedance requires adaptive."}
+		for _, field := range []string{"first_frame_image", "last_frame_image"} {
+			properties[field] = map[string]any{"type": "string", "maxLength": 8192, "description": "Public HTTPS URL; no reference mixing, frames require adaptive if ratio specified."}
+		}
+		schema["additionalProperties"] = false
+	}
+	return schema
 }
 
 func mcpFields(m map[string]json.RawMessage, allowed ...string) bool {
