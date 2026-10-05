@@ -201,7 +201,7 @@ func (c *Core) Handler() http.Handler {
 			http.Error(w, "invalid route", 400)
 			return
 		}
-		if r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions" {
+		if r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/v1/responses/compact" {
 			http.NotFound(w, r)
 			return
 		}
@@ -283,6 +283,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		stream = string(payload["stream"]) == "true"
+		if r.URL.Path == "/v1/responses/compact" {
+			c.localCheckpoint(ctx, w, body, config)
+			return
+		}
 		if r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" {
 			var seed *historySeed
 			protocol := resolveProtocol(model)

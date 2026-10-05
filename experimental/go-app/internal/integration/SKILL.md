@@ -11,7 +11,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
 - Require deliberate user configuration of the upstream and its key in MOMO.
 - Copy local connection configuration only with the user's authorization;
   it contains a LOCAL token, never the upstream key. Do not log or upload it.
-- Supported routes: GET /v1/models, POST /v1/responses and
+- Supported upstream routes: GET /v1/models, POST /v1/responses and
   POST /v1/chat/completions, using the matching upstream protocol.
 - Responses namespace/custom tools and unknown fields are passed through.
   Skill/MCP tools execute in the agent client, not inside the API proxy.
@@ -54,7 +54,18 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   cancellation does not commit. Redefine tools/instructions each turn. Native/default
   passthrough delegates history unchanged. Cross-model/provider and signed continuation
   remain unsupported. This is not remote-delivery acknowledgement.
-- Compaction, attachment management, media generation and
+- POST /v1/responses/compact is a separate explicit routing-mode local checkpoint,
+  not native provider compact or a semantic summary. Chat/Claude/unsigned Gemini
+  only; payload accepts model/input/tools and optional stream:false. Redeclare
+  tools. Keep every instruction/user item, whole tool-bearing turns and latest
+  assistant in order; only older ordinary assistant text is replaced by a smaller
+  disclosed assistant marker with normalized JSON byte count/SHA-256, not encryption.
+  A trailing current user is required. Unknown/opaque/media/pending tools/no useful
+  reduction reject422; oversize413. No automatic trigger, upstream call or hidden
+  state. Replay response.compaction.output explicitly as input. cmp_ IDs are NOT
+  previous_response_id anchors; no encrypted_content envelope/restart guarantee.
+  Omitted content is unknown; never infer task completion or retry an old task.
+- Native/semantic compaction, attachment management, media generation and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The built-in stdio MCP only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.

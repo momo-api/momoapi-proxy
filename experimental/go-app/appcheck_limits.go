@@ -97,5 +97,5 @@ func probeLimitsRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return nil
+	return probeCompactRequests(core)
 }

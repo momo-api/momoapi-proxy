@@ -175,3 +175,13 @@ incomplete；不是把异常、缺终端、物理断链、非法usage或半截�
 incomplete不prepare/commit历史；仅complete才执行成功状态事务。JSON短写/flush
 仍中止，不追加502。111组同mock黑盒精确比较Node忽略limit与误报completed的
 已知差异；没有改Node，也没有宣称真实供应商limit范围或完整客户端兼容。
+
+### 显式本地checkpoint子集
+
+严格IR复用用于compact输入/普通output重放校验，只接受文本/声明工具完整配对。
+不是模型摘要：保留全部指令/用户、完整工具回合和最新assistant，在原位置以
+助手级明确损失标记替换更早普通assistant；SHA256仅审计规范化JSON，非加密。
+cmp_不做内存anchor/opaque envelope，不引入持久签名key；默认不开启，不自动
+按大小触发，也不截断required state。返回普通response.compaction.output由客户端
+显式重放，不能因此宣称Codex opaque/provider compact已接入。114同mock测试
+中Node local选择工具证据/标签，Go完整工具回合保留，有独立差异断言。

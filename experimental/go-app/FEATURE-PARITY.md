@@ -8,13 +8,13 @@
 
 | 能力 | Node 版实现依据（仓库根目录相对路径） | Go 预览实际范围 |
 | --- | --- | --- |
-| 公共 API | `src/route-dispatch.mjs` | 仅精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses`；无无版本别名，无 compact |
+| 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与显式本地 `/v1/responses/compact`；无无版本别名，无原生 compact |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
 | Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/部分 custom 子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
-| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换路径支持同模型有界内存 previous_response_id 回放；原生/默认透传不改。compact、跨模型/供应商回放未迁移 |
+| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换路径支持同模型有界内存 previous_response_id 回放；新增显式本地有损 checkpoint/普通 output 手动回放。无原生/语义摘要 compact、opaque envelope、跨模型/供应商状态 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 仅手动复制本地连接配置；无自动接入或更新 |
@@ -139,6 +139,21 @@ limit并在这些夹具中报completed，实际上游捕获与输出差异独立
 工具仍拒绝。单测另覆缺终端、lateerror、usage非法/回退、物理断链、JSON短写/
 flush/写期限与不提交history。真实WebView合计30次上游发送，含三协议SSE/JSON
 incomplete。供应商较低token上限可能拒绝；不回退重发，原有物理预算不变。
+
+本地checkpoint轮扩为114组：三协议新增明确调用compact、零上游请求、完整指令/
+用户/工具回合原序保留断言。只在momo-routing可用，默认501，原生Responses/Muse
+拒绝422；仅model/input/tools/可选stream:false，当前用户必须在末尾，工具完整配对。
+保留全部system/developer/user、完整工具回合及最新assistant；只将更早的普通
+assistant文本换成更小的明确有损标记，标记含规范化JSON字节数/SHA256，不称加密
+或语义摘要，不承诺被省略内容已完成。cmp_仅响应ID，不是anchor；返回普通output
+由调用方显式重放，没有隐藏内存/磁盘checkpoint、opaque envelope或重启保证。
+无法安全缩减422，超预算413；不自动触发、不截尾、不改指令角色、不付费摘要。
+同mock比较Node显式local policy：两边均无上游发送，Node选择call/result并重新
+包装历史文本，Go保留完整工具回合（含触发与交错文本）；差异精确断言，不称
+等价。单测另覆三协议实际回放、无新anchor、未知选项/媒体/半截工具/重复checkpoint/
+短写/flush/取消/鉴权/默认门禁。真实WebView另测3次compact，本轮上游数仍30。
+Prism本轮105.391s为静态设计建议，不是执行或批准；采纳显式保留/损失披露，
+选择普通output重放，未采纳隐藏cmp_内存引用，避免假装provider opaque状态兼容。
 
 ## Magpie 借鉴边界
 

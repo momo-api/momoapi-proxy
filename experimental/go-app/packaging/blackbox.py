@@ -172,6 +172,9 @@ def check_boundaries(session):
         session.request("GET", "/v1/models", 403, headers=headers)
     session.request("OPTIONS", "/v1/responses", 403, headers={"Origin": "https://foreign.invalid"})
     session.request("GET", "/app/state", 404)
+    session.request("GET", "/v1/responses/compact", 405)
+    session.request("POST", "/v1/responses/compact", 501,
+                    body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}')
     session.request("GET", "/v1/models?extra=1", 400)
     session.request("GET", "/v1/%6dodels", 400)
     for method, path in (("POST", "/v1/models"), ("GET", "/v1/responses"), ("GET", "/v1/chat/completions")):

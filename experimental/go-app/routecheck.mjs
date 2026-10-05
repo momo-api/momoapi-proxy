@@ -112,10 +112,10 @@ function items(body){
  const incomplete=events.find(e=>e.type==='response.incomplete');
  return {events,completed,incomplete,output:(completed||incomplete)?.response?.output?.map(({id,status,...item})=>item)||[]};
 }
-async function invoke(url,token,p){
+async function invoke(url,token,p,path='/v1/responses'){
  return new Promise((resolve,reject)=>{
   const data=JSON.stringify(p);
-  const req=httpRequest(url+'/v1/responses',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json','content-length':Buffer.byteLength(data)}},response=>{
+  const req=httpRequest(url+path,{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json','content-length':Buffer.byteLength(data)}},response=>{
    const chunks=[];let settled=false;
    const finish=truncated=>{if(settled)return;settled=true;const body=Buffer.concat(chunks).toString('utf8');resolve({status:response.statusCode,body,truncated,...items(body)})};
    response.on('data',b=>chunks.push(b));response.once('end',()=>finish(false));response.once('error',()=>finish(true));response.once('aborted',()=>finish(true));
@@ -217,4 +217,31 @@ for(const fixture of cases){
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-console.log('PASS '+cases.length+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');
+for(const model of ['gpt-5.5','claude-sonnet-4-6','gemini-2.5-flash']){
+ const {child,handoff}=await launch({stream:text});let server;
+ try{
+  const env={MOMO_PROXY_HOME:'unused-routecheck-profile',MOMO_PROXY_CONSOLE_MIRROR:'0'};
+  const loggingRuntime={env,enqueueRequest:()=>true,enqueueDiagnostic:()=>true,snapshot:()=>({})};
+  server=createMomoSwitch({endpoint:'https://mock.example',apiKey:'synthetic-unified-only',localToken:'synthetic-node-only',host:'127.0.0.1',port:0,diagnosticsEnabled:false,compactionMode:'local',requestAdmission:{maxConcurrent:4,maxQueued:0,maxBodyBudgetMb:4,bodyReadTimeoutMs:15000},contextPolicy:{outboundBodyHardLimitBytes:1048576,outboundBodySoftLimitBytes:1047552},outputPolicy:{maxStreamMb:16,maxRetainedMb:1}},
+   {env,loggingRuntime,assetStore:{},attachmentAssetStore:{},fetchImpl:(url,init)=>{const u=new URL(url);return fetch(handoff.mock_url+u.pathname+u.search,init)}});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const input=[{role:'developer',content:'exact constraints 中文'}, {role:'user',content:'historical task'}, {role:'assistant',content:'old assistant 中文🙂'.repeat(200)}, {role:'user',content:'tool trigger'}, {role:'assistant',content:'before tool'}, {type:'function_call',namespace:'pad',name:'read',call_id:'compact_read',arguments:'{"n":9007199254740993}'}, {type:'function_call_output',call_id:'compact_read',output:'exact result'}, {role:'assistant',content:'final tool context'}, {role:'user',content:'CURRENT exact 中文🙂'}];
+  const p={model,stream:false,input,tools:[tool]};
+  // Node local policy accepts tools as an unused option; Go validates declared
+  // identities and requires explicit plain-output replay, not opaque state.
+  const n=await invoke('http://127.0.0.1:'+server.address().port,'synthetic-node-only',p,'/v1/responses/compact');
+  const g=await invoke(handoff.base_url.replace(/\/v1$/,''),handoff.api_key,p,'/v1/responses/compact');
+  assert.equal(n.status,200);assert.equal(g.status,200);assert.equal(n.truncated,false);assert.equal(g.truncated,false);
+  const nf=JSON.parse(n.body),gf=JSON.parse(g.body);assert.equal(nf.object,'response.compaction');assert.equal(gf.object,'response.compaction');
+  assert.equal(gf.output.length,input.length);assert.ok(g.body.length<JSON.stringify(p).length);
+  for(let i=0;i<input.length;i++){if(i===2)continue;assert.deepEqual(gf.output[i],input[i],model+' required item/order');}
+  const marker=gf.output[2];assert.equal(marker.role,'assistant');assert.ok(marker.content[0].text.startsWith('[MOMO explicit lossy checkpoint;'));assert.ok(marker.content[0].text.includes('sha256='));assert.ok(!g.body.includes('encrypted_content'));
+  assert.ok(nf.output[0].content[0].text.startsWith('# MOMO proxy historical checkpoint'));
+  assert.deepEqual(nf.output.find(i=>i.type==='function_call'),input[5]);assert.deepEqual(nf.output.find(i=>i.type==='function_call_output'),input[6]);
+  assert.ok(!JSON.stringify(nf.output).includes('before tool'));assert.ok(JSON.stringify(gf.output).includes('before tool'));
+  assert.equal((await(await fetch(handoff.mock_url+'/capture')).json()).length,0,'local checkpoint must not send upstream');
+  console.log('DIFFERENCE Go explicit checkpoint preserves whole tool-bearing turn and original user/developer items; Node local policy keeps selected calls/results and labels/repackages text');
+  console.log('PASS uniform blackbox '+model+' explicit local compact');
+ }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
+}
+console.log('PASS '+(cases.length+3)+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

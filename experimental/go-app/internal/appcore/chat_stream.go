@@ -17,8 +17,8 @@ type chatCall struct {
 }
 
 // Incremental text, bounded retained tool arguments, exact namespace restoration.
-// Never manufacture completion on malformed data/truncated EOF/length refusal.
-// Unlike the legacy Node adapter, require finish_reason and [DONE]. No replay.
+// Never manufacture completion on malformed data or truncated EOF. Verified
+// length is incomplete. Require finish_reason and [DONE]; never retry upstream.
 func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reader, plan *chatPlan) error {
 	e, err := newRoutedResponseWriter(w, plan)
 	if err != nil {

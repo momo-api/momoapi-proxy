@@ -52,6 +52,10 @@ assert.ok(source.includes('false 或省略 stream 等有效终端才返回最终
 assert.ok(source.includes('max_output_tokens 支持整数 1–1048576'));
 assert.ok(source.includes('incomplete（不是 completed），不保存为可续接历史'));
 assert.ok(source.includes('畸形半截工具参数仍拒绝'));
+assert.ok(source.includes('/v1/responses/compact'));
+assert.ok(source.includes('本地处理 · 不调用模型'));
+assert.ok(source.includes('返回 output 需客户端手动重放；cmp_ 不是续聊 anchor'));
+assert.ok(source.includes('没有加密 envelope，不自动触发'));
 assert.ok(source.includes('不代表真实上游非流式已验证'));
 assert.ok(!source.includes('压缩、非流式'));
 assert.ok(source.includes('不含 thinking/签名'));

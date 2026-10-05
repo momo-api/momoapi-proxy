@@ -47,6 +47,9 @@ func TestMCPAndSkillExports(t *testing.T) {
 	if !strings.Contains(out.String(), "output_limits") || !strings.Contains(out.String(), "max_output_tokens integer 1..1048576") || !strings.Contains(Skill, "Incomplete never creates a history") || strings.Contains(Skill, "explicit token-limit options are not") {
 		t.Fatal("stale output-limit capability/skill")
 	}
+	if !strings.Contains(out.String(), `POST /v1/responses/compact`) || !strings.Contains(Skill, "cmp_ IDs are NOT") || !strings.Contains(Skill, "not native provider compact or a semantic summary") {
+		t.Fatal("stale checkpoint capability/skill")
+	}
 	config := MCPConfig(`C:\Program Files\MOMO\preview.exe`)
 	if !json.Valid([]byte(config)) || !strings.Contains(config, "mcpServers") || strings.Contains(config, "api_key") {
 		t.Fatal("config export")

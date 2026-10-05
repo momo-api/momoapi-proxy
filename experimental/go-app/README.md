@@ -31,7 +31,7 @@ support; no signature bypass, replay cache or artificial signature is introduced
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
-It rejects unknown payload fields/options, media, foreign/expired history references, compaction,
+It rejects unknown payload fields/options, media, foreign/expired history references, opaque/provider compaction,
 built-in tools, exec/apply_patch normalization, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
@@ -98,7 +98,28 @@ instructions/knobs are per-turn, not inherited. Branches do not consume anchors.
 Claude/Gemini replay retains text/tool/text block order within one assistant turn.
 Chat only has content+tool_calls, so it cannot express block-level interleaving.
 Native/default passthrough delegates history unchanged. Cross-model/provider
-continuation, compact and signed Gemini history remain unsupported.
+continuation, native/semantic compact and signed Gemini history remain unsupported.
+
+### Explicit local checkpoint (not a semantic summary)
+
+POST /v1/responses/compact is a local-only operation, enabled only in momo-routing
+for the strict converted Chat/Claude/unsigned Gemini subset. Default mode returns
+501; native Responses/Muse reject422. It accepts only model/input/tools and optional
+stream:false, with a trailing current user turn and fully paired declared tools.
+No previous_response_id, instructions option, opaque/media state or automatic trigger.
+Instructions must be explicit input items. Redeclare tools when replaying.
+
+Keep all user/system/developer items, whole tool-bearing turns (trigger, interleaved
+assistant, calls/results and final text), and the latest assistant item in original
+order. Only older ordinary assistant text may become a smaller assistant-level
+omission marker containing its normalized JSON byte count/SHA-256. It openly says
+lossy/unknown/not task completion/not active instruction; this is NOT encryption
+or a semantic summary. No truncation of protected data. No useful reduction or
+unsupported history returns422; request/replay/output budget violation returns413.
+There is no upstream request, model billing, secret file, vault or new history state.
+Return response.compaction with ordinary output; explicitly replay output as input.
+cmp_ is not a previous_response_id anchor, encrypted_content or restart token. The
+caller owns exported history; this does not promise client automatic integration.
 
 For these opt-in converted subsets, stream:true returns Responses SSE; false or
 omitted stream returns one completed or incomplete Responses JSON object. The same bounded
@@ -114,7 +135,7 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-111 cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+114 cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
 and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
 and named function/custom selectors with forbidden/wrong-call rejection, explicit
 token-limit mapping and incomplete output. Legacy Node ignores explicit converted
@@ -125,11 +146,15 @@ previous_response_id sends only suffix, while Go replays successful history. Kno
 namespace, history schema, system/tool_choice, usage and premature-EOF differences
 are separately asserted/documented in
 [FEATURE-PARITY.md](FEATURE-PARITY.md). Normal build excludes this injection.
+Three additional explicit local compact cases use matched request/retention budgets;
+both Node local-policy and Go do zero upstream calls. Go preserves whole tool turns,
+Node retains selected call/result evidence and relabels/repackages text. These
+checkpoint differences are asserted, not presented as semantic equivalence.
 
 The offline desktop UI takes compact navigation, quiet card/list hierarchy and
 separate settings from Magpie as design references, with original styling/icons.
 Overview shows actual running/configuration/request state; Routing explicitly
-lists the three passthrough endpoints and missing Node features; Settings contains
+lists the three passthrough endpoints, explicit local compact and missing Node features; Settings contains
 optional OS-vault actions. No fake routing editor, historical usage, remote
 sharing or upstream-health indicator. Full gap audit and migration gates:
 [FEATURE-PARITY.md](FEATURE-PARITY.md). HTML/CSS/JS are embedded from
@@ -175,7 +200,7 @@ base_url/api_key: random LOCAL token, not upstream key. /v1/responses,
 exception, CORS, Origin or Sec-Fetch access. Request and successful SSE bytes
 kept unchanged in default passthrough, including namespace/unknown fields, Chat tool calls, usage and
 [DONE]. In default mode upstream must implement the matching protocol. Opt-in
-partial Chat/Claude/Gemini translation is described above; signed continuation, compaction,
+partial Chat/Claude/Gemini translation is described above; signed continuation, native/semantic compaction,
 attachment hosting and compatibility fallback remain unimplemented.
 
 Windows/macOS window close hides; Linux close quits (no tray required). Window
@@ -320,6 +345,7 @@ then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
 (30 physical upstream requests in total, including three-protocol history continuation
 and output-limit SSE/JSON incomplete terminals),
+then three local checkpoint JSON requests (zero additional upstream calls),
 checking exact namespace/unknown-field/Unicode bytes; native client
 holds incomplete fixed-length/chunked uploads before WebView Stop, verifies zero
 active without waiting for the upload timeout, then
