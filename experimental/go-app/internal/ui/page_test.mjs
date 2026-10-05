@@ -50,6 +50,21 @@ assert.equal(nodes.get('video-mcp-copy').disabled,true);
 assert.equal(calls.filter(c=>c.url==='/app/image-mcp-config').length,0);
 assert.equal(nodes.get('models-refresh').disabled,true);
 assert.equal(nodes.get('service-state').textContent,'已停止');
+assert.equal(nodes.get('integration-gateway').textContent,'尚未配置网关');
+assert.ok(source.includes('尚未检查客户端连接'));
+assert.ok(source.includes('id="codex-contract" class="integration-details"'));
+assert.ok(source.includes('id="integration-boundaries" class="contract-details"'));
+assert.ok(!source.includes('id="codex-contract" class="integration-details" open'));
+assert.ok(!source.includes('id="integration-boundaries" class="contract-details" open'));
+for(const state of [
+ {Configured:true,Running:false,Active:0,label:'已配置 · 尚未启动'},
+ {Configured:true,Running:true,Active:0,label:'本地网关运行中'},
+ {Configured:false,Running:false,Active:1,label:'本地网关正在停止'},
+]){
+ run('renderState('+JSON.stringify({...initial,...state})+')');
+ assert.equal(nodes.get('integration-gateway').textContent,state.label);
+}
+run('renderState('+JSON.stringify(initial)+')');
 assert.equal(nodes.get('active-count').textContent,'0');
 assert.equal(nodes.get('local-url').textContent,initial.LocalEndpoint+'/v1');
 assert.equal(nodes.get('build-version').textContent,initial.Version);

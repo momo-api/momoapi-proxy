@@ -36,7 +36,17 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### 完整客户端搜索生命周期 checkpoint（2026-10-06；新增验收进行中）
+### 接入页收尾（2026-10-06；本地验证，新HEAD待验收）
+
+减少默认长文占位：Codex可选目录/转换契约保留在键盘可展开details，关键
+无Key导出/手动合并/端口变化/兼容限制仍常显；图片与视频MCP并排卡片，
+窄屏单列，完整支持边界折叠但不删除。仅显示本Core配置/运行状态，明确
+“尚未检查客户端连接”，不伪造已接入/成功推理/钱包余额。按钮行为、授权、
+无自动安装/读取/计费约束不变。page状态回归、native details真实DOM点击、
+Win173TLSmock通过，light/dark/620px screenshot已检查无横向溢出。
+不是新协议能力、真实账号、签名发行或跨设备完成证明；新HEAD仍需CI验收。
+
+### 完整客户端搜索生命周期 checkpoint（2026-10-06；b02427e已三平台验收）
 
 显式 client-search + parallel false 的已完成 search/load/call/result 支持本地
 checkpoint；additional_tools、空结果、长namespace、图片/PDF及解读完整回合保留，
@@ -64,6 +74,11 @@ Windows PR WebView initial阶段25s watchdog失败：冷启动约6.7s建立环�
 测试探针新增authenticated page-ready阶段：启动仍25s门禁，页面动作仍25s，
 全进程仍40s上限，不重试/跳断言/变更production deadline。固定阶段回执，
 无timer reset；同步通道选择单测100遍，三平台CI执行。仍须新HEAD重新验收。
+
+b02427e首轮18checks/6nativejobs全部成功，每native395TCP+173TLS、普通安装
+载荷与隔离installer验收，Unix各5独立race；3OS新产物hash/version/mode/format
+及Windows下载载荷blackbox/官方SDK通过。本机未执行installer，PR仍draft。
+https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6004396004
 
 ### 普通 function strict 与 nullable schema（2026-10-06；cc44417已三平台验收）
 

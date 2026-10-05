@@ -507,6 +507,12 @@ checkpoint differences are asserted, not presented as semantic equivalence.
 
 The offline desktop UI takes compact navigation, quiet card/list hierarchy and
 separate settings from Magpie as design references, with original styling/icons.
+The Skill/MCP page keeps essential manual setup and consent limits visible,
+puts optional Codex catalog/translation details and full capability boundaries
+behind keyboard-accessible disclosures, and lays out image/video MCP side by
+side (single column on narrow windows). Its status badge describes only this
+gateway, explicitly not verified client connectivity. No automatic installation,
+credential lookup, model call or account-wallet claim is introduced.
 Overview shows actual running/configuration/request state; Routing explicitly
 lists the three passthrough endpoints, explicit local compact and missing Node features; Settings contains
 optional OS-vault actions. No fake routing editor, historical usage, remote
