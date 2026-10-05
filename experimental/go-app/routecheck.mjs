@@ -12,6 +12,7 @@ import {dsmlBlackbox} from './routecheck_dsml.mjs';
 import {providerReplayBlackbox} from './routecheck_provider_replay.mjs';
 import {toolAliasBlackbox} from './routecheck_tool_aliases.mjs';
 import {parallelToolsBlackbox} from './routecheck_parallel_tools.mjs';
+import {ordinaryStrictBlackbox} from './routecheck_ordinary_strict.mjs';
 const binary=process.argv[2];assert.ok(binary);
 const tool={type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'custom',name:'write'}]};
 const payload={model:'gpt-5.5',stream:true,instructions:'Be concise.',input:[{role:'user',content:[{type:'input_text',text:'中文🙂'}]}],tools:[tool]};
@@ -312,6 +313,7 @@ for(const fixture of cases){
     else if(fixture.path==='/v1/messages'){assert.equal(g.tool_choice.disable_parallel_tool_use,false);assert.equal(n.tool_choice?.disable_parallel_tool_use,undefined);delete g.tool_choice.disable_parallel_tool_use}
     else{assert.ok(!JSON.stringify(g).includes('parallel'))}
     console.log('DIFFERENCE Go preserves explicit client parallel:true provider mapping; Node omits it, independently asserted before normalization');
+    if(!fixture.path){assert.equal(g.tools[0].function.strict,false);assert.equal(n.tools[0].function.strict,undefined);delete g.tools[0].function.strict}
    }
    if(fixture.allowed){
     const declared=!fixture.path?n.tools:fixture.path==='/v1/messages'?n.tools:n.tools[0].functionDeclarations;
@@ -464,4 +466,5 @@ const dsmlCount=await dsmlBlackbox(launch,invoke);
 const providerReplayCount=await providerReplayBlackbox(launch,invoke);
 const toolAliasCount=await toolAliasBlackbox(launch,invoke);
 const parallelToolsCount=await parallelToolsBlackbox(launch,invoke);
-console.log('PASS '+(cases.length+8+imageCount+videoCount+dsmlCount+providerReplayCount+toolAliasCount+parallelToolsCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; converted provider replay and DSML explicit text conversion and marker-leak differences independently asserted; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+const ordinaryStrictCount=await ordinaryStrictBlackbox(launch,invoke);
+console.log('PASS '+(cases.length+8+imageCount+videoCount+dsmlCount+providerReplayCount+toolAliasCount+parallelToolsCount+ordinaryStrictCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; converted provider replay and DSML explicit text conversion and marker-leak differences independently asserted; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

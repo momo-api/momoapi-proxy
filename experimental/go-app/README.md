@@ -305,11 +305,22 @@ search results stay client tool-result data, not developer prose. This DOES NOT
 preserve native prompt/cache layout or implement hosted/server search. Converted
 strict:true functions use local validation before emitting/accepting calls, NOT
 provider constrained generation. All objects require additionalProperties:false
-and every property required. Supported schema keywords: type (single object/array/
-string/integer/number/boolean/null), description, properties, required,
+and every property required. Ordinary function strictness is independent of
+client-search and does not impose a single-call limit. Explicit true/false is
+preserved in Chat function.strict; no strict field is invented for Claude/Gemini.
+False/absent does not enable local schema validation. Root parameters must be an
+object; supported schema keywords: type (object/array/string/integer/number/boolean/
+null, or a nonempty array of unique known kinds, at most seven), description, properties, required,
 additionalProperties (boolean), items, scalar enum, minimum/maximum,
 min/maxLength and min/maxItems. Depth16/nodes2048/enum128 and numeric budgets apply;
-$ref/union/pattern/other vocabulary returns unsupported_search_schema before send.
+$ref/anyOf/oneOf/pattern/other vocabulary returns unsupported_search_schema before send.
+Nullable objects/arrays retain nested strict requirements and applicable limits;
+numbers are compared exactly, strings count Unicode code points. Historical and
+generated arguments use the same validator. All converted requests reject duplicate
+keys/invalid UTF-8/depth>64 before history normalization; strict provider frames
+are checked before object args can be reserialized. Invalid arguments abort SSE or
+return JSON 502, never complete/save history/retry. An earlier valid proposal may
+already be visible; this cannot roll back client execution or upstream billing.
 Local compact does not accept this lifecycle. Actual Codex discovery/live upstream
 acceptance and complete native deferred/strict schema support are still unverified.
 
@@ -742,10 +753,11 @@ It omits validated private client_metadata and prompt_cache_key (no cache
 guarantee), reasoning.summary auto/none (no summary output), and include
 reasoning.encrypted_content (no encrypted reasoning output or continuation).
 Unknown includes, concise/detailed summaries, signatures/compaction/grammar,
-strict:true and unsupported search remain rejected. Effort/content/instructions,
+unsupported strict schema and unsupported search remain rejected. Effort/content/instructions,
 call_id pairing and schemas remain authoritative; namespace descriptions are
-prepended to child tool descriptions. strict:false permits the existing non-strict
-shim; parallel_tool_calls booleans preserve their explicit per-turn constraint.
+prepended to child tool descriptions. Explicit strict booleans are preserved:
+true uses the bounded local function validator above, false permits the existing
+non-strict shim; parallel_tool_calls booleans preserve their per-turn constraint.
 Valid function/custom output item IDs label items only and are removed under this
 policy, never call_id/output. Duplicate JSON/depth>64/invalid UTF-8 rejected before
 history or attachment reserialization. The private header is never forwarded,

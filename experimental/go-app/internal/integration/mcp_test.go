@@ -75,6 +75,9 @@ func TestMCPAndSkillExports(t *testing.T) {
 		t.Fatal("stale checkpoint capability/skill")
 	}
 	config := MCPConfig(`C:\Program Files\MOMO\preview.exe`)
+	if !strings.Contains(Capabilities()["function_strict"].(string), "independent of client-search") || !strings.Contains(Skill, "Ordinary function strict:true is independent") {
+		t.Fatal("stale ordinary strict exports")
+	}
 	if !strings.Contains(Skill, "X-MOMO-Compact:native") || !strings.Contains(out.String(), "tool_loading") || !strings.Contains(Skill, "momo_tool_loading") {
 		t.Fatal("stale native compact/search capability exports")
 	}

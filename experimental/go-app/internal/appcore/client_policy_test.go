@@ -183,7 +183,7 @@ func TestClientPolicyNamespaceAndSchemaPreserved(t *testing.T) {
 	json.Unmarshal(normalized, &m)
 	ns := obj(m["tools"].([]any)[0])
 	child := obj(ns["tools"].([]any)[0])
-	if ns["description"] != nil || ns["name"] != "pad" || child["description"] != "namespace-rules\n\nchild-rules" || child["strict"] != nil || obj(child["parameters"])["additionalProperties"] != false {
+	if ns["description"] != nil || ns["name"] != "pad" || child["description"] != "namespace-rules\n\nchild-rules" || child["strict"] != false || obj(child["parameters"])["additionalProperties"] != false {
 		t.Fatal("namespace/schema semantics changed")
 	}
 	for _, value := range []any{nil, 42, true} {

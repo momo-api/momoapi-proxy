@@ -73,6 +73,11 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			return true, e.accept(streamEvent{kind: terminal, usage: usage}, plan)
 		}
 		var chunk map[string]json.RawMessage
+		if len(plan.constraints) != 0 {
+			if _, err := plan.decodeFrame(raw); err != nil {
+				return false, err
+			}
+		}
 		if json.Unmarshal([]byte(raw), &chunk) != nil || chunk == nil {
 			return false, errRouted
 		}

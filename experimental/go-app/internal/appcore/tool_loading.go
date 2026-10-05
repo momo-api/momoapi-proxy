@@ -16,7 +16,6 @@ var errUnsupportedSearchSchema = errors.New("unsupported_search_schema")
 type toolLoading struct {
 	active      map[string]bool
 	definitions map[string]string
-	constraints map[string]map[string]any
 	topDeferred map[string]bool
 	search      map[string]any
 	seen        map[string]bool
@@ -31,7 +30,7 @@ func newToolLoading(p map[string]any) (*toolLoading, error) {
 	if policy != "client-search" || p["parallel_tool_calls"] != false {
 		return nil, errUnsupportedToolLoading
 	}
-	return &toolLoading{active: map[string]bool{}, definitions: map[string]string{}, constraints: map[string]map[string]any{}, topDeferred: map[string]bool{}}, nil
+	return &toolLoading{active: map[string]bool{}, definitions: map[string]string{}, topDeferred: map[string]bool{}}, nil
 }
 
 func (l *toolLoading) declare(t map[string]any, ns, wire, source string) (bool, error) {

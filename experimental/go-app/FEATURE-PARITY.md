@@ -36,6 +36,36 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 普通 function strict 与 nullable schema（2026-10-06；本地通过，新HEAD三平台待验收）
+
+strict:true 不再错误依赖 client-search；strict:false/省略不启用本地 schema
+约束。Chat function.strict 保留显式 bool，Claude/Gemini 不捏造字段，schema
+原样保留。根 parameters 为 object，嵌套 type 支持最多七种唯一已知类型数组，
+nullable object/array 仍检查全部 required/additionalProperties:false；深度16、
+节点2048、enum128、精确数字与 Unicode 长度预算不放宽。未知关键词拒绝，
+不是完整 JSON Schema、grammar 或上游 constrained-generation 承诺。
+历史及生成参数同门禁；转换请求在 history 重序列化前拒绝 duplicate/非法
+UTF8/depth>64，strict provider frame 在对象参数重序列化前检查。失败 JSON502/
+SSE abort，无 completed/history/重试，不回滚先前可见 proposal 或上游计费。
+支持并行时不强加单call，text-tools-v1 保留 true/false，native/default 透传不改。
+语义红测先复现 unsupported_tool_loading，再绿；补三协议 SSE/JSON、nullable
+各类型、嵌套对象、精确数字、duplicate/深度/UTF8、strictfalse/省略、历史full/
+suffix与跨转换provider、按本轮schema重验、失败写/flush/deadline/Stop/DSML。
+DSML初次夹具未设置 string=false 导致合法数字/ null成为字符串而502，修正真实
+协议夹具，未放宽生产门禁。新增24组同mock/resource/input黑盒全部通过，
+统一总377组通过。Node遗漏strict并接受无效参数与Go显式映射/拒绝分别断言；尚非性能或真实
+provider能力证明。Windows真实WebView161次TLSmock通过（新增12）。Prism
+启动toolerror，无专家批准回执；新HEAD仍须三平台CI与产物验收。
+本地全量单测5遍、两种vet、page/packaging、Windows/WSL普通binary黑盒与
+官方MCP SDK1.32.1图片/视频连接通过。真实Codex0.156 Linux五种fresh只读
+mock流程各exit0/exact2requests及长MCP false约束通过；另新fresh relay明确
+将只读MCP空参数声明设置stricttrue+required[]+extrasfalse，两次Chat wire
+保留strict，原long身份返回/工具配对/第二轮完成。是测试relay opt-in，不宣称
+Codex原生发送stricttrue或全功能兼容，没有真实账号/推理/本机installer执行。
+上一8931ab7已6nativejobs/353+149/3OS新产物验收，但PR secret job第五次
+因hosted runner未获取而cancelled且steps空；保留annotation证据，未称18checks
+全通过，不替代本HEAD gate，不合并。
+
 ### 单次工具调用约束（2026-10-06；新HEAD三平台待验收）
 
 普通converted Responses支持parallel_tool_calls bool；false限制本轮新call<=1，

@@ -125,17 +125,11 @@ func normalizeTextToolsClient(data []byte) ([]byte, error) {
 						}
 						child["description"] = context + "\n\n" + description
 					}
-					if child["type"] == "function" && child["strict"] == false {
-						delete(child, "strict")
-					}
 				}
 			} else {
 				declarations++
 				if declarations > 128 {
 					return nil, errRouted
-				}
-				if t["type"] == "function" && t["strict"] == false {
-					delete(t, "strict")
 				}
 			}
 		}

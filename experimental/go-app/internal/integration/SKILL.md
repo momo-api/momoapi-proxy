@@ -93,7 +93,15 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Ordinary function tool_search is distinct from the reserved search wire alias.
   additional_tools only accepts developer nonempty explicitly loaded definitions;
   defer:true there rejects. strict:true is bounded local schema validation, NOT
-  upstream constrained generation; $ref/unions/pattern/other vocabulary reject.
+  upstream constrained generation; $ref/anyOf/oneOf/pattern/other vocabulary reject.
+  Ordinary function strict:true is independent of client-search and single-call
+  policy. Root parameters must be object; nullable type arrays of at most seven
+  unique known kinds retain exact numeric/Unicode bounds and nested strict object
+  requirements. Chat preserves explicit strict bool; Claude/Gemini add no strict
+  field. False/absent does not impose local schema constraints. History/generated
+  args share validation; duplicate/UTF8/depth framing is checked before lossy
+  reserialization. Invalid args abort/502, no completion/history/retry; previous
+  visible proposals/client execution/upstream billing cannot be rolled back.
   Native/default exact bytes remain untouched. This is not native deferred
   prompt/cache layout, hosted search or actual Codex discovery acceptance.
   No search/MCP/skill execution; search lifecycle local compact unsupported.
@@ -352,9 +360,10 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   acceptance before enabling; converted text/tool subset has no reasoning
   summaries/encrypted continuation or prompt-cache guarantees. Private labels
   and known output-includes are validated/omitted, namespace descriptions kept
-  in child descriptions, strict:false uses existing shim; parallel booleans are
+  in child descriptions, strict bool is preserved (true bounded local validation,
+  false existing non-strict shim); parallel booleans are
   preserved for the per-turn count contract, not discarded.
-  Input signatures/compaction/grammar/strict:true/search remain gated; no hidden
+  Input signatures/compaction/grammar/unsupported strict schema/search remain gated; no hidden
   downgrade on native/default routes. Valid output item labels normalize only
   under this policy; call_id pairing/content/schema are never discarded.
   One synthetic Linux actual Codex generic-metadata exec/output/second turn is

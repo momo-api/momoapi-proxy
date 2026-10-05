@@ -8,6 +8,31 @@ import (
 	"strings"
 )
 
+// Explicit, bounded JSON Schema type unions; no coercion or guessed keywords.
+func schemaTypes(s map[string]any) (map[string]bool, error) {
+	values, ok := s["type"].([]any)
+	if !ok {
+		values = []any{s["type"]}
+	}
+	if len(values) == 0 || len(values) > 7 {
+		return nil, errUnsupportedSearchSchema
+	}
+	types := map[string]bool{}
+	for _, value := range values {
+		kind, ok := value.(string)
+		if !ok || types[kind] {
+			return nil, errUnsupportedSearchSchema
+		}
+		switch kind {
+		case "object", "array", "string", "number", "integer", "boolean", "null":
+		default:
+			return nil, errUnsupportedSearchSchema
+		}
+		types[kind] = true
+	}
+	return types, nil
+}
+
 // Bounded, explicitly supported schema vocabulary, not arbitrary JSON Schema.
 // Unsupported keywords are rejected; nothing is silently ignored.
 func validateSearchSchema(schema map[string]any) error {
@@ -23,9 +48,11 @@ func validateSearchSchema(schema map[string]any) error {
 				return errUnsupportedSearchSchema
 			}
 		}
-		typ := str(s["type"])
-		switch typ {
-		case "object":
+		types, err := schemaTypes(s)
+		if err != nil {
+			return err
+		}
+		if types["object"] {
 			props := obj(s["properties"])
 			if props == nil {
 				return errUnsupportedSearchSchema
@@ -54,20 +81,18 @@ func validateSearchSchema(schema map[string]any) error {
 					seen[name] = true
 				}
 			}
-		case "array":
+		}
+		if types["array"] {
 			if err := walk(obj(s["items"]), depth+1); err != nil {
 				return err
 			}
-		case "string", "number", "integer", "boolean", "null":
-		default:
-			return errUnsupportedSearchSchema
 		}
 		for _, k := range []string{"properties", "required", "additionalProperties"} {
-			if _, ok := s[k]; ok && typ != "object" {
+			if _, ok := s[k]; ok && !types["object"] {
 				return errUnsupportedSearchSchema
 			}
 		}
-		if _, ok := s["items"]; ok && typ != "array" {
+		if _, ok := s["items"]; ok && !types["array"] {
 			return errUnsupportedSearchSchema
 		}
 		for _, pair := range [][3]string{{"minLength", "maxLength", "string"}, {"minItems", "maxItems", "array"}} {
@@ -76,7 +101,7 @@ func validateSearchSchema(schema map[string]any) error {
 			for i, k := range pair[:2] {
 				if v, ok := s[k]; ok {
 					n, valid := tokenCount(v)
-					if typ != pair[2] || !valid || n > MaxRequest {
+					if !types[pair[2]] || !valid || n > MaxRequest {
 						return errUnsupportedSearchSchema
 					}
 					if i == 0 {
@@ -93,7 +118,7 @@ func validateSearchSchema(schema map[string]any) error {
 		}
 		for _, k := range []string{"minimum", "maximum"} {
 			if v, ok := s[k]; ok {
-				if (typ != "number" && typ != "integer") || numberRat(v) == nil {
+				if (!types["number"] && !types["integer"]) || numberRat(v) == nil {
 					return errUnsupportedSearchSchema
 				}
 			}
@@ -133,8 +158,11 @@ func validateSearchSchema(schema map[string]any) error {
 // object must reject extras and require all its declared properties. Conversion
 // validates historical and generated arguments before accepting a call.
 func validateStrictSchema(s map[string]any) error {
-	switch s["type"] {
-	case "object":
+	types, err := schemaTypes(s)
+	if err != nil {
+		return err
+	}
+	if types["object"] {
 		props := obj(s["properties"])
 		required, _ := s["required"].([]any)
 		if s["additionalProperties"] != false || len(required) != len(props) {
@@ -145,7 +173,8 @@ func validateStrictSchema(s map[string]any) error {
 				return err
 			}
 		}
-	case "array":
+	}
+	if types["array"] {
 		return validateStrictSchema(obj(s["items"]))
 	}
 	return nil
@@ -170,6 +199,22 @@ func numberRat(v any) *big.Rat {
 }
 
 func validateSearchValue(s map[string]any, v any) error {
+	if values, ok := s["type"].([]any); ok {
+		if _, err := schemaTypes(s); err != nil {
+			return errRouted
+		}
+		branch := make(map[string]any, len(s))
+		for k, value := range s {
+			branch[k] = value
+		}
+		for _, kind := range values {
+			branch["type"] = kind
+			if validateSearchValue(branch, v) == nil {
+				return nil
+			}
+		}
+		return errRouted
+	}
 	if values, ok := s["enum"].([]any); ok {
 		found := false
 		for _, e := range values {

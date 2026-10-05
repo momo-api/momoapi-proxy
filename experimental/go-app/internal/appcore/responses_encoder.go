@@ -257,9 +257,9 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 				return errRouted
 			}
 		}
-		if plan.loading != nil && plan.loading.constraints[tool.wire] != nil {
-			args, err := decodeObject(ev.call.args)
-			if err != nil || validateSearchValue(plan.loading.constraints[tool.wire], args) != nil {
+		if plan.constraints[tool.wire] != nil {
+			args, err := decodeVideoObject([]byte(ev.call.args))
+			if err != nil || validateSearchValue(plan.constraints[tool.wire], args) != nil {
 				return errRouted
 			}
 		}

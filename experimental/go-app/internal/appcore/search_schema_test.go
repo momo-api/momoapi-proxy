@@ -12,6 +12,7 @@ func TestSearchSchemaBoundedVocabulary(t *testing.T) {
 		`{"type":"object","properties":{"s":{"type":"string","minLength":1,"maxLength":2},"a":{"type":"array","items":{"type":"integer","minimum":0,"maximum":9007199254740993},"minItems":1,"maxItems":2},"b":{"type":"boolean"},"z":{"type":"null"}},"required":["s","a","b","z"],"additionalProperties":false}`,
 		`{"type":"number","enum":[1,1.0,1e0],"minimum":0,"maximum":2}`,
 		`{"type":"object","properties":{}}`,
+		`{"type":["string","null"],"minLength":1,"enum":[null,"ok"]}`,
 	} {
 		if err := validateSearchSchema(mustSearchObject(text)); err != nil {
 			t.Fatal("valid bounded schema", err)
@@ -28,7 +29,8 @@ func TestSearchSchemaBoundedVocabulary(t *testing.T) {
 		`{"type":"string","maxLength":-1}`, `{"type":"string","maxLength":1.5}`,
 		`{"type":"integer","minimum":2,"maximum":1}`, `{"type":"number","minimum":1e1025}`,
 		`{"type":"string","minimum":1}`, `{"type":"number","items":{"type":"number"}}`,
-		`{"type":"string","properties":{}}`, `{"type":["string","null"]}`,
+		`{"type":"string","properties":{}}`, `{"type":["string","string"]}`,
+		`{"type":[]}`, `{"type":["string",null]}`, `{"type":["string","unknown"]}`,
 	} {
 		if validateSearchSchema(mustSearchObject(text)) == nil {
 			t.Fatal("unsupported schema accepted", text)

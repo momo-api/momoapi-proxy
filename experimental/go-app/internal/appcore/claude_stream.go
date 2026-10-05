@@ -35,7 +35,7 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 		return nil
 	}
 	return readRoutedSSE(ctx, body, func(event, raw string) (bool, error) {
-		m, err := decodeObject(raw)
+		m, err := plan.decodeFrame(raw)
 		if err != nil {
 			return false, err
 		}

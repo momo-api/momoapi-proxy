@@ -30,7 +30,7 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 		if event != "" && event != "message" {
 			return false, errRouted
 		}
-		root, err := decodeObject(raw)
+		root, err := plan.decodeFrame(raw)
 		if err != nil {
 			return false, err
 		}

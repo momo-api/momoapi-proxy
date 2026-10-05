@@ -47,6 +47,7 @@ type routeTool struct {
 	chatTool
 	description string
 	schema      any
+	strict      *bool
 }
 type routeRequest struct {
 	stream                bool
@@ -58,6 +59,7 @@ type routeRequest struct {
 	tools                 []routeTool
 	loading               *toolLoading
 	parallel              *bool
+	constraints           map[string]map[string]any
 	toolImages            string
 	toolFiles             string
 }
@@ -73,6 +75,7 @@ type chatPlan struct {
 	tools             map[string]chatTool
 	loading           *toolLoading
 	parallel          *bool
+	constraints       map[string]map[string]any
 }
 
 func str(v any) string         { s, _ := v.(string); return s }
@@ -129,10 +132,8 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	if len(data) > MaxRequest || !json.Valid(data) {
 		return nil, errRouted
 	}
-	var p map[string]any
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.UseNumber()
-	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images", "momo_tool_files") {
+	p, framingErr := decodeVideoObject(data)
+	if framingErr != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images", "momo_tool_files") {
 		return nil, errRouted
 	}
 	if v, present := p["stream"]; present {
@@ -141,7 +142,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		}
 	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
-	ir := &routeRequest{model: plan.model, stream: p["stream"] == true}
+	ir := &routeRequest{model: plan.model, stream: p["stream"] == true, constraints: map[string]map[string]any{}}
 	if value, present := p["parallel_tool_calls"]; present {
 		b, ok := value.(bool)
 		if !ok {
@@ -234,7 +235,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			}
 			identity := chatTool{wire: clientSearchWire, kind: "tool_search"}
 			plan.tools[clientSearchWire] = identity
-			tools = append(tools, routeTool{identity, description, schema})
+			tools = append(tools, routeTool{chatTool: identity, description: description, schema: schema})
 			loading.search = schema
 			loading.active[clientSearchWire] = true
 			return nil
@@ -245,14 +246,16 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		if !only(t, "type", "name", "description", "parameters", "format", "defer_loading", "strict") {
 			return errRouted
 		}
+		var strictFlag *bool
 		if strict, present := t["strict"]; present {
-			if kind != "function" || loading == nil {
-				return errUnsupportedToolLoading
+			if kind != "function" {
+				return errRouted
 			}
 			b, ok := strict.(bool)
 			if !ok {
 				return errRouted
 			}
+			strictFlag = &b
 			if b {
 				schema := obj(t["parameters"])
 				if schema == nil || schema["type"] != "object" || validateSearchSchema(schema) != nil || validateStrictSchema(schema) != nil {
@@ -328,10 +331,10 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			parameters = map[string]any{"type": "object", "properties": map[string]any{"input": map[string]any{"type": "string", "description": "Raw freeform input for this tool."}}, "required": []string{"input"}, "additionalProperties": false}
 		}
 		plan.tools[wire] = chatTool{wire, name, ns, kind}
-		if loading != nil && t["strict"] == true {
-			loading.constraints[wire] = obj(parameters)
+		if strictFlag != nil && *strictFlag {
+			ir.constraints[wire] = obj(parameters)
 		}
-		tools = append(tools, routeTool{plan.tools[wire], description, parameters})
+		tools = append(tools, routeTool{chatTool: plan.tools[wire], description: description, schema: parameters, strict: strictFlag})
 		return nil
 	}
 	if v, present := p["tools"]; present {
@@ -443,10 +446,13 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 				ok = true
 			}
 			parsed, err := decodeObject(args)
+			if ir.constraints[wire] != nil {
+				parsed, err = decodeVideoObject([]byte(args))
+			}
 			if !ok || err != nil {
 				return nil, errRouted
 			}
-			if loading != nil && loading.constraints[wire] != nil && validateSearchValue(loading.constraints[wire], parsed) != nil {
+			if ir.constraints[wire] != nil && validateSearchValue(ir.constraints[wire], parsed) != nil {
 				return nil, errRouted
 			}
 			seen[id] = true
@@ -702,6 +708,18 @@ func decodeObject(raw string) (map[string]any, error) {
 	}
 	return m, nil
 }
+
+// Strict provider objects must be checked before reserialization loses keys.
+func (p *chatPlan) decodeFrame(raw string) (map[string]any, error) {
+	if len(p.constraints) != 0 {
+		m, err := decodeVideoObject([]byte(raw))
+		if err != nil {
+			return nil, errRouted
+		}
+		return m, nil
+	}
+	return decodeObject(raw)
+}
 func buildChatPlan(data []byte) (*chatPlan, error) {
 	ir, err := parseRoutedRequest(data)
 	if err != nil {
@@ -762,7 +780,11 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 	}
 	tools := []any{}
 	for _, t := range ir.callableTools() {
-		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": t.wire, "description": t.description, "parameters": t.schema}})
+		function := map[string]any{"name": t.wire, "description": t.description, "parameters": t.schema}
+		if t.strict != nil {
+			function["strict"] = *t.strict
+		}
+		tools = append(tools, map[string]any{"type": "function", "function": function})
 	}
 	if len(tools) > 0 {
 		body["tools"], body["tool_choice"] = tools, ir.choice
@@ -782,6 +804,7 @@ func serializePlan(ir *routeRequest, body map[string]any) (*chatPlan, error) {
 	}
 	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, choice: ir.choice, selected: ir.selected, allowed: ir.allowed, tools: map[string]chatTool{}, loading: ir.loading}
 	p.parallel = ir.parallel
+	p.constraints = ir.constraints
 	for _, t := range ir.tools {
 		p.tools[t.wire] = t.chatTool
 	}
