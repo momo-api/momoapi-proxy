@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func selectedPayload(t *testing.T, payload string, selector any, stream bool) string {
@@ -158,6 +159,63 @@ func TestToolChoiceOutputContract(t *testing.T) {
 					}
 				})
 			}
+		}
+	}
+}
+
+func TestBareOutputToolCannotChooseBetweenTopLevelAndNamespace(t *testing.T) {
+	p, _ := decodeObject(routedPayload)
+	p["tools"] = []any{map[string]any{"type": "function", "name": "read"}, map[string]any{"type": "namespace", "name": "pad", "tools": []any{map[string]any{"type": "function", "name": "read"}}}}
+	raw, _ := json.Marshal(p)
+	plan, err := buildChatPlan(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plan.restoreTool("read"); ok {
+		t.Fatal("ambiguous bare output selected top-level tool")
+	}
+	if tool, ok := plan.restoreTool("pad__read"); !ok || tool.namespace != "pad" {
+		t.Fatal("explicit namespace alias lost")
+	}
+}
+
+func TestAmbiguousBareOutputAbortsWithoutHistory(t *testing.T) {
+	for _, tc := range []struct{ model, upstream string }{
+		{"gpt-5.5", chatSSE(choice(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "a", "type": "function", "function": map[string]string{"name": "read", "arguments": "{}"}}}}, "tool_calls"))},
+		{"claude-sonnet-4-6", claudeStart() + claudeTool(0, "a", "read", "{}") + claudeEnd("tool_use")},
+		{"gemini-2.5-flash", geminiFrame([]any{geminiCall("a", "read", map[string]any{})}, "STOP", geminiUsageFixture())},
+	} {
+		for _, stream := range []bool{true, false} {
+			t.Run(fmt.Sprint(tc.model, "/", stream), func(t *testing.T) {
+				c, endpoint := routedClaudeCore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, tc.upstream)
+				}))
+				p, _ := decodeObject(routedPayload)
+				p["model"], p["stream"] = tc.model, stream
+				p["tools"] = []any{map[string]any{"type": "function", "name": "read"}, map[string]any{"type": "namespace", "name": "pad", "tools": []any{map[string]any{"type": "function", "name": "read"}}}}
+				b, _ := json.Marshal(p)
+				req, _ := http.NewRequest("POST", endpoint+"/v1/responses", strings.NewReader(string(b)))
+				req.Header.Set("Authorization", "Bearer "+c.token)
+				req.Header.Set("Content-Type", "application/json")
+				client := http.Client{Timeout: 3 * time.Second}
+				defer client.CloseIdleConnections()
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, readErr := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if strings.Contains(string(data), "completed") || stream && readErr == nil || !stream && (readErr != nil || resp.StatusCode != 502) {
+					t.Fatal("ambiguous output reported successful identity")
+				}
+				c.mu.Lock()
+				count := len(c.history.entries)
+				c.mu.Unlock()
+				if count != 0 {
+					t.Fatal("ambiguous output cached")
+				}
+			})
 		}
 	}
 }

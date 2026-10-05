@@ -88,6 +88,7 @@ const cases=[
   {name:f.label+' tools continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.calls,json:!stream,continuation:true},
  ])),
  ...[{label:'Claude',payload:cp,path:'/v1/messages',stream:claudeOrdered},{label:'Gemini',payload:gp,path:gpath,stream:geminiOrdered}].flatMap(f=>[true,false].map(stream=>({name:f.label+' ordered block continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.stream,json:!stream,continuation:true,ordered:true}))),
+ ...[{label:'Chat',payload,path:undefined,stream:bare},{label:'Claude',payload:cp,path:'/v1/messages',stream:claudeSingle('read').replaceAll('pad__read','read')},{label:'Gemini',payload:gp,path:gpath,stream:geminiSingle('read').replaceAll('pad__read','read')}].flatMap(f=>[true,false].map(stream=>({name:f.label+' ambiguous bare output '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}}]}]},path:f.path,stream:f.stream,json:!stream,reject:true}))),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -164,7 +165,7 @@ for(const fixture of cases){
   for(let i=0;i<count;i++){
    const n=nodeResults[i],g=goResults[i];if(!(fixture.json&&(fixture.truncate||fixture.reject)))assert.equal(g.status,n.status,fixture.name+' HTTP status');
    if(fixture.status){assert.equal(g.completed,undefined);assert.equal(n.completed,undefined)}
-   else if(fixture.truncate||fixture.reject){assert.equal(g.completed,undefined);if(fixture.json){assert.equal(g.status,502);assert.equal(g.truncated,false)}else assert.equal(g.truncated,true);assert.ok(n.completed);console.log('DIFFERENCE Node completes invalid usage/clean premature EOF; Go rejects without fabricated completion')}
+   else if(fixture.truncate||fixture.reject){assert.equal(g.completed,undefined);if(fixture.json){assert.equal(g.status,502);assert.equal(g.truncated,false)}else assert.equal(g.truncated,true);assert.ok(n.completed);console.log('DIFFERENCE Node completes '+(fixture.name.includes('ambiguous bare')?'ambiguous bare tool output':fixture.truncate?'clean premature EOF':'invalid usage or tool-choice output')+'; Go rejects without fabricated completion')}
    else {
     assert.ok(n.completed&&g.completed,fixture.name+' missing completion');
     if(fixture.json){assert.equal(g.json,true);assert.equal(n.json,undefined);assert.equal(n.events[0].type,'response.created');console.log('DIFFERENCE Go returns completed JSON for false/omitted stream; legacy Node returns SSE')}

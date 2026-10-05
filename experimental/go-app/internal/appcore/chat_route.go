@@ -439,7 +439,9 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 
 // Bare names are restored only if unambiguous; never guess between namespaces.
 func (p *chatPlan) restoreTool(name string) (chatTool, bool) {
-	if tool, ok := p.tools[name]; ok {
+	// An exact namespace alias carries identity. A bare top-level name does not
+	// disambiguate an upstream that stripped a same-named tool's namespace.
+	if tool, ok := p.tools[name]; ok && tool.name != name {
 		return tool, true
 	}
 	var match chatTool

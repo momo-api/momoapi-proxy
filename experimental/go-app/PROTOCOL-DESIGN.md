@@ -160,3 +160,7 @@ Node转换仅suffix的差异；单测验证并行工具/交错assistant/独立�
 后续审查补有序routePart：Claude/Gemini请求回放保留同一assistant回合中的文本/
 工具交错，不先拼全部文本再拼全部工具。93组同mock夹具逐块核对真实上游续接
 请求；Chat wire只能表示content+tool_calls，无法表达块位置，此限制不掩饰。
+
+身份恢复另补歧义门禁：exact namespace alias可直接恢复，但裸top-level name须
+检查所有声明中的同名身份。top-level存在不是namespace剥离上游的消歧证据；
+99组同mock夹具明确Go拒绝/Node completed差异，不将失败输出提交为history。

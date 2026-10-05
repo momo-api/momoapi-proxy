@@ -35,6 +35,9 @@ It rejects unknown payload fields/options, media, foreign/expired history refere
 built-in tools, exec/apply_patch normalization, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
+An upstream bare output name is rejected when top-level and namespaced declarations
+share that name, even if a top-level wire match exists. Exact namespace aliases remain
+resolvable; never guess which tool a namespace-stripping upstream intended.
 
 Named function/custom selectors resolve only declared, kind-matching tool identities;
 explicit namespace uses its exact alias, bare selectors must be unique. Chat emits
@@ -98,7 +101,7 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-Ninety-three cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+Ninety-nine cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
 and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
 and named function/custom selectors with forbidden/wrong-call rejection. Legacy Node
 emits SSE for converted JSON requests, does not request/map Chat usage, retains a flat

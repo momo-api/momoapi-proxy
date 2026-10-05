@@ -123,6 +123,11 @@ instructions与选项每轮提供，不继承。仅完整精确语义prefix避�
 块协议不再把全部文本挪到工具前。Chat原协议只有content+tool_calls，不能表达
 块级交错，仍合并同一assistant工具回合；不宣称跨协议块顺序完全等价。
 
+输出身份歧义轮扩为99组：三协议SSE/JSON各增加top-level与namespace同名工具、
+上游仅返回裸名的夹具。Go拒绝歧义，不因top-level恰好匹配wire就猜身份；Node
+该夹具仍completed，明确独立断言。单测先复现原误选，再验证拒绝、无history
+写入与确切namespace别名仍可恢复。无工具执行；默认透传不变。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`
