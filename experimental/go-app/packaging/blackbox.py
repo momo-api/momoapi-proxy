@@ -9,6 +9,7 @@ import signal
 import socket
 import subprocess
 import threading
+import time
 from urllib.parse import urlsplit
 
 
@@ -88,7 +89,7 @@ def check_image_mcp(binary):
             all(r["result"]["isError"] for r in replies[3:]), "image MCP confirmation/catalog/task/DNS gates")
 
 
-def check_image_mcp_idle_signal(binary):
+def check_image_mcp_idle_signal(binary, blocked_output=False):
     options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
                else {"start_new_session": True})
     if os.name == "nt":
@@ -106,10 +107,18 @@ def check_image_mcp_idle_signal(binary):
         reader = threading.Thread(target=lambda: reply.put(process.stdout.readline()), daemon=True)
         reader.start()
         require(json.loads(reply.get(timeout=8))["id"] == 1, "image MCP idle readiness")
+        if blocked_output:
+            # A reply much larger than a pipe's buffer; don't read it. Signal
+            # must interrupt inherited stdout writes as well as stdin reads.
+            message = {"jsonrpc": "2.0", "id": "x" * (128 << 10), "method": "ping"}
+            process.stdin.write(json.dumps(message).encode() + b"\n")
+            process.stdin.flush()
+            time.sleep(0.05)  # let the fixed-size reply fill the pipe before SIGTERM
         process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM)
         require(process.wait(timeout=8) == 0, "image MCP idle signal shutdown")
         reader.join(timeout=1)
-        require(process.stdout.read() == b"" and process.stderr.read() == b"", "image MCP signal output")
+        remaining = process.stdout.read()
+        require((blocked_output or remaining == b"") and process.stderr.read() == b"", "image MCP signal output")
     finally:
         if process.poll() is None:
             process.kill()
@@ -283,6 +292,7 @@ def check_runtime(binary):
                 allocated_console = True
                 ctypes.WinDLL("user32").ShowWindow(ctypes.c_void_p(kernel.GetConsoleWindow()), 0)
         check_image_mcp_idle_signal(binary)
+        check_image_mcp_idle_signal(binary, blocked_output=True)
         for _ in range(2):
             sessions.append(Session(binary))
         first, second = sessions
@@ -300,7 +310,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle signal + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":

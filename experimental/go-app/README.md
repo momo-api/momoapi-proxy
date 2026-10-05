@@ -485,6 +485,9 @@ first stdin line MUST be private JSON config (exact Endpoint/APIKey/optional Mod
 handoff, env/vault/account discovery or config file read. A trusted launcher must
 inject the prelude; ordinary generic MCP configs cannot directly launch this
 mode. Do not place keys in argv/config exports/tool arguments/logs/shell history.
+On Unix the mode requires pipe/socket stdin/stdout, explicitly owned duplicated
+nonblocking descriptors registered with Go's poller; regular files/TTY are denied
+so local cancellation cannot hang on inherited blocking I/O.
 Existing desktop copied MCP config remains read-only, not silently upgraded.
 
 Catalog first, explicit model, generate arguments
@@ -500,6 +503,13 @@ and cancels local calls, not remote jobs or billed effects. Output failure exits
 without replay; task may already be submitted. No edit/video, third-party MCP
 manager, account wallet or transcript export. Mock/native stream and normal
 packaged CLI tests are not real agent/plugin/live upstream acceptance.
+
+Retained dff604c CI failure: both PR/push Unix native installer acceptance timed
+out at the unchanged 8s idle-signal test, while Windows passed. Inherited Unix
+os.Stdin blocked in syscall.Read; Close could not interrupt it. Independently
+reproduced on WSL Linux, then poller-owned pipe duplicates fixed that reproduction;
+new tests retain idle input and add blocked output signal cancellation. No timeout
+increase/retry/skip; current three-platform CI must verify the new commit.
 
 Overview's explicit quota button uses only the deliberately configured key/origin
 for `GET /api/usage/token/`. No startup/polling fetch, cookie or account discovery;

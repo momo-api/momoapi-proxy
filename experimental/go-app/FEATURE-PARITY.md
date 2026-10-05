@@ -454,6 +454,13 @@ read-ahead；默认 mcp/桌面复制配置仍只读。单独拥有 Core，无监
 注入Core单测称为双方插件兼容。普通发行CLI另验首行/EOF/idle signal/DNS门禁。
 编辑/视频/真实agent/生产推理/跨设备/签名发行未完成。当前增量CI回执需重新验收。
 
+dff604c首轮PR37305612760/push37305604867两Unix安装验收在8s idle signal退出门禁
+超时，Windows通过；保留失败不重跑。WSL Linux独立复现。Unix继承stdin/stdout为
+blocking kindNewFile，Close不能中断pending syscall；新增dup+CLOEXEC+nonblocking
+并注册Go poller，要求pipe/socket，regular/TTY拒绝。不加超时/不减门禁/不os.Exit。
+WSL复现转绿、Unix inherited pipe单测五遍、Linux普通无GUI二进制完整blackbox通过，
+额外blocked-output信号测试；仍须新提交三平台首轮产物验收，不以WSL代替mac发行。
+
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`
 （本地审阅提交 `2e3fffe794764afa5f40401aeef45a20f6a87f27`）：
 紧凑导航、安静底色、卡片分组、清楚的列表/状态、设置与工作页面分开。

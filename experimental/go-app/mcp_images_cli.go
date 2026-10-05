@@ -23,17 +23,23 @@ import (
 func runImageMCP() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	input, output, err := imageMCPStreams()
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	defer output.Close()
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = os.Stdin.Close()
-			_ = os.Stdout.Close() // unblock a peer that stopped reading replies
+			_ = input.Close()
+			_ = output.Close() // unblock a peer that stopped reading replies
 		case <-done:
 		}
 	}()
-	reader := bufio.NewReaderSize(os.Stdin, 8194)
+	reader := bufio.NewReaderSize(input, 8194)
 	config, err := readImageMCPConfig(reader)
 	if ctx.Err() != nil {
 		return nil
@@ -54,7 +60,7 @@ func runImageMCP() error {
 		return errors.New("image MCP unavailable")
 	}
 	// No Serve/listener: direct bounded dispatch through the owned Core.
-	err = integration.ServeImageMCP(ctx, reader, os.Stdout, core.DesktopImages)
+	err = integration.ServeImageMCP(ctx, reader, output, core.DesktopImages)
 	if ctx.Err() != nil {
 		return nil
 	}
