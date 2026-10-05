@@ -210,11 +210,11 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 95 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 99 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (95 upstream requests; explicit image catalog/generation/task subset) + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (99 upstream requests; desktop image catalog/generation/task/explicit inline preview + API subset) + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
@@ -235,7 +235,7 @@ func check() error {
 		close(appReady)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/skill", "/app/mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
+			case "/app/images/catalog", "/app/images/generate", "/app/images/task", "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/skill", "/app/mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
 				latestStep.Store(r.URL.Path)
 			}
 			if r.URL.Path == "/" {
@@ -262,7 +262,7 @@ func check() error {
 				if r.URL.Path == "/check-page-failure" {
 					step := r.URL.Query().Get("step")
 					known := false
-					for _, candidate := range []string{"initial", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "codex-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
+					for _, candidate := range []string{"initial", "nav-images", "image-catalog", "image-generate", "image-task", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "codex-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
 						if step == candidate {
 							known = true
 						}

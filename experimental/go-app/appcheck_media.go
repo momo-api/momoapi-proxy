@@ -23,11 +23,15 @@ func probeMediaUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"models":[{"id":"momoapi-gpt-image-2-5-flare","modality":"image","available":true,"operations":["generate"],"parameters":{}}]}`)
 	case "/v1/images/generations":
-		if r.Method != "POST" || string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"media-probe"}` {
+		if r.Method != "POST" || (string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"media-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"gui-inline-probe"}`) {
 			w.WriteHeader(400)
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(data), "gui-inline-probe") {
+			io.WriteString(w, `{"data":[{"b64_json":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}]}`)
+			return true
+		}
 		io.WriteString(w, `{"data":[{"status":"submitted","task_id":"task_media_probe"}]}`)
 	case "/v1/tasks/task_media_probe":
 		if r.Method != "GET" || len(data) != 0 {

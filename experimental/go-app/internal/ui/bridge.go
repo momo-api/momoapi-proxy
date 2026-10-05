@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // Native actions return no credentials to the WebView. Nil disables the action.
@@ -70,12 +71,21 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" {
+		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/task"
+		if imageAction && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
+			http.Error(w, "page capability required", 403)
+			return
+		}
+		if !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := io.ReadAll(io.LimitReader(r.Body, 8193))
-		if err != nil || len(data) > 8192 {
+		limit := 8192
+		if imageAction {
+			limit = 160 << 10
+		}
+		data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
+		if err != nil || len(data) > limit || !utf8.Valid(data) {
 			http.Error(w, "body rejected", 413)
 			return
 		}
@@ -87,6 +97,53 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 				return
 			}
 			defer actionMu.Unlock()
+		}
+		if imageAction {
+			path := "/internal/images/capabilities"
+			var body []byte
+			if r.URL.Path == "/app/images/catalog" {
+				if len(data) != 0 {
+					http.Error(w, "body denied", 400)
+					return
+				}
+			} else {
+				var input struct {
+					Confirmed bool            `json:"confirmed"`
+					Request   json.RawMessage `json:"request"`
+					TaskID    string          `json:"task_id"`
+				}
+				d := json.NewDecoder(bytes.NewReader(data))
+				d.DisallowUnknownFields()
+				var trailing any
+				if d.Decode(&input) != nil || d.Decode(&trailing) != io.EOF {
+					http.Error(w, "invalid image action", 400)
+					return
+				}
+				if r.URL.Path == "/app/images/generate" {
+					if !input.Confirmed || input.TaskID != "" || len(input.Request) == 0 {
+						http.Error(w, "explicit generation confirmation required", 400)
+						return
+					}
+					path = "/internal/images/generate"
+					body = input.Request
+				} else {
+					if input.Confirmed || input.Request != nil {
+						http.Error(w, "invalid task action", 400)
+						return
+					}
+					path = "/internal/images/tasks/" + input.TaskID
+				}
+			}
+			data, status := core.DesktopImages(r.Context(), path, body)
+			if status != 200 {
+				http.Error(w, "image action rejected or unavailable; submitted upstream effects may already exist", status)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if n, err := w.Write(data); err != nil || n != len(data) {
+				panic(http.ErrAbortHandler)
+			}
+			return
 		}
 		if r.URL.Path == "/app/configure" {
 			var input struct {

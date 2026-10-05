@@ -410,7 +410,7 @@ sharing or upstream-health indicator. Full gap audit and migration gates:
 
 ### Explicit image generation API subset
 
-Authenticated, non-browser API only (not a GUI generator or media MCP). First
+Authenticated non-browser API plus a desktop image workbench (not media MCP). First
 GET /internal/images/capabilities, explicitly select a catalog-authorized model,
 then POST /internal/images/generate with model/prompt/n and supported controls.
 No automatic model choice/fallback/retry; generation can bill. Permission is valid
@@ -433,9 +433,25 @@ one GET /v1/tasks/<id>, no auto-poll or alternate endpoint fallback. 64 slots
 reserved before generation (pending included), absolute30minTTL, no refresh.
 Stop/configure clears local catalog/tasks, not remote jobs or billed effects;
 delivery failure can leave submitted/tracked task, no rollback or auto-retry.
-No edits/video/cloud assets/filepicker/GUI generator/media MCP in this subset.
+No edits/video/cloud assets/filepicker/disk assets/media MCP in this subset.
 Readonly MCP exposes this contract as image_generation; media:false still means
 the full Node media suite is not implemented. Node remains primary.
+
+Desktop workbench: explicit catalog button, manual model/count selection, prompt
+and supported advanced JSON controls, per-request consent checkbox and confirmation
+dialog. No automatic catalog query/model selection/generation/task polling/retry.
+Fixed /app/images/catalog|generate|task native asset actions require exact Origin
+and per-page capability even on Windows; shared mutation lock keeps Stop/Quit/state
+available. Backend confirmation:true required for generation; upstream/local tokens
+never reach the page. Reuses Core admission/300s/Stop/session/response contracts via
+bounded in-memory native dispatch, not browser HTTP calls with privileged headers.
+Bridge request160KiB, page generation305s/catalog20s/task125s timeout. Failed delivery
+may already have submitted/billed: no automatic rollback/retry. Results localmemory
+only; URL text never auto-loaded or linked. Explicit inline preview sets data: only
+(CSP img-src data:), not a file-save/image-content safety promise. Stop/Apply/Load
+clears page catalog/task/results; epoch fence ignores late pending results. Prompt
+cleared on reset; no secure memory erasure. Only latest displayed task is managed;
+other tasks remain API-queryable this Core until TTL. No remote task cancellation.
 
 ### Skill / MCP and quota
 

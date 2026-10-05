@@ -182,7 +182,12 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   64 session slots reserved before generation, absolute30minTTL, no refresh.
   Stop/configure clears catalog/tasks, not remote jobs or paid upstream effects.
   Failed response delivery may already have submitted a task: do not auto-retry.
-  No edit/video/disk assets/media MCP or GUI image generator in this subset.
+  Desktop image workbench provides explicit catalog/model/count/advancedcontrols,
+  confirmation before generation, manual latest-task query and opt-in inline
+  data-only preview. URLs are text, not auto-loaded. Stop/Apply/Load clears UI
+  state and fences late results; remote effects cannot be undone. Native actions
+  require origin+page capability and never return tokens to the page.
+  No edit/video/disk assets/media MCP in this subset.
 - Semantic/local summarization, full attachment management, full media suite and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The built-in stdio MCP only reports capabilities and exposes this document.

@@ -8,22 +8,25 @@ const source = fs.readFileSync(new URL('./page.html', import.meta.url), 'utf8');
 const script = source.split('<script>')[1].split('</script>')[0];
 const nodes = new Map();
 let focused;
+const element=()=>({disabled:false,textContent:'',value:'',checked:false,hidden:false,dataset:{},children:[],append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items;this.value=items[0]?.value||''},removeAttribute(name){delete this[name]}});
 for (const [,id] of source.matchAll(/\bid="([^"]+)"/g)) {
   assert.equal(nodes.has(id),false,`Duplicate HTML id: ${id}`);
   const attributes=new Map();
-  nodes.set(id, {disabled:false,textContent:'',value:'',checked:false,hidden:false,dataset:{},
+  nodes.set(id, {...element(),
     setAttribute:(name,value)=>attributes.set(name,value),getAttribute:name=>attributes.get(name),
     focus:()=>{focused=id}});
 }
 const initial = {Configured:false,Running:false,Active:0,Endpoint:'',Version:'0.4.0-preview',LocalEndpoint:'http://127.0.0.1:12345'};
 let state = {...initial}, calls=[], handler;
+let allowConfirm=true;
 const response = (status, value=state) => ({ok:status===200,status,json:async()=>({...value})});
 const pending = () => {let resolve;const promise=new Promise(r=>{resolve=r});return {promise,resolve}};
 const timers=[], intervals=[], listeners=new Map();
 const context = vm.createContext({
-  document:{hidden:false,getElementById:id=>nodes.get(id)},
+  document:{hidden:false,getElementById:id=>nodes.get(id),createElement:()=>element()},
+  Option:function(text,value){Object.assign(this,element(),{textContent:text,value})},
   window:{addEventListener:(name,fn)=>listeners.set(name,fn)},
-  bridgeNonce:'synthetic-page-capability',AbortController,confirm:()=>true,
+  bridgeNonce:'synthetic-page-capability',AbortController,confirm:()=>allowConfirm,
   setTimeout:fn=>{timers.push(fn);return timers.length},clearTimeout:()=>{},
   setInterval:fn=>{intervals.push(fn)},
   fetch:async(url,options)=>{calls.push({url,options});return handler?handler(url,options):response(200)}
@@ -38,6 +41,8 @@ assert.equal(nodes.get('quit').disabled,false);
 assert.equal(nodes.get('quota-refresh').disabled,true);
 assert.equal(calls.filter(c=>c.url==='/app/quota').length,0);
 assert.equal(calls.filter(c=>c.url==='/app/models').length,0);
+assert.equal(calls.filter(c=>c.url.startsWith('/app/images/')).length,0);
+assert.equal(nodes.get('image-catalog').disabled,true);
 assert.equal(nodes.get('models-refresh').disabled,true);
 assert.equal(nodes.get('service-state').textContent,'已停止');
 assert.equal(nodes.get('active-count').textContent,'0');
@@ -93,8 +98,8 @@ assert.ok(source.includes('X-MOMO-Attachments:inline'));
 assert.ok(source.includes('删除附件不撤回已存历史'));
 assert.ok(source.includes('目录优先的图片生成'));
 assert.ok(source.includes('可能计费'));
-assert.ok(source.includes('无 GUI 生成器'));
-assert.ok(source.includes('无编辑、视频、下载保存或媒体 MCP'));
+assert.ok(source.includes('图片工作台支持明确生成'));
+assert.ok(source.includes('无编辑、视频、磁盘保存或媒体 MCP'));
 assert.ok(!source.includes('图片视频生成仍未迁移'));
 assert.ok(source.includes('部分支持 · 有界内存'));
 assert.ok(source.includes('Stop 或重新配置即清空；store:false 不保存新响应'));
@@ -113,6 +118,9 @@ assert.equal(prevented,true);
 assert.equal(focused,'nav-integrations');
 assert.equal(nodes.get('view-integrations').hidden,false);
 nodes.get('nav-integrations').onkeydown({key:'ArrowRight',preventDefault:()=>{}});
+assert.equal(nodes.get('view-images').hidden,false);
+assert.equal(focused,'nav-images');
+nodes.get('nav-images').onkeydown({key:'ArrowRight',preventDefault:()=>{}});
 assert.equal(nodes.get('view-settings').hidden,false);
 nodes.get('nav-settings').onkeydown({key:'Home',preventDefault:()=>{}});
 assert.equal(focused,'nav-overview');
@@ -181,6 +189,34 @@ state={...initial};
 await run("action('state')");
 
 // Profile saving waits: no duplicate mutations, polling/Stop/Quit still work.
+// Real shipped image handlers: explicit catalog/selection/confirmation, bounded
+// pending operations, manual task, no URL load or stale post-Stop rendering.
+state={...initial,Configured:true,Running:true,Endpoint:'https://mock.example'};
+handler=()=>response(200);await run("action('state')");
+const catalog={models:[{id:'image-test',available:true,parameters:['prompt','n','quality'],allowed_n:[1,2]}],expires_at:new Date(Date.now()+300000).toISOString()};
+handler=url=>url==='/app/images/catalog'?response(200,catalog):response(200);
+await nodes.get('image-catalog').onclick();
+assert.equal(nodes.get('image-model').value,'');assert.equal(nodes.get('image-generate').disabled,true);
+nodes.get('image-model').value='image-test';nodes.get('image-model').onchange();nodes.get('image-prompt').value='中文🙂';nodes.get('image-consent').checked=true;nodes.get('image-options').value='{}';nodes.get('image-consent').oninput();
+assert.equal(nodes.get('image-n').value,'1');assert.equal(nodes.get('image-generate').disabled,false);
+allowConfirm=false;assert.equal(await nodes.get('image-generate').onclick(),false);assert.equal(calls.filter(c=>c.url==='/app/images/generate').length,0);allowConfirm=true;
+nodes.get('image-options').value='{"model":"hidden-substitution"}';assert.equal(await nodes.get('image-generate').onclick(),false);assert.equal(calls.filter(c=>c.url==='/app/images/generate').length,0);nodes.get('image-options').value='{"quality":"high"}';
+handler=url=>url==='/app/images/generate'?response(200,{images:[],task_id:'task_gui',raw_status:'submitted',terminal:false}):response(200);
+assert.equal(await nodes.get('image-generate').onclick(),true);assert.equal(nodes.get('image-consent').checked,false);assert.equal(nodes.get('image-generate').disabled,true);assert.equal(nodes.get('image-task').disabled,false);
+const imageRequest=JSON.parse(calls.find(c=>c.url==='/app/images/generate').options.body);assert.equal(imageRequest.confirmed,true);assert.deepEqual(imageRequest.request,{quality:'high',model:'image-test',prompt:'中文🙂',n:1});assert.equal(calls.find(c=>c.url==='/app/images/generate').options.headers['X-MOMO-Bridge'],'synthetic-page-capability');
+const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+handler=url=>url==='/app/images/task'?response(200,{images:[{url:'https://images.example/a',b64_json:png,mime_type:'image/png'}],task_id:'task_gui',raw_status:'completed',terminal:true}):response(200);
+await nodes.get('image-task').onclick();assert.equal(nodes.get('image-task').disabled,true);assert.equal(nodes.get('image-preview').src,undefined);
+const card=nodes.get('image-results').children[0];assert.equal(card.children[1].textContent,'https://images.example/a');assert.equal(card.children[1].href,undefined);card.children[2].onclick();assert.equal(nodes.get('image-preview').src,'data:image/png;base64,'+png);
+assert.equal(calls.filter(c=>c.url==='/app/images/task').length,1);
+nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();const blockedImage=pending();handler=url=>url==='/app/images/generate'?blockedImage.promise:response(200);const generating=nodes.get('image-generate').onclick();await flush();assert.equal(nodes.get('configure').disabled,true);assert.equal(nodes.get('stop').disabled,false);assert.equal(nodes.get('quit').disabled,false);assert.equal(await nodes.get('image-generate').onclick(),false);
+const genOptions=calls.at(-1).options;timers.at(-1)();assert.equal(genOptions.signal.aborted,true);
+state={...state,Running:false};await nodes.get('stop').onclick();blockedImage.resolve(response(200,{images:[{url:'https://images.example/stale'}],terminal:true}));await generating;assert.equal(nodes.get('image-results').children.length,0);assert.equal(nodes.get('image-preview').src,undefined);assert.equal(run('imageCatalog'),null);
+state={...state,Running:true};handler=url=>url==='/app/images/catalog'?response(200,{...catalog,expires_at:new Date(Date.now()-1000).toISOString()}):response(200);await run("action('state')");await nodes.get('image-catalog').onclick();assert.equal(nodes.get('image-generate').disabled,true);assert.equal(nodes.get('image-model').disabled,true);
+for(const status of [401,404,409,502]){handler=()=>response(status);await nodes.get('image-catalog').onclick();assert.equal(run('imageCatalog'),null);assert.equal(nodes.get('image-model').disabled,true);assert.equal(nodes.get('image-generate').disabled,true)}
+handler=()=>response(200,{models:[{id:'bad',available:true,allowed_n:[1]}],expires_at:catalog.expires_at});await nodes.get('image-catalog').onclick();assert.equal(run('imageCatalog'),null);
+state={...initial};handler=()=>response(200);await run("action('state')");
+
 const saved=pending();
 handler=(url)=>url==='/app/configure'?saved.promise:response(200);
 nodes.get('endpoint').value=' https://mock.example ';
@@ -278,4 +314,4 @@ timers.at(-1)();assert.equal(options.signal.aborted,true);
 wait.resolve(response(200));await one;
 assert.equal(run('statePending'),false);
 assert.equal(calls.filter(c=>c.options.body?.includes('synthetic-page-input-only')).length,1);
-console.log('PASS shipped page: navigation/keyboard/status/capability gaps/Load/pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout');
+console.log('PASS shipped page: navigation/keyboard/status/capability gaps/Load/pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout + image catalog/selection/confirmation/manual task/data-only opt-in preview/Stop epoch');

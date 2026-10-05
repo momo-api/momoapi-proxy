@@ -8,6 +8,9 @@ import (
 )
 
 func TestMCPAndSkillExports(t *testing.T) {
+	if !strings.Contains(Skill, "Desktop image workbench") || !strings.Contains(Capabilities()["image_generation"].(string), "Desktop workbench") {
+		t.Fatal("stale image workbench export")
+	}
 	if Capabilities()["image_generation"] == nil || Capabilities()["media"] != false || !strings.Contains(Skill, "/internal/images/generate") || !strings.Contains(Skill, "no retry or auto-poll") {
 		t.Fatal("stale generation subset exports")
 	}
