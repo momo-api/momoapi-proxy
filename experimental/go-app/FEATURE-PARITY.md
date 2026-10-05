@@ -197,6 +197,16 @@ Prism下一阶段230.375s静态审查指出prepare阶段提升LRU的副作用；
 同mock协议夹具仍162组，载荷字节不改。审查的tool_search建议仅供后续设计；
 官方search_output示例允许defer_loading:true，未采纳顾问相反的拒绝建议。
 
+### UI轮询与启动并发修复（2026-10-05）
+
+dba68fe的PR macOS WebView首轮在check-proxy前失败，同提交复跑通过；推送三平台
+首轮通过，未证明根因。随后确定性DOM测试独立复现：Start在途时新发出的poll拿到
+旧停止快照，却因serial较高覆盖成功Start。修复为action epoch：操作期间poll可
+继续渲染（不阻断Stop/退出/凭据等待），但不提升serial；非poll完成推进epoch，
+过期poll不能覆盖操作结果。两种响应完成顺序均测试；已有Stop/轮询回归保留。
+test-only WebView失败路径现在立即报固定阶段标签，不再吞断言等25s；不输出状态、
+Key、账户或异常内容。该复现并不证明它就是原macOS CI失败原因；长期稳定仍待验收。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

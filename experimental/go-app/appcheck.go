@@ -210,13 +210,32 @@ func check() error {
 				_, _ = io.WriteString(w, page)
 				return
 			}
-			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-native-stop" || r.URL.Path == "/check-done" || r.URL.Path == "/check-routing" {
+			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-native-stop" || r.URL.Path == "/check-done" || r.URL.Path == "/check-routing" || r.URL.Path == "/check-page-failure" {
 				validation := r.Clone(r.Context())
 				validation.URL.Path = "/app/state"
 				auth := httptest.NewRecorder()
 				original.ServeHTTP(auth, validation)
 				if auth.Code != 200 {
 					http.Error(w, "denied", 403)
+					return
+				}
+				if r.URL.Path == "/check-page-failure" {
+					step := r.URL.Query().Get("step")
+					known := false
+					for _, candidate := range []string{"initial", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
+						if step == candidate {
+							known = true
+						}
+					}
+					if !known {
+						step = "unknown"
+					}
+					fmt.Println("FAIL WebView page assertion step:", step) // fixed labels only; never state/key/error text
+					select {
+					case completed <- struct{}{}:
+					default:
+					}
+					w.WriteHeader(204)
 					return
 				}
 				if r.URL.Path == "/check-proxy" {

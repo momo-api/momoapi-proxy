@@ -66,6 +66,10 @@ upstream failure/incomplete, cancellation and terminal write/flush failure do no
 promote it. A completed successful store:false continuation touches the existing
 anchor without creating one or extending its absolute TTL. In-flight evicted,
 expired or generation-invalidated anchors are never resurrected.
+UI state polling remains live while native actions are pending. Concurrent polls
+cannot outrank a completed Start/Stop via stale native snapshots: action epochs
+invalidate old polls, including polls launched during a mutation. The test-only
+WebView probe reports allowlisted failure-stage labels, never state/key/error text.
 The shared encoder
 rejects calls under none, wrong calls under a named selector, and a completed
 text-only result under required/named choice. It does not execute returned tools.

@@ -6,9 +6,10 @@ package main
 // Synthetic native test only, never compiled into the distributed application.
 const pageProbeScript = `
 async function check(){
- const ensure=value=>{if(!value)throw Error('page check failed')};
- const request=async name=>{const r=await fetch('/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});ensure(r.ok)};
- const button=async name=>{ensure(!byId(name).disabled);await byId(name).onclick()};
+ let step='initial';
+ window.momoProbeStep=()=>step;const ensure=value=>{if(!value)throw Error('page check failed')};
+ const request=async name=>{step=name;const r=await fetch('/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});ensure(r.ok)};
+ const button=async name=>{step=name;ensure(!byId(name).disabled);await byId(name).onclick()};
  const readyDeadline=Date.now()+5000;while((!lastState||statePending)&&Date.now()<readyDeadline)await new Promise(resolve=>setTimeout(resolve,20));
  ensure(lastState);await action('state');ensure(byId('start').disabled&&!byId('configure').disabled);
  await button('nav-routing');ensure(!byId('view-routing').hidden&&byId('view-overview').hidden&&byId('nav-routing').getAttribute('aria-selected')==='true');ensure(byId('compact-state').textContent==='默认关闭 · 501'&&!byId('routing-details').open);byId('routing-details').querySelector('summary').click();ensure(byId('routing-details').open);byId('routing-details').querySelector('summary').click();ensure(!byId('routing-details').open);
@@ -31,5 +32,5 @@ async function check(){
  byId('routing-mode').checked=true;byId('key').value='synthetic-appcheck-only';await button('configure');ensure(lastState.Mode==='momo-routing');
  await button('start');ensure(byId('routing-mode').disabled&&byId('routing-state').textContent.includes('已启用')&&byId('compact-state').textContent==='部分支持 · 手动回放');await request('check-routing');await request('check-stall');await button('stop');await request('check-done');
 }
-check().catch(()=>{});
+check().catch(()=>{const allowed=['initial','nav-routing','nav-settings','nav-overview','nav-integrations','skill-copy','mcp-copy','configure','load','quota-refresh','models-refresh','start','check-proxy','check-native-stop','check-routing','check-stall','stop','check-done'];const step=window.momoProbeStep?.();fetch('/check-page-failure?step='+(allowed.includes(step)?step:'unknown'),{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}}).catch(()=>{});});
 `

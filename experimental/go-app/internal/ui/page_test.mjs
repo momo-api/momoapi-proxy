@@ -192,6 +192,29 @@ await polling;
 assert.equal(run('lastState.Running'),false);
 
 // Native/tray changes are picked up by visible polling and focus; errors persist.
+// A poll launched DURING Start must not outrank Start's successful response.
+// Its server snapshot can have been taken before Start changes native state.
+for(const pollFirst of [true,false]){
+ const starting=pending(),during=pending();
+ handler=url=>url==='/app/start'?starting.promise:url==='/app/state'?during.promise:response(200,state);
+ const mutation=run("action('start')");await flush();
+ const concurrent=run("action('state')");await flush();
+ if(pollFirst){during.resolve(response(200,{...state,Running:false}));await concurrent;starting.resolve(response(200,{...state,Running:true}));await mutation;}
+ else{starting.resolve(response(200,{...state,Running:true}));await mutation;during.resolve(response(200,{...state,Running:false}));await concurrent;}
+ assert.equal(run('lastState.Running'),true,'concurrent pre-Start poll replaced successful Start');
+ assert.equal(nodes.get('service-state').textContent,'运行中');
+ assert.equal(nodes.get('start').disabled,true);
+ handler=()=>response(200,state);await run("action('stop')");
+}
+// Stop must also outrank an in-flight Start and a poll launched during Start.
+{
+ const starting=pending(),during=pending();
+ handler=url=>url==='/app/start'?starting.promise:url==='/app/state'?during.promise:response(200,state);
+ const mutation=run("action('start')");await flush();const concurrent=run("action('state')");await flush();
+ await run("action('stop')");starting.resolve(response(200,{...state,Running:true}));await mutation;
+ during.resolve(response(200,{...state,Running:true}));await concurrent;
+ assert.equal(run('lastState.Running'),false);assert.equal(nodes.get('service-state').textContent,'已停止');
+}
 nodes.get('notice').textContent='安全保存失败';
 handler=()=>response(200,{...state,Running:true});
 intervals[0]();await flush();
