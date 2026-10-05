@@ -59,6 +59,34 @@ def check_readonly_mcp(binary):
     require(replies[4]["error"]["code"] == -32602, "MCP arbitrary execution allowed")
 
 
+def check_media_metadata(binary, command, modality, prelude=b"", env=None):
+    meta = {"callId": SYNTHETIC_KEY, "threadId": SYNTHETIC_KEY,
+            "sessionId": SYNTHETIC_KEY, "windowId": SYNTHETIC_KEY,
+            "itemId": SYNTHETIC_KEY, "x-codex-turn-metadata": {"synthetic": True},
+            "progressToken": 9007199254740993, "confirmed": True}
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "gateway_capabilities", "arguments": {}, "_meta": meta}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": modality + "_capabilities", "arguments": {}, "_meta": meta}},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": modality + "_generate", "arguments": {"request": {}}, "_meta": meta}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": modality + "_capabilities", "arguments": {}, "_meta": None}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": modality + "_capabilities", "arguments": {}, "_meta": {"progressToken": []}}},
+        {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": modality + "_capabilities", "arguments": {}, "_meta": meta, "extra": True}},
+    ]
+    data = prelude + (chr(10).join(json.dumps(m) for m in messages) + chr(10)).encode()
+    result = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b"", "media metadata startup/EOF")
+    require(SYNTHETIC_KEY.encode() not in result.stdout and b'progressToken' not in result.stdout,
+            "media metadata reflection")
+    if env and env.get("MOMO_LOCAL_API_KEY"):
+        require(env["MOMO_LOCAL_API_KEY"].encode() not in result.stdout, "media metadata token reflection")
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require([r["id"] for r in replies] == [m["id"] for m in messages], "media metadata ID order")
+    require("result" in replies[0] and replies[1]["result"]["isError"],
+            "media metadata must reach existing Core/DNS gates")
+    require(all(r["error"]["code"] == -32602 for r in replies[2:]),
+            "media metadata cannot authorize or bypass whitelist")
+
+
 def check_image_mcp(binary):
     config = json.dumps(CONFIG).encode()
     for data in (b"", config, b"{}\n", config + b"{}\n", b"x" * 8194 + b"\n",
@@ -67,6 +95,7 @@ def check_image_mcp(binary):
                                 capture_output=True, timeout=8)
         require(result.returncode == 1 and result.stdout == b"", "image MCP invalid prelude")
         require(SYNTHETIC_KEY.encode() not in result.stderr, "image MCP prelude reflection")
+    check_media_metadata(binary, [str(binary), "mcp-images"], "image", config + bytes([10]))
     messages = [
         {"jsonrpc": "2.0", "id": 9007199254740993, "method": "initialize"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
@@ -144,6 +173,7 @@ def check_connected_image_mcp(binary, session):
     data = ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
     command = [str(binary), "mcp-images-connect", "--endpoint", endpoint]
     env = {**os.environ, "MOMO_LOCAL_API_KEY": session.token}
+    check_media_metadata(binary, command, "image", env=env)
     result = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
     require(result.returncode == 0 and result.stderr == b"", "connected MCP startup/EOF")
     require(session.token.encode() not in result.stdout and SYNTHETIC_KEY.encode() not in result.stdout,
@@ -171,6 +201,7 @@ def check_connected_image_mcp(binary, session):
 
 def check_video_mcp(binary):
     config = json.dumps(CONFIG).encode()
+    check_media_metadata(binary, [str(binary), "mcp-videos"], "video", config + bytes([10]))
     for data in (b"", config, b"{}\n", config + b"{}\n", b"x" * 8194 + b"\n",
                  json.dumps({**CONFIG, "extra": True}).encode() + b"\n"):
         result = subprocess.run([str(binary), "mcp-videos"], input=data,
@@ -211,6 +242,7 @@ def check_connected_video_mcp(binary, session):
     data = ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
     command = [str(binary), "mcp-videos-connect", "--endpoint", endpoint]
     env = {**os.environ, "MOMO_LOCAL_API_KEY": session.token}
+    check_media_metadata(binary, command, "video", env=env)
     result = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
     require(result.returncode == 0 and result.stderr == b"", "connected MCP startup/EOF")
     require(session.token.encode() not in result.stdout and SYNTHETIC_KEY.encode() not in result.stdout,

@@ -284,7 +284,18 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   It disables grammar/search/verbosity/REPL, leaves sandbox/approvals untouched,
   advertises no guessed context or effort defaults. With explicit policy, actual
   Codex0.156 Linux gpt-5.5 synthetic read-only exec/output/second turn passed;
-  not live inference/fullagent/patch/search/MCP tool execution proof.
+  not live inference/fullagent/patch/search proof. Additional actual Codex0.156
+  Linux synthetic tests passed gateway_capabilities, image/video catalog calls
+  and explicit inclusion of this embedded Skill, with paired output/second turn.
+  Only the tested read-only tool received explicit approval in a fresh test
+  profile; default approval failed earlier. No generation/tasks/paid inference,
+  existing user config changes or Windows/macOS real-client proof.
+- Media MCP tools/call params._meta is ignored untrusted correlation metadata,
+  bounded by existing 160KiB/64-depth/duplicate checks; object only, optional
+  progressToken string/number. Never forwarded/stored/echoed or treated as
+  confirmation/authorization. No progress notifications are promised; unknown
+  sibling parameters remain rejected. confirmed:true must remain in arguments
+  and is only a client assertion, not independent human consent.
 - Optional commented X-MOMO-Client-Policy:text-tools-v1 requires explicit user
   acceptance before enabling; converted text/tool subset has no reasoning
   summaries/encrypted continuation or prompt-cache guarantees. Private labels

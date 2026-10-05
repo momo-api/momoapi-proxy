@@ -543,8 +543,9 @@ negotiation/list/call/resources/close with separate ordinary binary and syntheti
 local gateway; no real accounts/public calls/models. Native mock adds3physical
 TCP→TLS catalog/generate/task calls (105 total). Normal binary blackbox covers
 separate processes/env/exact endpoint/key/Core gates/EOF/idle+blocked-output signal
-and gateway survival. Not actual Codex end-to-end, existing Node plugin parity or
-live generation acceptance.
+and gateway survival. Actual Codex's limited read-only/catalog workflows are
+recorded below; this does not establish existing Node plugin parity or live
+generation acceptance.
 
 Overview's explicit quota button uses only the deliberately configured key/origin
 for `GET /api/usage/token/`. No startup/polling fetch, cookie or account discovery;
@@ -588,6 +589,27 @@ Both modes share core/proxy/auth/admission implementation.
 ## Boundaries
 
 ### Manual Codex provider export
+
+Actual official Codex0.156.0 Linux also completed default read-only MCP
+gateway_capabilities, explicit image_capabilities/video_capabilities connectors,
+and an explicitly invoked copy of the actual embedded Skill in a fresh synthetic
+test HOME. Each workflow preserved namespaced tool identity and paired output,
+then completed the second agent turn: exit0, exactly two synthetic Chat requests.
+The Skill's actual content was asserted in both requests, not merely listed.
+These used the manual catalog + text-tools-v1 policy, read-only sandbox, zero
+retries and a fresh per-tool approval for only the tested read-only tool; no user
+config/approvals were changed and no media generation/tasks or paid inference ran.
+Default approval failed in earlier probes; this is not automatic approval proof.
+
+Media tools/call accepts MCP params._meta as an untrusted bounded object (optional
+progressToken string/number), ignored without dispatch/storage/reflection or
+permission effects. Actual Codex supplies correlation IDs/turn metadata here;
+rejecting them previously broke catalog calls. Unknown sibling params, duplicate
+JSON, excessive depth/size and metadata-only confirmation remain rejected.
+No progress notifications are promised. Specification:
+https://modelcontextprotocol.io/specification/2025-11-25/basic
+This is a synthetic Linux client transport/Skill test, not live model quality,
+Windows/macOS actual-client acceptance, full agent/media or cross-device support.
 
 For an explicitly chosen `gpt-5.5`, the normal binary can print a secret-free
 conservative client catalog without reading stdin/credentials or starting a

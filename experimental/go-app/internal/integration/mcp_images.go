@@ -116,7 +116,7 @@ func mediaMCPResult(ctx context.Context, method string, params json.RawMessage, 
 	}
 	var p map[string]json.RawMessage
 	var name string
-	if json.Unmarshal(params, &p) != nil || p == nil || !mcpFields(p, "name", "arguments") || json.Unmarshal(p["name"], &name) != nil {
+	if json.Unmarshal(params, &p) != nil || p == nil || !mcpFields(p, "name", "arguments", "_meta") || !validMCPMetadata(p["_meta"]) || json.Unmarshal(p["name"], &name) != nil {
 		return nil, -32602, "Unsupported tool or arguments"
 	}
 	if name == "gateway_capabilities" {
@@ -173,6 +173,24 @@ func mediaMCPRequestSchema(video bool, promptLimit int) map[string]any {
 		schema["additionalProperties"] = false
 	}
 	return schema
+}
+
+// MCP correlation/extension metadata is untrusted and ignored, never sent to
+// dispatch, echoed, stored, or interpreted as confirmation/authorization.
+// The enclosing request enforces the existing byte/depth/duplicate bounds.
+// Accept a standard string/number progressToken without promising progress.
+func validMCPMetadata(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	var meta map[string]json.RawMessage
+	if json.Unmarshal(raw, &meta) != nil || meta == nil {
+		return false
+	}
+	if token, present := meta["progressToken"]; present && !validMCPID(token) {
+		return false
+	}
+	return true
 }
 
 func mcpFields(m map[string]json.RawMessage, allowed ...string) bool {

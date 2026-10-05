@@ -36,6 +36,25 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 真实 Codex Skill/MCP 与媒体元数据修复（2026-10-06；新 HEAD CI 待验收）
+
+真实官方CLI0.156.0 Linux、fresh HOME/CODEX_HOME、read-only、zero retries，
+手动client目录+text-tools-v1下，默认只读gateway_capabilities、单独图片/视频
+connector目录各自完成namespace调用→真实MCP输出配对→第二turn：exit0、两次
+synthetic Chat请求。显式安装本binary resources/read返回的真实Skill到测试HOME，
+用$调用且两次实际请求均断言Skill内容存在；不改用户Skill/账号/全局配置。
+每次仅测试read-only tool有测试profile显式approve；默认approval先失败，不宣称
+自动授权。媒体目录无generation/task/付费上游，非真实推理或Win/mac客户端验收。
+
+真实image首轮失败-32602；仅采集stdio字段名/类型确认标准params._meta包含
+progressToken、callId、turn/thread/session/window/item metadata。红回归先复现双方
+media拒绝，再允许有界object（progressToken string/number）并忽略，不forward/
+store/echo/解释confirmed或permissions，不承诺progress通知。unknown sibling仍拒绝；
+160KiB/depth64/重复JSON/参数确认/模态隔离不变。新增两模态回归及四种普通binary
+模式黑盒：metadata不能授权、改payload或绕过Core/DNS，真实两种目录转绿。
+原统一299 TCP/117物理TLS mock与Node/native默认字节不改；新HEAD三平台待重验。
+MCP标准：https://modelcontextprotocol.io/specification/2025-11-25/basic
+
 ### 保守 Codex 客户端目录导出（2026-10-05；当前增量 CI 待验收）
 
 普通binary新增codex-text-tools-catalog --model gpt-5.5：只输出无Key JSON，无
