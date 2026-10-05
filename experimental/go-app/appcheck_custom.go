@@ -40,6 +40,7 @@ func probeCustomUpstream(w http.ResponseWriter, r *http.Request, data []byte) bo
 		schema = "input_schema"
 		valid = valid && o(body["tool_choice"])["type"] == "auto" && r.Header.Get("anthropic-version") == "2023-06-01"
 	case "/v1beta/models/gemini-2.5-flash:streamGenerateContent":
+		schema = "parametersJsonSchema"
 		if valid {
 			ds, _ := o(ts[0])["functionDeclarations"].([]any)
 			valid = len(ds) == 1

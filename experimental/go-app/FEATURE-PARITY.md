@@ -310,6 +310,19 @@ history可用wire别名冒用不同声明namespace/name，再修为无条件核�
 新增并行多图/最终结果flush/共享用户工具32图预算/marker转义/策略不继承，以及
 四映射SSE/JSON短写、flush、deadline、取消、Stop、incomplete事务门禁。
 
+### Gemini 工具 JSON Schema 字段修正（2026-10-05）
+
+第二份Prism6019-byte静态报告指向Gemini工具声明。实际获取Google v1beta discovery：
+restricted Schema不含additionalProperties，FunctionDeclaration.parametersJsonSchema
+明确支持JSON Schema，与parameters互斥。先TCP回归复现严格mock拒绝旧字段，再改
+三类声明（普通function/custom shim/client-search）统一发送parametersJsonSchema，
+包括嵌套限制，绝不剥掉约束伪称等价。219组统一TCP在任何规范化前独立核对真实Go
+字段和原schema，随后只对这个已确认Node字段差异规范化；Node源码不改。真实WebView
+custom/search探针核对新字段；新增Gemini2/3 SSE/JSON TCP回归与加载search声明回归。
+原生Responses/default bytes不改；不证明真实模型执行或schema全部支持。CI未完成前
+不以81d9681的通过回执替代本修复。官方结构来源：
+https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

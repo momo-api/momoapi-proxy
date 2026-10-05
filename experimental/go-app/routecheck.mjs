@@ -175,6 +175,20 @@ for(const fixture of cases){
   const goResults=await Promise.all(Array.from({length:count},()=>invoke(goURL,handoff.api_key,fixture.payload)));
   const captures=await(await fetch(handoff.mock_url+'/capture')).json();
   assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
+  // Independently assert the actual Go wire before normalizing this one known
+  // Node difference for the remaining payload comparisons. No constraints drop.
+  if(fixture.path?.includes(':streamGenerateContent')){
+   for(const g of captures.slice(count))for(const d of g.tools?.[0]?.functionDeclarations||[]){
+    assert.equal(d.parameters,undefined);assert.ok(d.parametersJsonSchema&&typeof d.parametersJsonSchema==='object');
+    const namespaced=fixture.payload.tools?.flatMap(t=>t.type==='namespace'?t.tools.map(v=>({...v,wire:t.name+'__'+v.name})): [{...t,wire:t.name}])||[];
+    const declared=namespaced.find(t=>t.wire===d.name);
+    if(declared&&declared.type==='function')assert.deepEqual(d.parametersJsonSchema,declared.parameters||{type:'object',properties:{}});
+    if(declared&&declared.type==='custom')assert.deepEqual(d.parametersJsonSchema,{type:'object',properties:{input:{type:'string',description:'Raw freeform input for this tool.'}},required:['input'],additionalProperties:false});
+    if(d.name==='momo__client_tool_search')assert.deepEqual(d.parametersJsonSchema,searchTool.parameters);
+    d.parameters=d.parametersJsonSchema;delete d.parametersJsonSchema;
+   }
+   console.log('DIFFERENCE Go Gemini uses parametersJsonSchema and preserves constraints; Node uses restricted parameters for JSON Schema');
+  }
   if(fixture.search){
    const [n,g]=captures;
    const declarations=b=>!fixture.path?b.tools.map(t=>t.function):fixture.path==='/v1/messages'?b.tools:b.tools[0].functionDeclarations;

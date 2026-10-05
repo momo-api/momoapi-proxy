@@ -116,7 +116,10 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 	}
 	declarations := []any{}
 	for _, tool := range ir.callableTools() {
-		declarations = append(declarations, map[string]any{"name": tool.wire, "description": tool.description, "parameters": tool.schema})
+		// parameters is Google's restricted Schema, not arbitrary JSON Schema.
+		// Preserve additionalProperties and nested client/shim constraints through
+		// the documented JSON Schema field; never send both fields or strip keys.
+		declarations = append(declarations, map[string]any{"name": tool.wire, "description": tool.description, "parametersJsonSchema": tool.schema})
 	}
 	if len(declarations) > 0 {
 		body["tools"] = []any{map[string]any{"functionDeclarations": declarations}}

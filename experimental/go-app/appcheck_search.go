@@ -27,6 +27,7 @@ func probeSearchUpstream(w http.ResponseWriter, r *http.Request, data []byte) bo
 	schema := "parameters"
 	if strings.HasPrefix(r.URL.Path, "/v1beta/") && len(defs) == 1 {
 		defs, _ = o(defs[0])["functionDeclarations"].([]any)
+		schema = "parametersJsonSchema"
 	}
 	for _, def := range defs {
 		m := o(def)

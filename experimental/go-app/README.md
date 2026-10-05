@@ -84,6 +84,12 @@ Reference wire contract: https://developers.openai.com/api/docs/guides/images-vi
 
 ### Paired function/custom tool image outputs
 
+Gemini function declarations use parametersJsonSchema, not the restricted
+parameters Schema. Client/shim JSON Schema (including nested additionalProperties)
+is preserved without stripping constraints; these fields are mutually exclusive.
+Official Google v1beta discovery confirms the wire contract, not live model support:
+https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
+
 function_call_output/custom_tool_call_output.output may contain ordered input_text
 and input_image parts, validated with the same aggregate image/history/body limits.
 Original call kind/ID/namespace pairing is mandatory. No orphan result recovery,
