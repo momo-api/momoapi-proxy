@@ -267,7 +267,12 @@ Limits: request 1 MiB, response 16 MiB, active 4, TCP 32; upload 15s, upstream
 fabricated events. Clean EOF remains upstream behavior; no completion parser.
 Reconfigure only stopped with zero active. No ordinary disk credential file.
 
-Stop also interrupts incomplete fixed-length/chunked uploads rather than waiting
+Passthrough JSON/SSE checks cancellation after
+upstream reads; downstream short/error/flush/deadline failures abort HTTP rather
+than returning a clean partial response or appending a replacement error. JSON
+now uses the same 15s write deadline/flush contract; successful payload bytes remain
+unchanged. Deterministic writer/EOF-cancellation regressions cover these paths.
+Stop interrupts incomplete fixed-length/chunked uploads rather than waiting
 for the 15s upload deadline. A cancellation callback sets only the in-flight
 request read deadline; normal completed uploads remove/join the callback before
 continuing so later keep-alive requests are not poisoned. Regression uses real

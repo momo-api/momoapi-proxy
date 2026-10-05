@@ -409,6 +409,9 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		total := 0
 		for {
 			n, err := upstream.Body.Read(buffer)
+			if ctx.Err() != nil {
+				panic(http.ErrAbortHandler)
+			}
 			total += n
 			if total > MaxResponse {
 				// Abort the HTTP response, do not inject a non-upstream SSE frame or
@@ -417,13 +420,13 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			}
 			if n > 0 {
 				if controller.SetWriteDeadline(time.Now().Add(15*time.Second)) != nil {
-					return
+					panic(http.ErrAbortHandler)
 				}
-				if _, e := w.Write(buffer[:n]); e != nil {
-					return
+				if written, e := w.Write(buffer[:n]); e != nil || written != n {
+					panic(http.ErrAbortHandler)
 				}
 				if controller.Flush() != nil {
-					return
+					panic(http.ErrAbortHandler)
 				}
 			}
 			if err != nil {
@@ -439,12 +442,21 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data, err := io.ReadAll(io.LimitReader(upstream.Body, MaxResponse+1))
+		if ctx.Err() != nil {
+			panic(http.ErrAbortHandler)
+		}
 		if err != nil || len(data) > MaxResponse || !json.Valid(data) {
 			http.Error(w, "upstream body rejected", 502)
 			return
 		}
+		controller := http.NewResponseController(w)
+		if controller.SetWriteDeadline(time.Now().Add(15*time.Second)) != nil {
+			panic(http.ErrAbortHandler)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(data)
+		if written, err := w.Write(data); err != nil || written != len(data) || controller.Flush() != nil {
+			panic(http.ErrAbortHandler)
+		}
 	}
 }
 
