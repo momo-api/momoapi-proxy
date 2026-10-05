@@ -8,6 +8,7 @@ import {createMomoSwitch} from '../../src/server.mjs';
 import {fileCases,assertFileCase} from './routecheck_files.mjs';
 import {imageBlackbox} from './routecheck_images.mjs';
 import {videoBlackbox} from './routecheck_videos.mjs';
+import {dsmlBlackbox} from './routecheck_dsml.mjs';
 const binary=process.argv[2];assert.ok(binary);
 const tool={type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'custom',name:'write'}]};
 const payload={model:'gpt-5.5',stream:true,instructions:'Be concise.',input:[{role:'user',content:[{type:'input_text',text:'中文🙂'}]}],tools:[tool]};
@@ -450,4 +451,5 @@ for(const status of [200,404]){
 }
 const imageCount=await imageBlackbox(launch,invoke);
 const videoCount=await videoBlackbox(launch,invoke);
-console.log('PASS '+(cases.length+8+imageCount+videoCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+const dsmlCount=await dsmlBlackbox(launch,invoke);
+console.log('PASS '+(cases.length+8+imageCount+videoCount+dsmlCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; DSML explicit text conversion and marker-leak differences independently asserted; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

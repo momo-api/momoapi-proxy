@@ -311,8 +311,31 @@ Known audio/prediction details are validated but not projected; unknown usage fi
 are rejected rather than silently accepted. Usage-only trailers require a prior
 finish_reason and are not terminals: [DONE] is still mandatory. Upstreams rejecting
 include_usage are not retried/fallen back; native/default requests remain unchanged.
-No adapter synthesizes DSML tools;
-only successful full output is completed; bounded converted history is described below.
+DSML tool text conversion is now explicit on converted Chat only:
+X-MOMO-Tool-Text:dsml-v1. It changes model text into declared calls, so it is never
+enabled automatically, inferred from a model or inherited by history. Header is
+not forwarded. Native Responses/default passthrough bytes remain unchanged;
+attempting this policy there or on Claude/Gemini/compact/Chat entry is rejected.
+Plain <tool_calls>/<invoke>/<parameter> and ASCII/fullwidth DSML-prefixed tags
+are parsed only after finish_reason + [DONE]. A possible marker prefix is held
+across chunks (without splitting UTF-8), so markup does not leak as partial text.
+Ordinary prose containing the acronym DSML remains text, not a tool marker.
+Surrounding text retains exact order; malformed/unknown/ambiguous/duplicate tags,
+parameters, unsupported attributes and mixed structured+DSML calls fail. 1MiB
+retained output,128 calls/parameters,1024byte tag header,256byte parameter name,
+depth64 duplicate-free explicit JSON. Bare tool names must resolve uniquely;
+namespace, allowed/named/none choice gates apply. Default parameter values or
+string=true are exact raw strings (no trimming/entity decoding/JS guessing);
+string=false must be JSON, including exact large integers. This differs from
+Node's string-only trimmed parser. Custom tools accept exactly input:string.
+No tool execution, verified human consent, grammar or native DSML compatibility
+claim. Explicit policy trusts the selected upstream's tool text just as other
+model-proposed calls; the client still enforces approvals/sandbox.
+Search lifecycle, mixed native calls, limit/truncated/missing terminal DSML fail
+without completed/incomplete or history commit. Normal output-write/Stop gates
+remain, no retries. Synthetic same-mock and native probe acceptance, not live
+model/actual Codex DSML proof. Only successful full output is completed;
+bounded converted history is described below.
 
 Converted requests accept max_output_tokens as an integer 1..1048576. Chat maps it
 to max_completion_tokens, Claude to max_tokens (default 12240 when omitted), and

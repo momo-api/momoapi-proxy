@@ -99,5 +99,8 @@ func probeNamedRequests(core *appcore.Core) error {
 	if err := probeSearchRequests(core); err != nil {
 		return err
 	}
+	if err := probeDSMLRequests(core); err != nil {
+		return err
+	}
 	return probeHistoryRequests(core)
 }

@@ -135,7 +135,7 @@ func TestRoutedTruncationAndErrorsNeverComplete(t *testing.T) {
 		chatSSE(choice(map[string]any{"content": "partial"}, nil)),
 		chatSSE(choice(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "a", "function": map[string]string{"name": "missing", "arguments": "{}"}}}}, "tool_calls")),
 		chatSSE(choice(map[string]any{"content": strings.Repeat("a", maxRoutedEvent+1)}, "stop")),
-		chatSSE(choice(map[string]any{"content": "DS"}, nil), choice(map[string]any{"content": "ML"}, "stop")),
+		chatSSE(choice(map[string]any{"content": "<||DS"}, nil), choice(map[string]any{"content": "ML||invoke name='read'>"}, "stop")),
 		chatSSE(choice(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "a", "function": map[string]string{"name": "pad__write", "arguments": "{\"input\":null}"}}}}, "tool_calls")),
 	}
 	for i, stream := range streams {

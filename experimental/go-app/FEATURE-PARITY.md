@@ -36,6 +36,23 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### DSML 工具文本转换（2026-10-06；新 HEAD CI 待验收）
+
+新增逐请求X-MOMO-Tool-Text:dsml-v1，仅converted Chat，明确改变text→call信任解释；
+默认关闭、不按model自动启用、不继承history、不forward。native/default/Claude/
+Gemini/compact/Chat入口拒绝策略，不改原字节。plain/ASCII/fullwidth tags，分片前缀
+有界hold避免markup泄露/UTF8切断；普通DSML缩写不再误拒。保留前后文本顺序、唯一
+声明/alias/namespace/named/allowed/none门禁、128calls/params/1MiB retained。
+参数默认/string=true为原始文本不trim/entity decode/猜JS；string=false严格JSON
+保大整数，拒duplicate/depth>64。不同于Node string-only trim，差异明确。
+custom仅input:string；mixed structured/DSML、search、畸形/重复/未知/歧义、length/
+缺finish+[DONE]拒绝，无completed/incomplete/history；Stop/写失败不重发。
+替换原DSML缩写一律拒绝逻辑；parser/split/真实TCP SSE+JSON/失败无history/配对续聊策略不继承/
+Stop/短写门禁回归。统一新增6同mock/resources：三tag形式×SSE/JSON，exactupstream
+独立断言；Go不泄分片markup，Node自动合成丢namespace且泄前缀。计划305统一TCP，
+native新增2实际API→TLSmock SSE/JSON探针计划119。非实际Codex DSML/真实模型/工具
+执行/完整三方性能排名；Node unchanged，Muse excluded，新提交产物需重新验收。
+
 ### Codex 接入界面补齐（2026-10-06；新 HEAD CI 待验收）
 
 Skill/MCP页明确复制同CLI的gpt-5.5保守目录，无Key、无上游查询、无模型选择；

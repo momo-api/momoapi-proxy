@@ -62,6 +62,7 @@ type routeRequest struct {
 }
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
+	dsml              bool
 	prepareCompletion func(string, []any) (func(), error)
 	stream            bool
 	choice, selected  string

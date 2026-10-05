@@ -399,6 +399,13 @@ def check_boundaries(session):
     session.request("POST", "/internal/attachments", 400, body=b"{}")  # default passthrough mode
     session.request("GET", "/internal/attachments", 405)  # no listing
     session.request("POST", "/v1/responses", 400, body=b'{"model":"gpt-5.6-sol"}', headers={"X-MOMO-Attachments":"inline"})
+    for policy in ("dsml-v1", "unknown"):
+        session.request("POST", "/v1/responses", 400,
+                        body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}',
+                        headers={"X-MOMO-Tool-Text": policy})  # passthrough cannot opt into text synthesis
+    session.request("POST", "/v1/chat/completions", 400,
+                    body=b'{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}',
+                    headers={"X-MOMO-Tool-Text": "dsml-v1"})
     session.request("GET", "/v1/responses/compact", 405)
     session.request("POST", "/v1/responses/compact", 501,
                     body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}')

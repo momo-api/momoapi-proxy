@@ -30,11 +30,30 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 	finished := false
 	terminal := "complete"
 	var usage map[string]any
-	dsmlTail := ""
+	text := dsmlText{enabled: plan.dsml}
 	return readRoutedSSE(ctx, body, func(_ string, raw string) (bool, error) {
 		if raw == "[DONE]" {
 			if !finished {
 				return false, errRouted
+			}
+			if text.found {
+				if len(calls) != 0 || terminal != "complete" || plan.loading != nil {
+					return false, errRouted
+				}
+				events, parseErr := parseDSML(text.body.String(), plan)
+				if parseErr != nil {
+					return false, parseErr
+				}
+				for _, event := range events {
+					if ctx.Err() != nil {
+						return false, ctx.Err()
+					}
+					if err = e.accept(event, plan); err != nil {
+						return false, err
+					}
+				}
+			} else if err = e.accept(streamEvent{kind: "text", text: text.pending}, plan); err != nil {
+				return false, err
 			}
 			seenIDs := map[string]bool{}
 			for _, index := range order {
@@ -115,17 +134,11 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			if retained > maxRoutedRetained {
 				return false, errRouted
 			}
-			// DSML/tool-text synthesis not migrated: never report it as a successful tool.
-			joined := dsmlTail + s
-			if strings.Contains(joined, "DSML") {
-				return false, errRouted
+			visible, textErr := text.push(s)
+			if textErr != nil {
+				return false, textErr
 			}
-			if len(joined) > 3 {
-				dsmlTail = joined[len(joined)-3:]
-			} else {
-				dsmlTail = joined
-			}
-			if err := e.accept(streamEvent{kind: "text", text: s}, plan); err != nil {
+			if err := e.accept(streamEvent{kind: "text", text: visible}, plan); err != nil {
 				return false, err
 			}
 		}
@@ -178,7 +191,7 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			if *choice.FinishReason == "length" {
 				terminal = "incomplete"
 			}
-			if *choice.FinishReason == "tool_calls" && len(calls) == 0 {
+			if *choice.FinishReason == "tool_calls" && len(calls) == 0 && !text.found {
 				return false, errRouted
 			}
 		}

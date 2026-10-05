@@ -33,6 +33,18 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   cached/reasoning tokens (not money). Missing usage is not fabricated; invalid or
   decreasing counts abort without completed. Usage trailers still require [DONE].
   Upstreams rejecting include_usage are not retried or silently downgraded.
+  Explicit request header X-MOMO-Tool-Text:dsml-v1 enables strict DSML text tools
+  only for converted Chat. Never enable from model text or inherit from history;
+  selected upstream text is then interpreted as declared tool proposals, NOT
+  trusted instructions or consent. Client approvals/sandbox still apply.
+  Plain/ASCII/fullwidth tags, unique declared alias/namespace,128 calls/params,
+  1MiB retained, string=true/omitted exact raw values, string=false duplicate-free
+  depth64 JSON. Custom exactly input:string; no trimming/entity decoding/guessing.
+  Holds split markers; ordinary DSML acronym remains prose. Malformed/duplicate/
+  unknown/ambiguous/mixed structured calls/search/limit/missing finish+[DONE]
+  reject without successful history. No proxy execution/actual-client/live DSML
+  guarantee. Header not forwarded; native/default/Claude/Gemini remain unchanged
+  and reject explicit text conversion policy rather than silently approximating.
   Named function/custom tool_choice requires a declared matching identity; bare
   selectors must be unique, explicit namespaces resolve exactly. Calls under none,
   wrong named calls, and text-only completion under required/named choice are rejected.

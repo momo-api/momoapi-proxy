@@ -225,6 +225,11 @@ func (c *Core) Handler() http.Handler {
 	})
 }
 func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
+	dsml, validDSML := dsmlRequested(r)
+	if !validDSML {
+		http.Error(w, "invalid tool text policy", 400)
+		return
+	}
 	clientPolicy, validClientPolicy := clientPolicyRequested(r)
 	if !validClientPolicy {
 		http.Error(w, "invalid client policy", 400)
@@ -329,6 +334,16 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		stream = string(payload["stream"]) == "true"
 		protocol := resolveProtocol(model)
 		converted := r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" && (protocol == "chat" || protocol == "claude" || protocol == "gemini")
+		if dsml && (!converted || protocol != "chat") {
+			http.Error(w, "tool text policy requires converted Chat routing", 400)
+			return
+		}
+		if dsml {
+			if _, err := decodeVideoObject(body); err != nil {
+				http.Error(w, "invalid tool text request", 400)
+				return
+			}
+		}
 		if clientPolicy && converted {
 			body, err = normalizeTextToolsClient(body)
 			if err != nil {
@@ -410,6 +425,14 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if routed != nil {
+				if dsml {
+					if routed.loading != nil {
+						http.Error(w, "tool text policy cannot combine client search", 400)
+						return
+					}
+					routed.dsml = true
+					w.Header().Set("X-MOMO-Tool-Text", "dsml-v1")
+				}
 				if clientPolicy {
 					w.Header().Set("X-MOMO-Client-Policy", "text-tools-v1")
 				}

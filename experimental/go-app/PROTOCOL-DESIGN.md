@@ -212,3 +212,22 @@ prepare只读取未过期anchor与合并副本；有效anchor的LRU次序也须�
 本地write/flush才touch。不仅是新增history，失败请求不能影响未来淘汰顺序。
 touch不改变bytes/绝对expiry、不复活在途缺失anchor；store:false成功也可touch旧
 anchor但不创建新history。继续保留generation/取消检查与自然过期回收。
+
+### DSML 只作为显式有界输入适配器
+
+2026-10-06增量：逐请求X-MOMO-Tool-Text:dsml-v1仅converted Chat启用，不按模型
+猜测、不继承history、不把策略头转发给上游。默认/原生透传仍保持字节；其他
+协议明确拒绝此策略。text→tool proposal改变信任解释，不能等同客户端执行授权。
+
+流中只hold可能的tag前缀，发现marker后保留有界余量；finish+[DONE]验证后再整体
+解析为既有text/tool事件。所有调用先验证声明身份、namespace alias、允许集合
+和named/none门禁；后续畸形调用不能使先前工具提案泄露。参数默认原始string，
+不trim/XML实体解码/猜JS；只有string=false才做duplicate-free/depth64 JSON解析，
+保留大整数。custom仍仅input:string，不新增执行器、语法约束或签名续接。
+
+扫描仅线性推进到下一个marker/parameter结束符，避免为每个调用反复搜索整个
+1MiB剩余正文；128calls/params、tag/name限制及取消检查保持本地资源边界。
+mixed structured+DSML、client-search、length或缺终端拒绝，失败不完成/不写历史。
+6个同mock/resources夹具分别断言三tag形式的SSE/JSON与Node现有namespace丢失、
+分片markup泄露差异；305统一TCP与119原生TLS探针不代表真实模型/工具执行或
+三方稳定性排名。当前Prism任务启动失败，无本轮专家审查回执。
