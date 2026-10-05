@@ -59,6 +59,12 @@ Windows/WSL Linux fullblackbox及官方MCP SDK image/video通过；真实Codex0.
 fresh流程测试relay明确设置false再交gateway（不是原生Codex设置功能声明），
 两次Chat wire均false、原identity回传、配对结果/第二轮通过，无用户global审批变化。
 
+86ec9fe首轮Windows PR111948078242停机回归失败，本地独立200遍复现。
+夹具chatSSE实际CRLF，但用LF删除[DONE]未删除，导致Stop前偶尔成功terminal；
+修正精确CRLF并新增fixture无terminal自检，保持readError/无completed/单send/
+零anchor原门禁，读取history用Core锁。修正后独立200遍通过；失败回执保留，
+不重跑失败HEAD，不延长timeout、不改变生产Stop或协议实现，新提交重新三平台验收。
+
 上一HEAD2a41f03首轮18checks/6nativejobs329+137/Unix各5race/3OS新产物/真实
 Codex只读long-MCP已验收，不替代本增量：https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6001419219
 

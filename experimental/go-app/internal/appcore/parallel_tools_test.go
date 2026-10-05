@@ -349,6 +349,11 @@ func TestParallelToolsPreflightNativeAndWriteFailures(t *testing.T) {
 	}
 }
 func TestParallelToolsStopNoAnchorOrRetry(t *testing.T) {
+	full := parallelStream("gpt-5.5", 1, "function", false)
+	stalled := strings.TrimSuffix(full, "data: [DONE]\r\n\r\n")
+	if stalled == full || strings.Contains(stalled, "[DONE]") {
+		t.Fatal("stalled fixture must contain no upstream terminal")
+	}
 	entered := make(chan struct{})
 	var mu sync.Mutex
 	sends := 0
@@ -357,7 +362,7 @@ func TestParallelToolsStopNoAnchorOrRetry(t *testing.T) {
 		sends++
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, strings.TrimSuffix(parallelStream("gpt-5.5", 1, "function", false), "data: [DONE]\n\n"))
+		io.WriteString(w, stalled)
 		w.(http.Flusher).Flush()
 		close(entered)
 		<-r.Context().Done()
@@ -380,8 +385,10 @@ func TestParallelToolsStopNoAnchorOrRetry(t *testing.T) {
 	data, err := io.ReadAll(resp.Body)
 	mu.Lock()
 	defer mu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err == nil || strings.Contains(string(data), "response.completed") || sends != 1 || len(c.history.entries) != 0 {
-		t.Fatal("Stop completed/retried/retained anchor")
+		t.Fatalf("Stop completed/retried/retained anchor: status=%d readError=%v completed=%v sends=%d anchors=%d", resp.StatusCode, err, strings.Contains(string(data), "response.completed"), sends, len(c.history.entries))
 	}
 }
 
