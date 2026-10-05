@@ -29,6 +29,13 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
 - Default is exact same-protocol passthrough. Explicit Mode=momo-routing enables
   Responses-entry model classification and partial Chat/Claude/Gemini translation:
   text, function/custom text tools (including exec/apply_patch), namespace restoration.
+  Original namespace/name each ASCII [A-Za-z0-9_-], 1..64 bytes. Flattened names
+  over64 use deterministic 64-byte mta_ full-identity SHA-256 aliases; reserved
+  client spellings re-encode to avoid shadowing. Declaration/selector/history/
+  client-loaded/DSML mapping is shared; canonical output retains original identity.
+  Short nonreserved wires unchanged; functions normalizes top-level. Unknown
+  reserved aliases, ambiguous bare names and flattened collisions reject; no
+  truncation/guessing/Unicode or overlong component support/native byte changes.
   Custom format omitted or exactly {type:"text"}: strict input:string shim,
   preserving raw whitespace/CRLF/Unicode. No trim, shell/JS guessing, patch repair
   or proxy-side execution. cmd/patch/raw aliases, extra fields and nonstrings fail.

@@ -266,12 +266,8 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		if !wireName(name) {
 			return errRouted
 		}
-		wire := name
-		if ns != "" && ns != "functions" {
-			wire = ns + "__" + name
-		} else {
-			ns = ""
-		}
+		ns = toolNamespace(ns)
+		wire := routedToolWire(ns, name)
 		if !wireName(wire) {
 			return errRouted
 		}
@@ -408,12 +404,8 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 					return nil, errRouted
 				}
 			}
-			wire := name
-			if ns != "" && ns != "functions" {
-				wire = ns + "__" + name
-			} else {
-				ns = ""
-			}
+			ns = toolNamespace(ns)
+			wire := routedToolWire(ns, name)
 			tool, exists := plan.tools[wire]
 			if tool.name != name || tool.namespace != ns || loading != nil && !loading.active[wire] {
 				return nil, errRouted
@@ -626,12 +618,8 @@ func resolveSelector(selector map[string]any, tools map[string]chatTool) (chatTo
 		if !ok || s != "" && !wireName(s) {
 			return chatTool{}, errRouted
 		}
-		wire := name
-		if s != "" && s != "functions" {
-			wire = s + "__" + name
-		} else {
-			s = ""
-		}
+		s = toolNamespace(s)
+		wire := routedToolWire(s, name)
 		tool, found = tools[wire]
 		found = found && tool.name == name && tool.namespace == s
 	} else {
@@ -676,6 +664,11 @@ func (p *chatPlan) restoreTool(name string) (chatTool, bool) {
 	// disambiguate an upstream that stripped a same-named tool's namespace.
 	if tool, ok := p.tools[name]; ok && tool.name != name {
 		return tool, true
+	}
+	// Reserved wires are only valid as exact registered aliases. Do not let an
+	// upstream bare-name fallback impersonate a re-encoded client identity.
+	if reservedToolAlias(name) {
+		return chatTool{}, false
 	}
 	var match chatTool
 	found := false

@@ -36,6 +36,27 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 长 namespace 工具别名（2026-10-06；新HEAD三平台待验收）
+
+原namespace/name各ASCII [A-Za-z0-9_-] 1..64，拼接超64不再拒绝；mta_64字节
+wire含16字符提示与完整SHA256结构身份digest。保留域真实名称再次编码防shadow；
+同映射用于声明/选择器/历史/client loading/DSML，canonical输出原身份不变。
+保留短wire、functions顶层规范化、未知alias/裸名歧义/flatten碰撞拒绝；不猜或
+截断身份，不增加Unicode/超长组件/native-byte变更。先红再绿，三协议function/
+custom、named/allowed、full/suffix replay、顺序/保留域/边界/loading/DSML回归。
+本地统一329组通过（新增12），native137物理TLSmock通过（新增12声明及配对回放）。
+Node130字节wire与Go64字节wire分别断言，同输入/资源/结果，permissive mock非
+真实上游接受证明。首轮共享用例断言揭示Node Chat丢namespace；保留失败，仅独立
+断言缺失后规范化该字段；custom raw与Node exec wrapper也分别断言后仅规范化input，
+不隐藏差异。Prism启动错误，无专家审查批准回执。三协议间12组long alias
+cross-provider full/suffix/默认门禁/source immutable回归5遍通过。普通Windows
+blackbox+官方MCP SDK image/video、WSL普通nogui黑盒通过；真实Codex0.156五种
+fresh-profile只读mock流程与额外long-MCP流程各exit0/exact2requests/配对结果通过。
+没有真实Key/付费推理/本机installer或用户global审批变化，新HEAD仍需三平台验收。
+
+上一HEAD489b0f已18首轮checks/6nativejobs317+125/Unix各5race/3OS产物全验收，
+非本增量替代：https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6000892971
+
 ### 显式本地脱敏诊断（2026-10-06；本地通过，新HEAD三平台待验收）
 
 设置页明确读取本Core runtime/运行状态/资源limits/aggregate retained与live计数。

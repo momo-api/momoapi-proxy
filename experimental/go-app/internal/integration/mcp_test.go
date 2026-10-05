@@ -8,6 +8,9 @@ import (
 )
 
 func TestMCPAndSkillExports(t *testing.T) {
+	if !strings.Contains(Capabilities()["tool_aliases"].(string), "64-byte mta_") || !strings.Contains(Skill, "reserved") || !strings.Contains(Skill, "canonical output retains original identity") {
+		t.Fatal("stale long tool identity contract")
+	}
 	if Capabilities()["video_mcp"] == nil || !strings.Contains(Skill, "mcp-videos-connect") || !strings.Contains(Skill, "NOT verified human consent") || strings.Contains(Capabilities()["video_generation"].(string), "No video MCP yet") {
 		t.Fatal("stale explicit video MCP boundary")
 	}

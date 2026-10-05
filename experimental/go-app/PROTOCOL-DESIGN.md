@@ -50,6 +50,17 @@ Magpie 的转换核心清楚，不代表整个 gateway 很小：它还包含订�
 
 ## MOMO 建议：有界小 IR + 明确能力契约
 
+### 2026-10-06：有界工具身份别名
+
+借鉴 OpenCodex structured-identity registry 思路，不复制其全套 fallback 策略。
+原 namespace/name 各 ASCII 1..64；flatten 超64 或命中保留域时，用 mta_ +
+16字符提示 + 完整SHA256(JSON[规范namespace,name]) base64url，合计64字符。
+声明、历史、named/allowed selector、client loading 与 DSML 使用同一确定函数，
+无声明顺序/跨账户缓存。真实保留域名称再次编码，未知保留wire不作裸名恢复；
+原短wire/歧义拒绝/flatten碰撞fail-closed保留，canonical输出仍为原namespace/name。
+不是Unicode/超长组件/任意身份支持，也不改默认或native字节。
+上表“超过64拒绝”为历史基线；本增量解除合法组件拼接过长的限制。
+
 ### 2026-10-06：跨转换模型的完整canonical回放
 
 X-MOMO-History:replay-v1明确解除同模型anchor门禁，只对本Core里已经由严格转换

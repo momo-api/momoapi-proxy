@@ -378,6 +378,17 @@ remain, no retries. Synthetic same-mock and native probe acceptance, not live
 model/actual Codex DSML proof. Only successful full output is completed;
 bounded converted history is described below.
 
+Converted tools retain original namespace/name in canonical Responses output
+and history. Each identity component still requires ASCII [A-Za-z0-9_-], 1..64
+bytes. A flattened namespace__name exceeding 64 bytes uses a deterministic
+64-byte mta_ wire (16-byte name hint plus full SHA-256 structured-identity digest).
+Declarations, named/allowed selectors, history, client-loaded tools and DSML
+share this mapping. Short nonreserved wires are unchanged; functions means
+top-level. Real identities matching the reserved synthetic pattern are encoded
+again, never allowed to shadow aliases. Unknown reserved wires, ambiguous bare
+names and flattened collisions fail closed. No reverse guessing/truncation,
+Unicode/overlong component support, native-byte changes or provider guarantee.
+
 Converted requests accept max_output_tokens as an integer 1..1048576. Chat maps it
 to max_completion_tokens, Claude to max_tokens (default 12240 when omitted), and
 Gemini to generationConfig.maxOutputTokens. Provider/model-specific lower limits
