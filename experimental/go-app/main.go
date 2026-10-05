@@ -23,6 +23,17 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 4 && os.Args[1] == "codex-text-tools-catalog" && os.Args[2] == "--model" {
+		catalog, err := integration.CodexTextToolsCatalog(os.Args[3])
+		if err != nil {
+			return err
+		}
+		n, err := io.WriteString(os.Stdout, catalog)
+		if err != nil || n != len(catalog) {
+			return errors.New("client catalog output unavailable")
+		}
+		return nil // no GUI/listener/credential input/env or client file access
+	}
 	if len(os.Args) == 4 && os.Args[1] == "mcp-videos-connect" && os.Args[2] == "--endpoint" {
 		return runConnectedVideoMCP(os.Args[3])
 	}
@@ -46,7 +57,7 @@ func run() error {
 		return desktop()
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("MOMO preview: desktop (no args) | --version | mcp (read-only stdio) | mcp-videos (opt-in private config line) | mcp-videos-connect --endpoint <local-origin> (explicit local key environment) | mcp-images (opt-in private config line then stdio) | mcp-images-connect --endpoint <local-origin> (explicit local key environment) | serve (upstream config on private stdin)")
+		return errors.New("MOMO preview: desktop (no args) | --version | codex-text-tools-catalog --model gpt-5.5 (manual secret-free client contract) | mcp (read-only stdio) | mcp-videos (opt-in private config line) | mcp-videos-connect --endpoint <local-origin> (explicit local key environment) | mcp-images (opt-in private config line then stdio) | mcp-images-connect --endpoint <local-origin> (explicit local key environment) | serve (upstream config on private stdin)")
 	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
 	_ = os.Stdin.Close()

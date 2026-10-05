@@ -392,8 +392,28 @@ def check_boundaries(session):
     session.request("POST", "/v1/responses", 400, body=b"{}")
 
 
+def check_codex_catalog(binary):
+    result = subprocess.run([str(binary), 'codex-text-tools-catalog', '--model', 'gpt-5.5'],
+                            input=b'not-private-config', capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b'', 'client catalog export')
+    catalog = json.loads(result.stdout)
+    require(list(catalog) == ['models'] and len(catalog['models']) == 1, 'catalog scope')
+    model = catalog['models'][0]
+    require(model['slug'] == 'gpt-5.5' and model['apply_patch_tool_type'] is None
+            and model['supports_search_tool'] is False and model['support_verbosity'] is False
+            and model['node_repl_disabled'] is True and model['supported_reasoning_levels'] == []
+            and model['default_reasoning_summary'] == 'auto', 'catalog conservative contract')
+    require('context_window' not in model and 'api_key' not in model
+            and 'not live model' in model['description'], 'catalog unsupported claims')
+    for args in (['codex-text-tools-catalog'], ['codex-text-tools-catalog', '--model', 'gpt-5.6-sol'],
+                 ['codex-text-tools-catalog', '--model', 'gpt-5.5', 'extra']):
+        result = subprocess.run([str(binary), *args], input=b'', capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b'', 'invalid catalog mode')
+
+
 def check_runtime(binary):
     binary = Path(binary).resolve(strict=True)
+    check_codex_catalog(binary)
     check_invalid_inputs(binary)
     check_readonly_mcp(binary)
     check_image_mcp(binary)

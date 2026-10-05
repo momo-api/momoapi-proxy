@@ -589,6 +589,33 @@ Both modes share core/proxy/auth/admission implementation.
 
 ### Manual Codex provider export
 
+For an explicitly chosen `gpt-5.5`, the normal binary can print a secret-free
+conservative client catalog without reading stdin/credentials or starting a
+listener: `momo-preview codex-text-tools-catalog --model gpt-5.5`. Redirect to a
+NEW file of your choice outside the repository, review it, then manually set
+top-level `model_catalog_json` to its absolute path in user-level Codex config
+(before TOML tables), together with the explicit text-tools-v1 provider header
+below. MOMO does not select the model, write/overwrite client files, discover
+accounts, query upstream or install Codex. Only this reviewed slug is supported.
+
+This is a CLIENT contract, not upstream capability/availability/context/pricing
+evidence. It disables grammar apply_patch/search/verbosity/native REPL options;
+tools are instead advertised by the client with its supported function interface.
+No guessed context window or reasoning effort defaults, no borrowed remote
+instructions or approval/sandbox overrides. Minimal original instructions retain
+client sandbox/approvals. Summary auto is best-effort and is omitted under the
+explicit policy (not a summary-output claim); Codex0.156 otherwise sends empty
+reasoning:{} when disabling the parameter. Skill/MCP execution remains client
+managed. Full catalog replacement affects that client profile: back up and review
+existing config; do not merge this into an unrelated native provider/profile.
+
+Actual Codex0.156 Linux `gpt-5.5` with this normal-binary-exported catalog and
+explicit policy completed read-only fixed printf/paired output/second turn with
+two synthetic mock calls and no global skill-path text in the captured requests.
+Not real inference, patch/search/MCP execution, native signed continuation or
+full client compatibility. Existing unmodified gpt-5.5 metadata remains rejected
+when it requests unsupported grammar/search/verbosity; no server-side stripping.
+
 Optional request-scoped converted-client policy: explicitly uncomment
 `http_headers = { "X-MOMO-Client-Policy" = "text-tools-v1" }` in the exported
 provider table ONLY after accepting this lossy text/function/custom-text subset.

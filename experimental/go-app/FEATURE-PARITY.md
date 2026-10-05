@@ -36,6 +36,24 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 保守 Codex 客户端目录导出（2026-10-05；当前增量 CI 待验收）
+
+普通binary新增codex-text-tools-catalog --model gpt-5.5：只输出无Key JSON，无
+stdin/env/账号/客户端文件读写/监听/模型查询。仅explicit已审阅slug，不替用户选
+模型。原创最小clientinstructions，不拷贝远端prompt/账户metadata，disable
+grammar/search/verbosity/REPL，不声称实际modelavailability、上下文、价格或effort
+能力。byte10000是clienttooloutput截断策略而非modelcontext；不改approval/sandbox。
+用户手动保存新文件并审阅user-level model_catalog_json + 显式text-tools-v1，
+未修改任何已有客户端文件。summaryauto仅best-effort无summaryoutput契约：
+Codex0.156禁用parameter会发reasoning:{}，现有strictpolicy继续拒绝，未放松门禁。
+
+真实官方CLI0.156Linux读取普通prod binary实际导出的目录，gpt-5.5 model字符串
+保留，read-only fixedprintf→配对output→第二turn exit0/两次syntheticmock。
+未检测到请求中的全局skill路径不等于证明scan完全关闭。非真实推理、patch/search/
+MCP execution/跨设备/fullagent；未改原Node/default/native字节，无grammardrop。
+未改目录时真实gpt5.5专用metadata仍拒绝。回归限制slug/无假能力/普通发行CLI合法
+与非法参数，三平台新HEAD需要重新验证299/117与产物，不能用553f3ac绿灯替代。
+
 ### 显式客户端 text-tools-v1 策略（2026-10-05；当前增量 CI 待验收）
 
 逐请求 X-MOMO-Client-Policy:text-tools-v1，仅转换 POST /v1/responses。默认不启用，

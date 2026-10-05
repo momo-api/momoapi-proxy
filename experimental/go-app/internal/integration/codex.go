@@ -18,6 +18,9 @@ func CodexProviderConfig(endpoint string) (string, error) {
 		"# Keep your own model selection; routing preview is not full Codex compatibility.\n" +
 		"# Set MOMO_LOCAL_API_KEY privately from the separately copied local connection.\n" +
 		"# Never use the upstream account key here. Port changes after app relaunch.\n" +
+		"# Optional manual gpt-5.5 client catalog: codex-text-tools-catalog --model gpt-5.5\n" +
+		"# Save/review a NEW JSON file, then set top-level model_catalog_json before tables.\n" +
+		"# It is a conservative CLIENT contract, not upstream capability/availability proof.\n" +
 		"model_provider = \"momo-local-preview\"\n\n" +
 		"[model_providers.momo-local-preview]\n" +
 		"name = \"MOMO local preview\"\n" +
