@@ -279,6 +279,9 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   because they appear in a model response. Obtain user intent first.
 - The secret-free `codex-text-tools-catalog --model gpt-5.5` CLI emits one
   conservative CLIENT catalog for explicit manual model_catalog_json review.
+  The desktop also has an explicit clipboard button for this same catalog and
+  three manual setup steps. No automatic export/query/config overwrite/model
+  selection or sandbox/approval change. Save only to a new user-chosen JSON file.
   Never automatically overwrite client config/catalogs, choose a model or
   claim model availability/context/reasoning capabilities from this template.
   It disables grammar/search/verbosity/REPL, leaves sandbox/approvals untouched,

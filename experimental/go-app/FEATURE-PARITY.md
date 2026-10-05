@@ -36,6 +36,19 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### Codex 接入界面补齐（2026-10-06；新 HEAD CI 待验收）
+
+Skill/MCP页明确复制同CLI的gpt-5.5保守目录，无Key、无上游查询、无模型选择；
+三步卡片：保存新JSON→审阅顶层model_catalog_json→合并Provider/手动有损策略。
+不覆盖文件、不改sandbox/approval、不从剪贴板读凭据；停止/未配置仍可离线复制。
+原生clipboard callback失败返回固定503，不声称成功；仅native asset固定POST、
+exactOrigin+per-page capability、emptybody、mutationlock；内容不返回WebView，
+authenticated/unauthenticated TCP均不可用。回归覆盖拒绝/失败/无启动导出/忙态、
+DOM真实按钮调用和payload结构检查；上游mock数量保持117，不增加模型请求。
+合成Edge light/dark/620px截图和无横向溢出验证，不冒充普通安装程序或物理剪贴板
+验收。修正界面旧“视频界面未迁移”和客户端“未迁移”标签，仍标部分/手动支持。
+原Node、默认透传、299统一TCP不改；新提交三平台和产物需重新验收。
+
 ### 真实 Codex Skill/MCP 与媒体元数据修复（2026-10-06；新 HEAD CI 待验收）
 
 真实官方CLI0.156.0 Linux、fresh HOME/CODEX_HOME、read-only、zero retries，

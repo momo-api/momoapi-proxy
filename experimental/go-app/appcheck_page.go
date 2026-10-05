@@ -15,7 +15,7 @@ async function check(){
  await button('nav-routing');ensure(!byId('view-routing').hidden&&byId('view-overview').hidden&&byId('nav-routing').getAttribute('aria-selected')==='true');ensure(byId('compact-state').textContent==='默认关闭 · 501'&&!byId('routing-details').open);byId('routing-details').querySelector('summary').click();ensure(byId('routing-details').open);byId('routing-details').querySelector('summary').click();ensure(!byId('routing-details').open);
  await button('nav-settings');ensure(!byId('view-settings').hidden&&byId('view-routing').hidden);
  await button('nav-overview');ensure(!byId('view-overview').hidden);
- await button('nav-integrations');ensure(!byId('view-integrations').hidden);await button('skill-copy');await button('mcp-copy');await button('codex-copy');
+ await button('nav-integrations');ensure(!byId('view-integrations').hidden);await button('skill-copy');await button('mcp-copy');await button('codex-copy');await button('codex-catalog-copy');
  await button('nav-overview');ensure(byId('quota-refresh').disabled);
  byId('endpoint').value='https://mock.example';byId('key').value='synthetic-appcheck-only';byId('remember').checked=true;
  await button('configure');ensure(byId('key').value===''&&lastState.Configured);
@@ -38,5 +38,5 @@ async function check(){
  byId('routing-mode').checked=true;byId('key').value='synthetic-appcheck-only';await button('configure');ensure(lastState.Mode==='momo-routing');
  await button('start');ensure(byId('routing-mode').disabled&&byId('routing-state').textContent.includes('已启用')&&byId('compact-state').textContent==='部分支持 · 手动回放');await request('check-routing');await request('check-stall');await button('stop');await request('check-done');
 }
-check().catch(()=>{const allowed=['initial','nav-videos','video-catalog','video-generate','video-task','nav-routing','nav-settings','nav-overview','nav-integrations','nav-images','image-catalog','image-generate','image-task','skill-copy','mcp-copy','image-mcp-copy','video-mcp-copy','codex-copy','configure','load','quota-refresh','models-refresh','start','check-proxy','check-native-stop','check-routing','check-stall','stop','check-done'];const step=window.momoProbeStep?.();fetch('/check-page-failure?step='+(allowed.includes(step)?step:'unknown'),{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}}).catch(()=>{});});
+check().catch(()=>{const allowed=['initial','nav-videos','video-catalog','video-generate','video-task','nav-routing','nav-settings','nav-overview','nav-integrations','nav-images','image-catalog','image-generate','image-task','skill-copy','mcp-copy','image-mcp-copy','video-mcp-copy','codex-copy','codex-catalog-copy','configure','load','quota-refresh','models-refresh','start','check-proxy','check-native-stop','check-routing','check-stall','stop','check-done'];const step=window.momoProbeStep?.();fetch('/check-page-failure?step='+(allowed.includes(step)?step:'unknown'),{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}}).catch(()=>{});});
 `

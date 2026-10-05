@@ -590,6 +590,17 @@ Both modes share core/proxy/auth/admission implementation.
 
 ### Manual Codex provider export
 
+The Skill/MCP page now also explicitly copies the same secret-free gpt-5.5
+client catalog as the CLI. Three numbered setup cards explain saving a NEW JSON
+file, reviewing top-level model_catalog_json, and manually combining the provider
+with the lossy policy. This offline copy works while stopped/unconfigured, makes
+no upstream query and never writes a file, selects a client model or changes
+approvals. The native clipboard callback is required; failures remain failures.
+Its native-only bridge requires exact origin and per-page capability, empty POST
+body and the shared mutation lock. No catalog/key contents are returned to the
+WebView; it is not an authenticated local TCP API. Clipboard remains shared OS
+state; the copied catalog has no credentials.
+
 Actual official Codex0.156.0 Linux also completed default read-only MCP
 gateway_capabilities, explicit image_capabilities/video_capabilities connectors,
 and an explicitly invoked copy of the actual embedded Skill in a fresh synthetic

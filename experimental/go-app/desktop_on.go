@@ -87,6 +87,13 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 			}
 			return nil
 		},
+		CopyCodexCatalog: func() error {
+			text, err := integration.CodexTextToolsCatalog("gpt-5.5")
+			if err != nil || !app.Clipboard.SetText(text) {
+				return errors.New("client catalog clipboard unavailable")
+			}
+			return nil
+		},
 		CopyImageMCPConfig: func() error {
 			exe, err := os.Executable()
 			if err != nil {

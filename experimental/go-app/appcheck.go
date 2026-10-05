@@ -86,6 +86,7 @@ func check() error {
 			origin = "http://wails.localhost"
 		}
 		var upstreamRequests, savedProfiles, loadedProfiles, quotaQueries, skillCopies, mcpCopies, codexCopies, imageMCPCopies, videoMCPCopies atomic.Int32
+		var codexCatalogCopies atomic.Int32
 		var stalled []net.Conn
 		var savedProfile appcore.Config
 		closeMock := appcore.InstallProbeMock(core, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +217,7 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 117 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || imageMCPCopies.Load() != 1 || videoMCPCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 117 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || codexCatalogCopies.Load() != 1 || imageMCPCopies.Load() != 1 || videoMCPCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
@@ -253,11 +254,20 @@ func check() error {
 				codexCopies.Add(1)
 				return nil
 			},
+			CopyCodexCatalog: func() error {
+				text, err := integration.CodexTextToolsCatalog("gpt-5.5")
+				var catalog struct{ Models []struct{ Slug string } }
+				if err != nil || json.Unmarshal([]byte(text), &catalog) != nil || len(catalog.Models) != 1 || catalog.Models[0].Slug != "gpt-5.5" || strings.Contains(text, "synthetic-appcheck-only") || strings.Contains(text, "api_key") {
+					return errors.New("client catalog probe failed")
+				}
+				codexCatalogCopies.Add(1)
+				return nil
+			},
 		})
 		close(appReady)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/app/videos/catalog", "/app/videos/generate", "/app/videos/task", "/app/images/catalog", "/app/images/generate", "/app/images/task", "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/skill", "/app/mcp-config", "/app/image-mcp-config", "/app/video-mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
+			case "/app/videos/catalog", "/app/videos/generate", "/app/videos/task", "/app/images/catalog", "/app/images/generate", "/app/images/task", "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/codex-catalog", "/app/skill", "/app/mcp-config", "/app/image-mcp-config", "/app/video-mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
 				latestStep.Store(r.URL.Path)
 			}
 			if r.URL.Path == "/" {
@@ -284,7 +294,7 @@ func check() error {
 				if r.URL.Path == "/check-page-failure" {
 					step := r.URL.Query().Get("step")
 					known := false
-					for _, candidate := range []string{"initial", "nav-videos", "video-catalog", "video-generate", "video-task", "nav-images", "image-catalog", "image-generate", "image-task", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "image-mcp-copy", "video-mcp-copy", "codex-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
+					for _, candidate := range []string{"initial", "nav-videos", "video-catalog", "video-generate", "video-task", "nav-images", "image-catalog", "image-generate", "image-task", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "image-mcp-copy", "video-mcp-copy", "codex-copy", "codex-catalog-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
 						if step == candidate {
 							known = true
 						}
