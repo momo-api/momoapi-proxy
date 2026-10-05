@@ -511,6 +511,41 @@ reproduced on WSL Linux, then poller-owned pipe duplicates fixed that reproducti
 new tests retain idle input and add blocked output signal cancellation. No timeout
 increase/retry/skip; current three-platform CI must verify the new commit.
 
+#### Direct client connection to the running gateway
+
+Start the desktop gateway, then explicitly click **复制图片 MCP 配置** in
+Integrations. It exports generic mcpServers JSON with the executable and
+`mcp-images-connect --endpoint http://127.0.0.1:<currentPort>`, never a Key or env
+value. The MCP client must privately inherit **MOMO_LOCAL_API_KEY** from the
+separately copied local connection (64 lowercase hex session token, NOT upstream
+account Key). Do not put its value in shared config/argv/tool arguments/logs or
+shell history. No private first-line prelude in this mode; no env/account/vault
+discovery besides this explicit local-session env. Default read-only export stays
+unchanged. JSON mcpServers isn't universal client config syntax; merge manually
+into the trusted client's supported stdio format, no auto client-file edits.
+This is the existing full local gateway token, NOT a media-only scoped credential.
+Trust the client process inheriting it; it can call other authenticated local APIs.
+Environment inheritance/private copying is not secure-memory erasure or isolation.
+
+Connector creates no Core/listener and doesn't start/stop/configure the gateway.
+Exact IPv4 loopback origin and fixed media routes, no DNS/proxy/redirect/retry;
+keepalive disabled so reused-connection retries cannot resubmit. No initialize/
+tools-list queries; only explicit tool calls send. TCP300s Core generation budget
+with305s connector context (catalog20s/task125s), bounded16MiB JSON, fixed redacted
+errors/token reflection rejection. MCP shared catalog/tasks belong to gateway
+session (GUI/API can also query); Stop/configure clears them, restart requires new
+endpoint/key. EOF observed between sequential calls, signal cancels local I/O/
+HTTP; upstream may already submit/bill, not remote cancellation. Connector exits
+without replay and leaves gateway running. Unix requires pipe/socket stdio.
+
+Official @modelcontextprotocol/sdk1.32.1 StdioClientTransport tested initialize/
+negotiation/list/call/resources/close with separate ordinary binary and synthetic
+local gateway; no real accounts/public calls/models. Native mock adds3physical
+TCP→TLS catalog/generate/task calls (105 total). Normal binary blackbox covers
+separate processes/env/exact endpoint/key/Core gates/EOF/idle+blocked-output signal
+and gateway survival. Not actual Codex end-to-end, existing Node plugin parity or
+live generation acceptance.
+
 Overview's explicit quota button uses only the deliberately configured key/origin
 for `GET /api/usage/token/`. No startup/polling fetch, cookie or account discovery;
 same pinned public HTTPS transport/redirect policy, 8s deadline, 8KiB response limit,

@@ -18,14 +18,15 @@ import (
 
 // Native actions return no credentials to the WebView. Nil disables the action.
 type Actions struct {
-	SaveProfile     func(appcore.Config) error
-	LoadProfile     func() (appcore.Config, error)
-	ForgetProfile   func() error
-	CopyConnection  func() error
-	Quit            func()
-	CopySkill       func() error
-	CopyMCPConfig   func() error
-	CopyCodexConfig func() error
+	SaveProfile        func(appcore.Config) error
+	LoadProfile        func() (appcore.Config, error)
+	ForgetProfile      func() error
+	CopyConnection     func() error
+	Quit               func()
+	CopySkill          func() error
+	CopyMCPConfig      func() error
+	CopyImageMCPConfig func() error
+	CopyCodexConfig    func() error
 	// WebKit custom schemes can omit Origin or serialize it as null. Require a
 	// separate unguessable page capability; never accept either by itself.
 	AllowOpaqueOrigin bool
@@ -72,11 +73,11 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			return
 		}
 		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/task"
-		if imageAction && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
+		if (imageAction || r.URL.Path == "/app/image-mcp-config") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
 			return
 		}
-		if !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" {
+		if !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" && r.URL.Path != "/app/image-mcp-config" {
 			http.NotFound(w, r)
 			return
 		}
@@ -221,6 +222,16 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			if r.URL.Path == "/app/mcp-config" && (actions.CopyMCPConfig == nil || actions.CopyMCPConfig() != nil) {
 				http.Error(w, "MCP config clipboard unavailable", 503)
 				return
+			}
+			if r.URL.Path == "/app/image-mcp-config" {
+				if !core.State().Running {
+					http.Error(w, "start gateway before image MCP export", 409)
+					return
+				}
+				if actions.CopyImageMCPConfig == nil || actions.CopyImageMCPConfig() != nil {
+					http.Error(w, "image MCP config clipboard unavailable", 503)
+					return
+				}
 			}
 			if r.URL.Path == "/app/codex-config" && (actions.CopyCodexConfig == nil || actions.CopyCodexConfig() != nil) {
 				http.Error(w, "client config clipboard unavailable", 503)

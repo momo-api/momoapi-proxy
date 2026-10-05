@@ -89,7 +89,7 @@ def check_image_mcp(binary):
             all(r["result"]["isError"] for r in replies[3:]), "image MCP confirmation/catalog/task/DNS gates")
 
 
-def check_image_mcp_idle_signal(binary, blocked_output=False):
+def check_image_mcp_idle_signal(binary, blocked_output=False, connection=None):
     options = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
                else {"start_new_session": True})
     if os.name == "nt":
@@ -97,11 +97,16 @@ def check_image_mcp_idle_signal(binary, blocked_output=False):
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startup.wShowWindow = 0
         options["startupinfo"] = startup
-    process = subprocess.Popen([str(binary), "mcp-images"], stdin=subprocess.PIPE,
+    command = [str(binary), "mcp-images"]
+    if connection:
+        endpoint, token = connection
+        command = [str(binary), "mcp-images-connect", "--endpoint", endpoint]
+        options["env"] = {**os.environ, "MOMO_LOCAL_API_KEY": token}
+    process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **options)
     try:
-        process.stdin.write(json.dumps(CONFIG).encode() + b"\n" +
-                            b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n')
+        prelude = b"" if connection else json.dumps(CONFIG).encode() + b"\n"
+        process.stdin.write(prelude + b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n')
         process.stdin.flush()
         reply = queue.Queue(maxsize=1)
         reader = threading.Thread(target=lambda: reply.put(process.stdout.readline()), daemon=True)
@@ -125,6 +130,43 @@ def check_image_mcp_idle_signal(binary, blocked_output=False):
             process.wait(timeout=8)
         for pipe in (process.stdin, process.stdout, process.stderr):
             pipe.close()
+
+
+def check_connected_image_mcp(binary, session):
+    endpoint = "http://127.0.0.1:" + str(session.port)
+    messages = [
+        {"jsonrpc": "2.0", "id": 9007199254740993, "method": "initialize"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "image_capabilities", "arguments": {}}},
+        {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "image_generate", "arguments": {"confirmed": True, "request": {"model": "momoapi-gpt-image-2-5-flare", "prompt": "synthetic"}}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "image_task", "arguments": {"task_id": "foreign"}}},
+    ]
+    data = ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
+    command = [str(binary), "mcp-images-connect", "--endpoint", endpoint]
+    env = {**os.environ, "MOMO_LOCAL_API_KEY": session.token}
+    result = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b"", "connected MCP startup/EOF")
+    require(session.token.encode() not in result.stdout and SYNTHETIC_KEY.encode() not in result.stdout,
+            "connected MCP secret reflection")
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require([r["id"] for r in replies] == [m["id"] for m in messages], "connected MCP ID order")
+    require(all(r["result"]["isError"] for r in replies[2:]), "connected MCP real Core catalog/task/DNS gates")
+    for key in ("", SYNTHETIC_KEY):
+        result = subprocess.run(command, input=data, env={**env, "MOMO_LOCAL_API_KEY": key},
+                                capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b"", "connected MCP missing/invalid key")
+        require(not key or key.encode() not in result.stderr, "connected MCP key error reflection")
+    result = subprocess.run(command, input=data, env={**env, "MOMO_LOCAL_API_KEY": "0" * 64},
+                            capture_output=True, timeout=8)
+    replies = [json.loads(line) for line in result.stdout.splitlines()]
+    require(result.returncode == 0 and all(r["result"]["isError"] for r in replies[2:]), "connected MCP wrong session key")
+    for url in ("http://localhost:1", "https://127.0.0.1:1", endpoint + "/", "http://example.com:1"):
+        result = subprocess.run([str(binary), "mcp-images-connect", "--endpoint", url], input=data,
+                                env=env, capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b"", "connected MCP remote/invalid endpoint")
+    check_image_mcp_idle_signal(binary, connection=(endpoint, session.token))
+    check_image_mcp_idle_signal(binary, blocked_output=True, connection=(endpoint, session.token))
+    session.request("GET", "/v1/models", 401, authenticated=False)  # connector never stops gateway
 
 
 class Session:
@@ -296,6 +338,7 @@ def check_runtime(binary):
         for _ in range(2):
             sessions.append(Session(binary))
         first, second = sessions
+        check_connected_image_mcp(binary, first)
         require(first.port != second.port and first.token != second.token, "multiple instances share session")
         second.request("GET", "/v1/models", 401, headers={"Authorization": "Bearer " + first.token})
         check_boundaries(first)
@@ -310,7 +353,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":

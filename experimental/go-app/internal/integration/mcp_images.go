@@ -83,7 +83,7 @@ func imageMCPResult(ctx context.Context, method string, params json.RawMessage, 
 		}{
 			{"image_capabilities", "Explicit upstream catalog query. No generation or automatic selection.", map[string]any{}, nil, true},
 			{"image_generate", "May bill. Query catalog first, choose model explicitly. confirmed:true is client affirmation, NOT verified human consent. One send, no retry. URLs/Base64 returned as text, not downloaded. Failed delivery/Stop cannot undo submission.", map[string]any{"confirmed": map[string]any{"type": "boolean", "const": true}, "request": map[string]any{"type": "object", "properties": map[string]any{"model": map[string]any{"type": "string"}, "prompt": map[string]any{"type": "string", "maxLength": 32000}}, "required": []string{"model", "prompt"}}}, []string{"confirmed", "request"}, false},
-			{"image_task", "One manual query for an ID returned by this process. Absolute 30min TTL; no auto-poll, import or remote cancellation.", map[string]any{"task_id": map[string]any{"type": "string", "maxLength": 256}}, []string{"task_id"}, true},
+			{"image_task", "One manual query for an ID returned by the current gateway session. Absolute 30min TTL; no auto-poll, import or remote cancellation.", map[string]any{"task_id": map[string]any{"type": "string", "maxLength": 256}}, []string{"task_id"}, true},
 		} {
 			schema := map[string]any{"type": "object", "properties": spec.properties, "additionalProperties": false}
 			if spec.required != nil {

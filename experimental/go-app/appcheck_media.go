@@ -26,11 +26,15 @@ func probeMediaUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"models":[{"id":"momoapi-gpt-image-2-5-flare","modality":"image","available":true,"operations":["generate"],"parameters":{}}]}`)
 	case "/v1/images/generations":
-		if r.Method != "POST" || (string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"media-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"gui-inline-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"mcp-probe"}`) {
+		if r.Method != "POST" || (string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"media-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"gui-inline-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"mcp-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"mcp-connected-probe"}`) {
 			w.WriteHeader(400)
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(data), "mcp-connected-probe") {
+			io.WriteString(w, `{"task_id":"task_mcp_connected","status":"submitted"}`)
+			return true
+		}
 		if strings.Contains(string(data), "mcp-probe") {
 			io.WriteString(w, `{"task_id":"task_mcp_probe","status":"submitted"}`)
 			return true
@@ -40,12 +44,16 @@ func probeMediaUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 			return true
 		}
 		io.WriteString(w, `{"data":[{"status":"submitted","task_id":"task_media_probe"}]}`)
-	case "/v1/tasks/task_media_probe", "/v1/tasks/task_mcp_probe":
+	case "/v1/tasks/task_media_probe", "/v1/tasks/task_mcp_probe", "/v1/tasks/task_mcp_connected":
 		if r.Method != "GET" || len(data) != 0 {
 			w.WriteHeader(400)
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "task_mcp_connected") {
+			io.WriteString(w, `{"task_id":"task_mcp_connected","status":"completed","url":"https://images.example/connected.png"}`)
+			return true
+		}
 		if strings.HasSuffix(r.URL.Path, "task_mcp_probe") {
 			io.WriteString(w, `{"task_id":"task_mcp_probe","status":"completed","url":"https://images.example/mcp.png"}`)
 			return true
@@ -94,6 +102,16 @@ func probeMediaRequests(core *appcore.Core) error {
 	var output bytes.Buffer
 	if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &output, core.DesktopImages) != nil || strings.Count(output.String(), "\n") != 3 || strings.Contains(output.String(), `"isError":true`) || !strings.Contains(output.String(), "https://images.example/mcp.png") || strings.Contains(output.String(), "synthetic-appcheck-only") || strings.Contains(output.String(), key) {
 		return errors.New("image MCP native probe")
+	}
+	dispatch, closeClient, err := integration.NewLocalImageDispatch(strings.TrimSuffix(base, "/v1"), key)
+	if err != nil {
+		return errors.New("image MCP connector probe")
+	}
+	defer closeClient()
+	input = strings.ReplaceAll(strings.ReplaceAll(input, "mcp-probe", "mcp-connected-probe"), "task_mcp_probe", "task_mcp_connected")
+	output.Reset()
+	if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &output, dispatch) != nil || strings.Count(output.String(), "\n") != 3 || strings.Contains(output.String(), `"isError":true`) || !strings.Contains(output.String(), "https://images.example/connected.png") || strings.Contains(output.String(), key) {
+		return errors.New("image MCP connected TCP probe")
 	}
 	return nil
 }

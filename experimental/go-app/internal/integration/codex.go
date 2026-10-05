@@ -2,20 +2,12 @@ package integration
 
 import (
 	"errors"
-	"net"
-	"net/url"
-	"strconv"
 )
 
 // CodexProviderConfig exports no token/model/account/config-file contents.
 // It does not inspect or modify any client profile or select a user's model.
 func CodexProviderConfig(endpoint string) (string, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil || u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" {
-		return "", errors.New("local endpoint unavailable")
-	}
-	port, err := strconv.Atoi(u.Port())
-	if err != nil || port < 1 || port > 65535 || endpoint != "http://"+net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) {
+	if ValidateLocalEndpoint(endpoint) != nil {
 		return "", errors.New("local endpoint unavailable")
 	}
 	// Documented user-level Codex provider fields. No inline bearer token and

@@ -20,7 +20,7 @@
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成子集：显式目录/选模型/单次请求，URL/Base64/本进程任务手动查询；图片工作台与独立 opt-in 图片 MCP；不自动下载/保存/轮询，编辑、视频、完整媒体插件未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
-| Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有配置首行后目录/生成/任务工具，需可信 launcher，不是现有插件直接兼容；视频/完整媒体/通用第三方管理未迁移 |
+| Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有首行，另有可复制无Key配置的 mcp-images-connect（客户端显式local session env）接入当前gateway；非现有插件直接兼容，视频/完整媒体/通用第三方管理未迁移 |
 | 额度展示 | 兼容 NewAPI `GET /api/usage/token/`（非账户钱包） | 明确点击查询 Key 额度、已用/授予/到期/查询时间；不猜汇率，不获取账户登录态 |
 | 跨平台 / 跨设备 | Go `desktop_on.go`、`packaging/` | Windows X64 / macOS ARM64 / Linux X64 预览；仅 127.0.0.1，不支持跨设备共享 |
 
@@ -438,6 +438,21 @@ Prism有效静态审查指出按原始长度逐前缀加delta使合法空白输�
 非PDF、附件UI选择器、媒体插件或真实客户端/真实模型完整兼容声明。
 
 ## Magpie 借鉴边界
+
+### 图片 MCP 客户端直接接入增量（2026-10-05）
+
+独立 mcp-images-connect --endpoint <当前loopback>，仅显式MOMO_LOCAL_API_KEY环境变量
+（本地64hex session token，不是上游Key）；无私有配置首行/账号/凭据库/Node自动读取。
+桌面单独复制无Key generic mcpServers配置；默认只读导出不变，无客户端文件修改/安装。
+固定127.0.0.1原点/图片路径，无DNS/系统proxy/redirect/keepalive retry；初始化/list
+零查询，调用一次TCP→现有Core。目录/任务共享gateway会话，connector EOF/signal不
+停gateway，Stop/configure清空，重启端口/Key重新接入。confirmed仅客户端声明非真人
+授权，可能已提交/计费不回滚。结果16MiB text JSON、固定错误/token反射拒绝。
+原生探针新增3实际TCP→TLS mock请求共105，原275统一黑盒不变。官方MCP SDK1.32.1
+实测单独普通binary+synthetic本地gateway初始化/协商/list/call/resource/close；不是
+真实Codex/已有插件/生产推理证明。普通binary另验缺失/非法/错Key、非法地址、共享
+Core门禁、EOF/idle+blocked stdout signal退出且gateway存活。三平台CI需当前HEAD
+重新验收，edit/video/完整客户端/跨设备/正式签名仍未完成。
 
 ### 独立显式图片 MCP 增量（2026-10-05）
 

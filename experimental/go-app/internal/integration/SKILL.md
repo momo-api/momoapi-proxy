@@ -209,6 +209,24 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   cancellation (Core deadlines still bound it); signal cancels local operations,
   not remote jobs. No history/quota/key export, edit/video/disk assets or general
   third-party MCP runner.
+- Desktop can separately copy credential-free image MCP config using
+  `mcp-images-connect --endpoint http://127.0.0.1:<currentPort>`. This standard
+  stdio mode needs no private config prelude: client MUST explicitly inherit
+  `MOMO_LOCAL_API_KEY` (64 lowercase hex, copied privately from LOCAL connection,
+  never upstream Key). Do not put its value in shared MCP config/tool arguments/
+  argv/logs; this mode reads only that intentional environment value, no account/
+  vault/Node discovery. Normal copied read-only MCP config is unchanged.
+  It is the full local API session credential, NOT media-only scope; trust the
+  inheriting client (other authenticated local APIs accessible). No memory erasure
+  or client isolation claim.
+  Start gateway first; re-export endpoint and reset local key after app relaunch.
+  No auto initialize/list catalog query; exact loopback only, no system proxy,
+  redirects/keepalive retries or alternative gateway. Tasks/catalog shared with
+  GUI/API in current gateway Core; connector EOF/signal does not stop gateway.
+  Stop/configure clears session. User must authorize possibly billed generation;
+  confirmed:true isn't independent human consent. No edit/video/downloads/client
+  file edits/auto install. Official MCP SDK mock interop isn't real Codex/plugin
+  workflow or live-model acceptance.
 - Token quota is not the account wallet or a currency amount. The desktop
   queries it only on explicit refresh and does not export it to this MCP.
 - Existing Node MOMO Image/Video plugins still require their Node proxy;

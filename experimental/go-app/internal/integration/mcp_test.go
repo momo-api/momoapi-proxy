@@ -11,6 +11,9 @@ func TestMCPAndSkillExports(t *testing.T) {
 	if !strings.Contains(Capabilities()["image_mcp"].(string), "NOT verified human consent") || !strings.Contains(Skill, "mcp-images") || !strings.Contains(Skill, "trusted launcher") {
 		t.Fatal("stale opt-in MCP boundaries")
 	}
+	if !strings.Contains(Capabilities()["image_mcp"].(string), "mcp-images-connect") || !strings.Contains(Skill, "no private config prelude") || !strings.Contains(Skill, "MOMO_LOCAL_API_KEY") {
+		t.Fatal("stale connected MCP exports")
+	}
 	if !strings.Contains(Skill, "Desktop image workbench") || !strings.Contains(Capabilities()["image_generation"].(string), "Desktop workbench") {
 		t.Fatal("stale image workbench export")
 	}
