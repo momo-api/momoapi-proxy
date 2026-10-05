@@ -54,7 +54,7 @@
 </div>
 <details id="routing-details" class="contract-details"><summary>详细模型规则与不支持的能力</summary><div class="contract-content">
 <div><h2>部分路由，不是完整兼容</h2><p>只有明确启用后，Responses 入口对普通模型走 Chat 转换；mimo-* / *-sol / *-luna / *-responses 原样走 Responses。claude-* 走 Messages 文本/工具子集（不含 thinking/签名），gemini-* 走文本/工具子集（不含 thinking/签名/媒体）；Muse 转换不在计划内，实验选路仍明确拒绝。</p></div>
-<div><h2>失败时明确拒绝</h2><p>转换暂不接受媒体、原生压缩、exec/apply_patch 或未知参数；会明确拒绝，不静默丢弃。独立 compact 仅接受明确的文本工具历史，没有加密 envelope，不自动触发；不支持原生 Responses compact、待完成工具或供应商状态。默认模式返回 501。</p></div>
+<div><h2>失败时明确拒绝</h2><p>exec/apply_patch 支持纯文本 custom 输入，原文保留、由客户端执行；转换不支持 grammar 约束，返回 unsupported_tool_format，不猜 shell 或改写 JS。媒体、原生压缩或未知参数明确拒绝。独立 compact 仅接受明确的文本工具历史，没有加密 envelope，不自动触发；不支持原生 Responses compact、待完成工具或供应商状态。默认模式返回 501。</p></div>
 </div></details></section>
 <section id="view-integrations" role="tabpanel" aria-labelledby="nav-integrations" hidden>
 <div class="grid"><section class="card"><div class="card-head"><h2>内置 Skill</h2><span class="badge" data-tone="good">可导出</span></div><div class="card-body settings-copy"><p>一份无密钥的 SKILL.md，描述本地代理接口、工具字段透传和真实支持边界。由客户端加载，不是在代理内执行脚本。</p><div class="row-buttons"><button id="skill-copy" class="primary">复制 SKILL.md</button></div><p class="hint" style="margin-top:15px">你决定保存在哪个客户端的技能目录；不会自动扫描或改写其他应用配置。</p></div></section>

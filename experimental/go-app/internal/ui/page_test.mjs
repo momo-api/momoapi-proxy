@@ -61,6 +61,8 @@ assert.ok(source.includes('返回 output 需客户端手动重放；cmp_ 不是�
 assert.ok(source.includes('没有加密 envelope，不自动触发'));
 assert.equal((source.match(/class="protocol-card"/g)||[]).length,5);
 assert.ok(source.includes('allowed_tools'));
+assert.ok(source.includes('exec/apply_patch 支持纯文本 custom 输入'));
+assert.ok(source.includes('unsupported_tool_format，不猜 shell 或改写 JS'));
 assert.ok(source.includes('转换只发送本轮可调用声明，不承诺原生缓存优化'));
 assert.ok(source.includes('<details id="routing-details" class="contract-details">'));
 assert.ok(source.includes('详细模型规则与不支持的能力'));

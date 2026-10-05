@@ -194,3 +194,14 @@ allowed_tools加入共享IR的本轮wire身份集合，不另建协议转换器�
 以优化缓存；明确披露，不宣称无损provider等价。共享encoder对每个新调用再次
 校验允许集；required文本不complete，合法incomplete不会造工具，也不能越界。
 144同mock精确断言Node发送全声明/忽略限制的差异。默认/原生完全透传不改。
+
+### 客户端custom text，不猜执行语义
+
+解除exec/apply_patch名字黑名单，身份以声明kind为准；只有custom可携带format，
+缺省或严格type:text才走原有input:string shim。共享encoder解除JSON转义后直接
+恢复custom input，保留空白/换行/Unicode，不根据名字或内容猜JS/shell/patch。
+不新增执行器；工具动作仍归客户端。严格wrapper验证不接受cmd/patch/raw别名。
+grammar需要生成阶段约束，Chat/Claude/unsigned Gemini shim无法保证，因此发送前
+拒绝unsupported_tool_format，不能以prompt描述代替约束。原生Responses保持原字节，
+由上游实施约束（本轮未做真实上游验证）。162组统一黑盒与新增history/choice/
+write-boundary回归承载该text子集，不称完整Codex grammar兼容。Prism仅静态设计。

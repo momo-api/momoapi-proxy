@@ -17,7 +17,13 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Skill/MCP tools execute in the agent client, not inside the API proxy.
 - Default is exact same-protocol passthrough. Explicit Mode=momo-routing enables
   Responses-entry model classification and partial Chat/Claude/Gemini translation:
-  text, function/custom tools (excluding exec/apply_patch), namespace restoration.
+  text, function/custom text tools (including exec/apply_patch), namespace restoration.
+  Custom format omitted or exactly {type:"text"}: strict input:string shim,
+  preserving raw whitespace/CRLF/Unicode. No trim, shell/JS guessing, patch repair
+  or proxy-side execution. cmd/patch/raw aliases, extra fields and nonstrings fail.
+  Grammar/unknown formats on converted routes return 400 unsupported_tool_format
+  before upstream send; native/default format bytes remain unchanged. This is not
+  grammar support or full Codex exec compatibility. Redefine tools each turn.
   stream:true emits SSE; false/omitted stream emits one final completed/incomplete Responses JSON,
   using the same typed encoder and a single upstream SSE request. Conversion
   failures before JSON writing return redacted 502; partial writes abort HTTP.

@@ -7,6 +7,7 @@ import (
 )
 
 var errRouted = errors.New("unsupported routed payload")
+var errUnsupportedToolFormat = errors.New("unsupported_tool_format")
 
 // Same model classifier as Node's Responses entry; classification is not proof
 // that the corresponding protocol adapter exists. Unsupported adapters fail.
@@ -178,11 +179,22 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		if kind != "function" && kind != "custom" {
 			return errRouted
 		}
-		if !only(t, "type", "name", "description", "parameters") {
+		if !only(t, "type", "name", "description", "parameters", "format") {
 			return errRouted
 		}
+		if format, present := t["format"]; present {
+			if kind != "custom" {
+				return errRouted
+			}
+			f := obj(format)
+			// Function shims cannot constrain generation with Responses grammars.
+			// Reject rather than drop/describe a grammar and claim it was enforced.
+			if f == nil || !only(f, "type") || f["type"] != "text" {
+				return errUnsupportedToolFormat
+			}
+		}
 		name := str(t["name"])
-		if !wireName(name) || name == "exec" || name == "apply_patch" {
+		if !wireName(name) {
 			return errRouted
 		}
 		wire := name

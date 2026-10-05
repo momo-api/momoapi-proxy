@@ -90,6 +90,10 @@ func check() error {
 				w.WriteHeader(400)
 				return
 			}
+			if probeCustomUpstream(w, r, data) {
+				upstreamRequests.Add(1)
+				return
+			}
 			if probeAllowedUpstream(w, r, data) {
 				upstreamRequests.Add(1)
 				return
@@ -178,11 +182,11 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 37 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 49 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/history/output limits/incomplete/local compact + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/history/output limits/incomplete/local compact + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
@@ -223,7 +227,9 @@ func check() error {
 					proxied.Store(true)
 					fmt.Println("PROXY: exact Responses/Chat SSE + models over authenticated local TCP and TLS mock")
 				} else if r.URL.Path == "/check-routing" {
-					if core.State().Mode != "momo-routing" || probeRoutedRequest(core) != nil {
+					routeErr := probeRoutedRequest(core)
+					if core.State().Mode != "momo-routing" || routeErr != nil {
+						fmt.Println("FAIL routing probe:", routeErr)
 						http.Error(w, "route check failed", 500)
 						return
 					}

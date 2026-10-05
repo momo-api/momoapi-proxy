@@ -304,7 +304,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				var routeErr error
 				routed, routeErr = buildChatPlan(body)
 				if routeErr != nil {
-					http.Error(w, "unsupported routed Responses payload", 400)
+					routedPayloadError(w, routeErr)
 					return
 				}
 				body = routed.body
@@ -314,7 +314,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				var routeErr error
 				routed, routeErr = buildClaudePlan(body)
 				if routeErr != nil {
-					http.Error(w, "unsupported routed Responses payload", 400)
+					routedPayloadError(w, routeErr)
 					return
 				}
 				body = routed.body
@@ -325,7 +325,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				var routeErr error
 				routed, routeErr = buildGeminiPlan(body)
 				if routeErr != nil {
-					http.Error(w, "unsupported routed Responses payload", 400)
+					routedPayloadError(w, routeErr)
 					return
 				}
 				body = routed.body

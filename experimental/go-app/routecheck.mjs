@@ -39,6 +39,11 @@ const geminiSingle=name=>gf([{functionCall:{id:'call_one',name:'pad__'+name,args
 const claudeOrdered=cs+ct(0,'before-tool')+ctool(1,'call_read','pad__read','{}')+ct(2,'after-tool')+ctool(3,'call_write','pad__write',JSON.stringify({input:"text('hi')"}))+ce('tool_use');
 const geminiOrdered=gf([{text:'before-tool'},{functionCall:{id:'call_read',name:'pad__read',args:{}}},{text:'after-tool'},{functionCall:{id:'call_write',name:'pad__write',args:{input:"text('hi')"}}}])+gf(null,'STOP',gu);
 const allowedChoice=(mode,name,kind='function')=>({type:'allowed_tools',mode,tools:[{type:kind,name,namespace:'pad'}]});
+const clientToolSamples=[
+ {name:'exec',raw:' \r\nawait tools.exec_command({cmd: '+String.fromCharCode(96)+'echo $'+'{x} $(whoami) 中文🙂'+String.fromCharCode(96)+'});\r\n ',node:'await tools.exec_command({cmd: '+String.fromCharCode(96)+'echo $'+'{x} $(whoami) 中文🙂'+String.fromCharCode(96)+'});'},
+ {name:'exec',raw:'git status',node:'await tools.exec_command({ cmd: "git status" });'},
+ {name:'apply_patch',raw:'*** Begin Patch\r\n*** Add File: example.txt\r\n+中文🙂\r\n*** End Patch\r\n',node:'*** Begin Patch\r\n*** Add File: example.txt\r\n+中文🙂\r\n*** End Patch'},
+];
 const cases=[
  {name:'text Unicode fragmented',stream:text,payload},
  {name:'function custom namespace fragmented',stream:calls,payload},
@@ -101,6 +106,11 @@ const cases=[
   {name:f.label+' allowed required rejects text '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:allowedChoice('required','read')},path:f.path,stream:f.text,json:!stream,allowed:'pad__read',reject:true},
   {name:f.label+' allowed rejects excluded call '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:allowedChoice('auto','read')},path:f.path,stream:f.single('write'),json:!stream,allowed:'pad__read',reject:true},
  ])),
+ ...[{label:'Chat',payload,path:undefined},{label:'Claude',payload:cp,path:'/v1/messages'},{label:'Gemini',payload:gp,path:gpath}].flatMap(f=>[true,false].flatMap(stream=>clientToolSamples.map(sample=>({
+  name:f.label+' custom client '+sample.name+' '+sample.raw.length+' '+(stream?'SSE':'JSON'),
+  payload:{...f.payload,stream,tools:[{type:'namespace',name:'pad',tools:[{type:'custom',name:sample.name,format:{type:'text'}}]}]},path:f.path,json:!stream,clientTool:sample,
+  stream:!f.path?sse([chunk({tool_calls:[{index:0,id:'call_client',type:'function',function:{name:'pad__'+sample.name,arguments:JSON.stringify({input:sample.raw})}}]},'tool_calls')]):f.path==='/v1/messages'?cs+ctool(0,'call_client','pad__'+sample.name,JSON.stringify({input:sample.raw}))+ce('tool_use'):gf([{functionCall:{id:'call_client',name:'pad__'+sample.name,args:{input:sample.raw}}}])+gf(null,'STOP',gu),
+ })))),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -190,6 +200,18 @@ for(const fixture of cases){
      console.log('DIFFERENCE Go Gemini history preserves declared tool alias; Node uses bare name');
     }
    }
+   if(fixture.clientTool){
+    const nt=!fixture.path?n.tools[0].function:fixture.path==='/v1/messages'?n.tools[0]:n.tools[0].functionDeclarations[0];
+    const gt=!fixture.path?g.tools[0].function:fixture.path==='/v1/messages'?g.tools[0]:g.tools[0].functionDeclarations[0];
+    assert.equal(gt.name,'pad__'+fixture.clientTool.name);assert.equal(nt.name,gt.name);
+    const schema=!fixture.path?'parameters':fixture.path==='/v1/messages'?'input_schema':'parameters';
+    assert.deepEqual(gt[schema],{type:'object',properties:{input:{type:'string',description:'Raw freeform input for this tool.'}},required:['input'],additionalProperties:false});
+    const inputDescription=fixture.clientTool.name==='exec'?'JavaScript source for unified exec. Use await tools.exec_command(...) for shell commands and text(...) to return textual output; do not provide a bare shell command.':'Raw tool input. For apply_patch, begin exactly with '+String.fromCharCode(96)+'*** Begin Patch'+String.fromCharCode(96)+' (no trailing '+String.fromCharCode(96)+'***'+String.fromCharCode(96)+'), then use its standard patch envelope.';
+    assert.deepEqual(nt[schema],{type:'object',properties:{input:{type:'string',description:inputDescription}},required:['input'],additionalProperties:false});
+    assert.equal(nt.description,'Codex custom tool\n'+inputDescription);assert.equal(gt.description,'Codex custom tool\nRaw freeform input for this tool.');
+    g.tools=n.tools; // Shim descriptions/schema differ; asserted separately above.
+    console.log('DIFFERENCE client custom declarations use Go strict input shim; Node legacy tool-specific descriptions/schema');
+   }
    assert.deepEqual(g,n,fixture.name+' upstream request mismatch');
   }
   for(let i=0;i<count;i++){
@@ -202,6 +224,12 @@ for(const fixture of cases){
     if(fixture.json){assert.equal(g.json,true);assert.equal(n.json,undefined);assert.equal(n.events[0].type,'response.created');console.log('DIFFERENCE Go returns completed JSON for false/omitted stream; legacy Node returns SSE')}
     // Legacy Node drops explicit namespaces on Chat calls; Go restores them.
     const normalized=g.output.map(({namespace,...item})=>item);
+    if(fixture.clientTool){
+     assert.equal(g.output.length,1);assert.equal(g.output[0].type,'custom_tool_call');assert.equal(g.output[0].namespace,'pad');assert.equal(g.output[0].name,fixture.clientTool.name);assert.equal(g.output[0].input,fixture.clientTool.raw);
+     assert.equal(n.output.length,1);assert.equal(n.output[0].input,fixture.clientTool.node);assert.equal(n.output[0].namespace,undefined);
+     normalized[0].input=n.output[0].input;
+     console.log('DIFFERENCE Go preserves client custom raw string exactly; Node trims/guesses executable input; neither proxy executes it');
+    }
     if(fixture.singleNamespace&&(fixture.payload.tool_choice.type==='custom'||fixture.allowedCustom)){assert.equal(g.output[0].input,'hi');assert.equal(n.output[0].input,'await tools.exec_command({ cmd: "hi" });');normalized[0].input=n.output[0].input;console.log('DIFFERENCE Go preserves custom raw input; Node synthesizes an exec_command wrapper for this fixture')}
     assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
     if(fixture.ordered){assert.equal(g.output.length,4);assert.equal(g.output[0].content[0].text,'before-tool');assert.equal(g.output[2].content[0].text,'after-tool');for(const j of [1,3]){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}}

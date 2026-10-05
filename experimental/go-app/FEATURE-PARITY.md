@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与显式本地 `/v1/responses/compact`；无无版本别名，无原生 compact |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
-| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/部分 custom 子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
+| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/媒体/grammar 等拒绝，不宣称完整兼容 |
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
@@ -171,6 +171,21 @@ required已完成文本拒绝，合法incomplete可无工具但不能越过集�
 真实WebView新增6次允许集SSE/JSON，物理上游合计37（含1次列表检查），无工具执行。
 官方结构参考（不是MOMO真实上游验收）：
 https://developers.openai.com/api/reference/resources/responses/methods/create
+
+### 客户端 custom text 增量（2026-10-05）
+
+统一黑盒扩为162组，三协议SSE/JSON各增加exec JS原文、裸git status、apply_patch
+CRLF夹具。接受custom的format缺省或严格{text}；严格input:string shim只解除JSON
+转义，不trim、不猜JS/shell、不包exec_command、不修补patch、不执行工具。恢复
+原name/namespace/kind/call_id；历史回放保留原文。cmd/patch/raw别名、多字段、非字符串
+wrapper拒绝，不完成/存history。单测另覆空串、显式/缺省text、三协议history续接、
+none/named/allowed身份门禁、incomplete及JSON短写/flush/期限不提交history。
+转换grammar/未知format发送前400 unsupported_tool_format，绝不静默丢弃约束；
+function禁止format，custom禁止parameters。默认/原生Responses仍精确透传grammar，
+但透传不证明上游约束已验证。实际Codex的grammar exec仍不是完整兼容。
+Node不改；同mock已独立断言Node会trim/猜shell包装，Go精确保留差异；不是等价。
+真实WebView探针新增12次exec/apply_patch SSE/JSON请求，总上游49（含列表检查）；
+不含3次零上游localcompact。Prism本轮183.469s仅静态建议，不是执行或批准。
 
 ## Magpie 借鉴边界
 

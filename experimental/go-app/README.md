@@ -32,9 +32,18 @@ The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
 It rejects unknown payload fields/options, media, foreign/expired history references, opaque/provider compaction,
-built-in tools, exec/apply_patch normalization, malformed/unmatched
+built-in tools, grammar on converted paths, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
+Custom text tools include exec/apply_patch with omitted format or exactly
+format:{type:"text"}. The strict single input:string function shim preserves the
+decoded raw string, including whitespace/CRLF/Unicode; no trim, shell/JavaScript
+guessing, exec_command wrapping, patch repair or tool execution. cmd/patch/raw
+aliases, extra wrapper fields and nonstring input fail without completion/history.
+Converted grammar/unknown formats return 400 unsupported_tool_format before any
+upstream send; native Responses/default passthrough preserve format bytes unchanged
+and delegate enforcement to the upstream. This is not grammar support or full
+Codex exec compatibility. Custom format is forbidden on function declarations.
 An upstream bare output name is rejected when top-level and namespaced declarations
 share that name, even if a top-level wire match exists. Exact namespace aliases remain
 resolvable; never guess which tool a namespace-stripping upstream intended.
@@ -369,7 +378,7 @@ WebView state/configure+remember/change-config/load/start; native client uses au
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
-(37 physical upstream requests in total, including an explicit model-catalog check, six allowed-tools SSE/JSON requests and three-protocol history continuation
+(49 physical upstream requests in total, including an explicit model-catalog check, six allowed-tools and twelve raw exec/apply_patch SSE/JSON requests and three-protocol history continuation
 and output-limit SSE/JSON incomplete terminals),
 then three local checkpoint JSON requests (zero additional upstream calls),
 checking exact namespace/unknown-field/Unicode bytes; native client
