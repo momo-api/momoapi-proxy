@@ -287,11 +287,11 @@ func TestToolImageDeclarationIdentityAndParallelGate(t *testing.T) {
 				t.Error("wire alias accepted as different declared identity", model, inverse)
 			}
 		}
-		for _, value := range []any{false, true, "false", nil, []any{}, map[string]any{}} {
+		for _, value := range []any{"false", nil, []any{}, map[string]any{}} {
 			p := toolImagePayload(model, policy, []any{imagePart(inline)}, false)
 			p["parallel_tool_calls"] = value
-			if _, err := toolImageBuild(p); !errors.Is(err, errUnsupportedToolLoading) {
-				t.Error("parallel contract outside explicit loading not rejected", model, value, err)
+			if _, err := toolImageBuild(p); !errors.Is(err, errRouted) {
+				t.Error("invalid parallel boolean not rejected", model, value, err)
 			}
 		}
 	}

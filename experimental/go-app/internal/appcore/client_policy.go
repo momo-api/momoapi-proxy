@@ -69,13 +69,12 @@ func normalizeTextToolsClient(data []byte) ([]byte, error) {
 			delete(p, "reasoning")
 		}
 	}
-	// true permits multiple calls (the existing converter behavior); false
-	// requires a distinct single-call contract and is not approximated here.
+	// Preserve the explicit tool-count constraint for strict IR/protocol mapping.
+	// Never erase false or assume anchors authorize parallel calls this turn.
 	if v, present := p["parallel_tool_calls"]; present {
-		if v != true {
+		if _, ok := v.(bool); !ok {
 			return nil, errRouted
 		}
-		delete(p, "parallel_tool_calls")
 	}
 	if v, present := p["tools"]; present {
 		tools, ok := v.([]any)

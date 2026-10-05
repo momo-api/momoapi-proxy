@@ -8,6 +8,9 @@ import (
 )
 
 func TestMCPAndSkillExports(t *testing.T) {
+	if !strings.Contains(Capabilities()["parallel_tools"].(string), "false at most one NEW") || !strings.Contains(Skill, "never inherit constraint") || !strings.Contains(Skill, "SSE may expose first proposal") {
+		t.Fatal("stale explicit parallel tool contract")
+	}
 	if !strings.Contains(Capabilities()["tool_aliases"].(string), "64-byte mta_") || !strings.Contains(Skill, "reserved") || !strings.Contains(Skill, "canonical output retains original identity") {
 		t.Fatal("stale long tool identity contract")
 	}

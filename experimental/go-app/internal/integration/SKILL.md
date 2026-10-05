@@ -74,6 +74,15 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   abort without completion/history. Required text-only completion fails; incomplete
   may have no call but cannot bypass the set. Re-declare selection each turn.
   Returned tools run in the client, not MOMO.
+  Explicit parallel_tool_calls:false accepts at most one NEW tool call per
+  response; true permits multiple, absent unchanged. Independent of client
+  search. Chat forwards bool, Claude auto/any/tool inverse disable_parallel_tool_use
+  (none no extra field), Gemini local count only with no invented provider field.
+  Function/custom/DSML/incomplete share count; two calls abort without successful
+  terminal/history. JSON502; SSE may expose first proposal before abort, cannot
+  undo client execution/billing or guarantee constrained generation. Past parallel
+  calls/results replay normally, never inherit constraint. Invalid/duplicate
+  flags fail before send; native/default bytes unchanged.
   Client search requires per-request momo_tool_loading:"client-search" and
   parallel_tool_calls:false. One top-level tool_search (execution:"client",
   object parameters) returns tool_search_call with object arguments and call_id.
@@ -343,7 +352,8 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   acceptance before enabling; converted text/tool subset has no reasoning
   summaries/encrypted continuation or prompt-cache guarantees. Private labels
   and known output-includes are validated/omitted, namespace descriptions kept
-  in child descriptions, strict:false and parallel:true use existing shims.
+  in child descriptions, strict:false uses existing shim; parallel booleans are
+  preserved for the per-turn count contract, not discarded.
   Input signatures/compaction/grammar/strict:true/search remain gated; no hidden
   downgrade on native/default routes. Valid output item labels normalize only
   under this policy; call_id pairing/content/schema are never discarded.

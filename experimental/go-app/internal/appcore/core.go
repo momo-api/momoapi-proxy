@@ -347,7 +347,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "tool text policy requires converted Chat routing", 400)
 			return
 		}
-		if dsml || replay {
+		_, parallelPresent := payload["parallel_tool_calls"]
+		// A duplicate false/true constraint must not become last-value-wins
+		// during history normalization. Native/default bytes still bypass this.
+		if dsml || replay || converted && parallelPresent {
 			if _, err := decodeVideoObject(body); err != nil {
 				http.Error(w, "invalid explicit conversion request", 400)
 				return

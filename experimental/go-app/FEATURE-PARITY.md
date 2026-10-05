@@ -36,6 +36,32 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 单次工具调用约束（2026-10-06；新HEAD三平台待验收）
+
+普通converted Responses支持parallel_tool_calls bool；false限制本轮新call<=1，
+true允许多call，省略不改旧默认。Chat显式bool，Claude auto/any/tool逆向
+disable_parallel_tool_use；none仅type，Gemini无捏造字段，仅共享输出门禁。
+function/custom/DSML/search/incomplete同约束，历史并行call/result不限制，anchor
+不继承选项。多call拒绝completed/incomplete/history，JSON502/SSE abort；首个
+proposal可能先暴露，不保证上游生成约束或回滚客户端执行/计费。不重试。
+text-tools-v1保留bool；invalid/duplicate在历史重序列化之前拒绝，不改nativebytes。
+原client-search仍false-only。先红再绿，三协议0/1/2call×两boolean×SSE/JSON×
+function/custom×complete/incomplete、selectors/history/full-suffix/DSML/Stop/
+terminal写失败/无副作用回归。第一次DSML夹具缺Content-Type返回415，补正确
+header而非削弱门禁；fragment夹具用空finish_reason误失败，改为真实null中间帧，
+严格终端不放宽。本地统一353组通过（新增24），native149TLSmock通过（新增12）。
+Node忽略false并接受2call与Go映射/拒绝分别断言；相同mock/resources/input，
+非真实upstream或全功能证明。Prism启动tool error，无专家批准回执。
+旧clientpolicy/原生history夹具要求丢弃parallel:true而失败，更新为exact旧wire+
+明确true字段（Claude无tools仍不添加tool_choice），其它字段继续深比较。普通
+Windows/WSL Linux fullblackbox及官方MCP SDK image/video通过；真实Codex0.156
+五种fresh/read-only/zero-retry/mock流程各exit0/exact2requests通过。新增long-MCP
+fresh流程测试relay明确设置false再交gateway（不是原生Codex设置功能声明），
+两次Chat wire均false、原identity回传、配对结果/第二轮通过，无用户global审批变化。
+
+上一HEAD2a41f03首轮18checks/6nativejobs329+137/Unix各5race/3OS新产物/真实
+Codex只读long-MCP已验收，不替代本增量：https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6001419219
+
 ### 长 namespace 工具别名（2026-10-06；新HEAD三平台待验收）
 
 原namespace/name各ASCII [A-Za-z0-9_-] 1..64，拼接超64不再拒绝；mta_64字节

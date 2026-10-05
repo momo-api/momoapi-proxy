@@ -108,5 +108,8 @@ func probeNamedRequests(core *appcore.Core) error {
 	if err := probeToolAliasRequests(core); err != nil {
 		return err
 	}
+	if err := probeParallelRequests(core); err != nil {
+		return err
+	}
 	return probeHistoryRequests(core)
 }

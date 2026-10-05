@@ -23,6 +23,7 @@ func probeHistoryUpstream(w http.ResponseWriter, r *http.Request, data []byte) b
 	switch r.URL.Path {
 	case "/v1/chat/completions":
 		json.Unmarshal([]byte(routedProbeBody), &want)
+		want["parallel_tool_calls"] = true
 		want["messages"] = []any{map[string]any{"role": "user", "content": "hi"}, map[string]any{"role": "assistant", "content": "routed-ok"}, map[string]any{"role": "user", "content": "next-history"}}
 		stream = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"history-ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
 	case "/v1/messages":

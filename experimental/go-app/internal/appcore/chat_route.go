@@ -57,6 +57,7 @@ type routeRequest struct {
 	messages              []routeMessage
 	tools                 []routeTool
 	loading               *toolLoading
+	parallel              *bool
 	toolImages            string
 	toolFiles             string
 }
@@ -71,6 +72,7 @@ type chatPlan struct {
 	model             string
 	tools             map[string]chatTool
 	loading           *toolLoading
+	parallel          *bool
 }
 
 func str(v any) string         { s, _ := v.(string); return s }
@@ -140,6 +142,13 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
 	ir := &routeRequest{model: plan.model, stream: p["stream"] == true}
+	if value, present := p["parallel_tool_calls"]; present {
+		b, ok := value.(bool)
+		if !ok {
+			return nil, errRouted
+		}
+		ir.parallel = &b
+	}
 	if policy, present := p["momo_tool_images"]; present {
 		if policy != "user-projection" || resolveProtocol(ir.model) == "claude" {
 			return nil, errUnsupportedToolImage
@@ -745,8 +754,8 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 		messages = append([]any{map[string]any{"role": "system", "content": strings.Join(systems, "\n\n")}}, messages...)
 	}
 	body := map[string]any{"model": ir.model, "stream": true, "stream_options": map[string]bool{"include_usage": true}, "messages": messages}
-	if ir.loading != nil {
-		body["parallel_tool_calls"] = false
+	if ir.parallel != nil {
+		body["parallel_tool_calls"] = *ir.parallel
 	}
 	if ir.maxOutputTokens != 0 {
 		body["max_completion_tokens"] = ir.maxOutputTokens
@@ -772,6 +781,7 @@ func serializePlan(ir *routeRequest, body map[string]any) (*chatPlan, error) {
 		return nil, errRouted
 	}
 	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, choice: ir.choice, selected: ir.selected, allowed: ir.allowed, tools: map[string]chatTool{}, loading: ir.loading}
+	p.parallel = ir.parallel
 	for _, t := range ir.tools {
 		p.tools[t.wire] = t.chatTool
 	}

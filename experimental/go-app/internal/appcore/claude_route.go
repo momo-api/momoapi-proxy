@@ -101,8 +101,9 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 		if ir.selected != "" {
 			body["tool_choice"] = map[string]string{"type": "tool", "name": ir.selected}
 		}
-		if ir.loading != nil && choice != "none" {
-			selection := map[string]any{"type": choice, "disable_parallel_tool_use": true}
+		// ToolChoiceNone only carries type; it already forbids all new calls.
+		if ir.parallel != nil && choice != "none" {
+			selection := map[string]any{"type": choice, "disable_parallel_tool_use": !*ir.parallel}
 			if ir.selected != "" {
 				selection["type"] = "tool"
 				selection["name"] = ir.selected

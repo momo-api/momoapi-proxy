@@ -267,6 +267,17 @@ No automatic context_management/compaction_trigger or semantic summary is added.
 
 ### Explicit client-search compatibility (not native deferred loading)
 
+Ordinary converted requests accept parallel_tool_calls:false independently of
+search: at most one NEW call per response. true permits multiple, absent unchanged.
+Chat forwards bool; Claude auto/any/tool inverse disable_parallel_tool_use (none
+has no extra field); Gemini local gate only, no invented field. Function/custom/
+DSML/search/incomplete share count; past parallel calls/results replay normally.
+Never inherit constraints from anchors. Invalid/duplicate flags reject before send.
+Two calls fail without completed/incomplete/history: JSON502 or SSE abort, where
+first proposal may already be exposed. No retry/client-execution/billing rollback
+or provider constrained-generation guarantee. text-tools-v1 preserves booleans;
+native/default bytes unchanged. Existing client-search remains false-only.
+
 Converted Chat/Claude/unsigned Gemini requests can opt in per request with
 momo_tool_loading:"client-search" and parallel_tool_calls:false. Without this
 policy, search/defer_loading/additional_tools reject with 400
@@ -734,7 +745,7 @@ Unknown includes, concise/detailed summaries, signatures/compaction/grammar,
 strict:true and unsupported search remain rejected. Effort/content/instructions,
 call_id pairing and schemas remain authoritative; namespace descriptions are
 prepended to child tool descriptions. strict:false permits the existing non-strict
-shim; parallel_tool_calls:true permits multiple calls, false is not approximated.
+shim; parallel_tool_calls booleans preserve their explicit per-turn constraint.
 Valid function/custom output item IDs label items only and are removed under this
 policy, never call_id/output. Duplicate JSON/depth>64/invalid UTF-8 rejected before
 history or attachment reserialization. The private header is never forwarded,

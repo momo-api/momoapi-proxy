@@ -50,6 +50,16 @@ Magpie 的转换核心清楚，不代表整个 gateway 很小：它还包含订�
 
 ## MOMO 建议：有界小 IR + 明确能力契约
 
+### 2026-10-06：独立的新工具调用数量约束
+
+parallel_tool_calls作为optional bool存在IR/plan，不和client-search耦合；search
+仍要求false。共享encoder按新call累计false最多1，function/custom/DSML/incomplete
+都不可绕过；历史并行turn不受影响，省略不继承anchor。Chat映射bool，Claude
+auto/any/tool逆disable_parallel_tool_use，none仅type；Gemini不造字段，本地
+拒绝额外call，不宣称控制供应商生成。多call可已泄露首proposal但不会成功terminal
+或history，无重试/远程计费回滚。显式bool请求先duplicate/depth校验，再history
+normalize；text-tools-v1不再剥除bool。默认/nativebytes不变。
+
 ### 2026-10-06：有界工具身份别名
 
 借鉴 OpenCodex structured-identity registry 思路，不复制其全套 fallback 策略。

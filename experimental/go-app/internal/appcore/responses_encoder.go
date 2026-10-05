@@ -239,6 +239,11 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 	case "text":
 		return e.textDelta(ev.text)
 	case "tool":
+		// This is a constraint on newly produced calls, not on historical tool
+		// turns. All protocols (including DSML and incomplete) share this gate.
+		if plan.parallel != nil && !*plan.parallel && e.toolCount >= 1 {
+			return errRouted
+		}
 		if plan.loading != nil && (ev.call.id == "" || len(ev.call.id) > 128) {
 			return errRouted
 		}

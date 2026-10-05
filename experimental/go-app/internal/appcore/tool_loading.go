@@ -26,9 +26,6 @@ type toolLoading struct {
 func newToolLoading(p map[string]any) (*toolLoading, error) {
 	policy, present := p["momo_tool_loading"]
 	if !present {
-		if _, present := p["parallel_tool_calls"]; present {
-			return nil, errUnsupportedToolLoading
-		}
 		return nil, nil
 	}
 	if policy != "client-search" || p["parallel_tool_calls"] != false {

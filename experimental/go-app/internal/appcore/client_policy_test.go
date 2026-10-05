@@ -72,7 +72,6 @@ func TestClientPolicyRejectsUnsafeOptionsWithoutSending(t *testing.T) {
 		func(p map[string]any) { p["reasoning"] = map[string]any{"summary": "auto", "effort": false} },
 		func(p map[string]any) { p["reasoning"] = map[string]any{} },
 		func(p map[string]any) { p["prompt_cache_retention"] = "24h" },
-		func(p map[string]any) { p["parallel_tool_calls"] = false },
 		func(p map[string]any) { p["parallel_tool_calls"] = nil },
 		func(p map[string]any) { p["parallel_tool_calls"] = "true" },
 		func(p map[string]any) {
