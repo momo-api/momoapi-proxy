@@ -63,7 +63,7 @@ assert.ok(source.includes('畸形半截工具参数仍拒绝'));
 assert.ok(source.includes('/v1/responses/compact'));
 assert.ok(source.includes('显式原生上游 / 本地 checkpoint'));
 assert.ok(source.includes('返回 output 需客户端手动重放；cmp_ 不是续聊 anchor'));
-assert.ok(source.includes('实验本地 checkpoint 仅文本工具历史、不含加密 envelope'));
+assert.ok(source.includes('实验本地 checkpoint 保留完整工具/图片回合及解读、不含加密 envelope'));
 assert.ok(source.includes('不自动触发或转换供应商状态'));
 assert.equal((source.match(/class="protocol-card"/g)||[]).length,5);
 assert.ok(source.includes('allowed_tools'));

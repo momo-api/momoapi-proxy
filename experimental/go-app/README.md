@@ -72,8 +72,11 @@ than silently removing the requested contract.
 Only user images are converted: file_id, files/audio/video, assistant/system
 images, image tool results, asset uploads/storage and image generation are not
 implemented. Invalid input returns fixed unsupported_image_input without echoing
-image bytes/URLs; no fallback or local fetching. Local compact rejects image
-history until retention is implemented. Default/native Responses bytes are
+image bytes/URLs; no fallback or local fetching. Local compact retains every
+image-bearing user turn, including its assistant interpretation, without replacing
+images or interpretations with text markers. It may omit only older ordinary
+assistant text outside all tool/image-bearing turns; no benefit means reject,
+not delete required images to fit. Default/native Responses bytes are
 unchanged; passing a protocol mock does not prove any live model can see images.
 Reference wire contract: https://developers.openai.com/api/docs/guides/images-vision
 (provider published limits are not this preview's smaller local limits).
@@ -222,10 +225,10 @@ Headerless POST /v1/responses/compact is a local-only operation, enabled only in
 for the strict converted Chat/Claude/unsigned Gemini subset. Default mode returns
 501; native Responses/Muse reject422. It accepts only model/input/tools and optional
 stream:false, with a trailing current user turn and fully paired declared tools.
-No previous_response_id, instructions option, opaque/media state or automatic trigger.
+No previous_response_id, instructions option, opaque/unsupported media state or automatic trigger.
 Instructions must be explicit input items. Redeclare tools when replaying.
 
-Keep all user/system/developer items, whole tool-bearing turns (trigger, interleaved
+Keep all user/system/developer items, whole tool/image-bearing turns (trigger, interleaved
 assistant, calls/results and final text), and the latest assistant item in original
 order. Only older ordinary assistant text may become a smaller assistant-level
 omission marker containing its normalized JSON byte count/SHA-256. It openly says

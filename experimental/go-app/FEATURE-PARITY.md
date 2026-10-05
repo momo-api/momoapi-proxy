@@ -267,6 +267,17 @@ Node Chat聚合文字在图片之前且图片独立输入填marker，Go保序不
 真实WebView新增6请求，计划68上游（含列表检查），localcompact仍3次零上游。
 当前增量本地/三平台回执未完成前不称通过。
 
+### 图片 checkpoint 保留增量（2026-10-05）
+
+先用确定性回归复现图片历史拒绝，再允许合法用户图片 local checkpoint。完整图片
+回合（包含其 assistant 解读）受保护，不只保留图像字节而遗漏历史结论。保留原顺序/
+MIME/detail/URL/data，无 URL 本地抓取；仅非工具/非图片回合的旧普通 assistant 可
+替换为明确损失marker，无安全缩减收益则拒绝。普通output复用同IR验证重放，仍无
+opaque/anchor/语义摘要。三协议TCP实际compact零上游后显式重放一请求、required
+项一致；增加3同mock图片checkpoint夹具，计划203；WebView原3个本地探针改为带
+图片保留，物理上游仍68。历史条目中的此前拒绝是38531c4基线，不是当前能力。
+本增量CI回执未完成前不称跨平台通过。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

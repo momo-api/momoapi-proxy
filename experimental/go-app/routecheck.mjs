@@ -311,7 +311,7 @@ for(const fixture of cases){
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-for(const model of ['gpt-5.5','claude-sonnet-4-6','gemini-2.5-flash']){
+for(const model of ['gpt-5.5','claude-sonnet-4-6','gemini-2.5-flash'])for(const withImages of [false,true]){
  const {child,handoff}=await launch({stream:text});let server;
  try{
   const env={MOMO_PROXY_HOME:'unused-routecheck-profile',MOMO_PROXY_CONSOLE_MIRROR:'0'};
@@ -320,6 +320,7 @@ for(const model of ['gpt-5.5','claude-sonnet-4-6','gemini-2.5-flash']){
    {env,loggingRuntime,assetStore:{},attachmentAssetStore:{},fetchImpl:(url,init)=>{const u=new URL(url);return fetch(handoff.mock_url+u.pathname+u.search,init)}});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   const input=[{role:'developer',content:'exact constraints 中文'}, {role:'user',content:'historical task'}, {role:'assistant',content:'old assistant 中文🙂'.repeat(200)}, {role:'user',content:'tool trigger'}, {role:'assistant',content:'before tool'}, {type:'function_call',namespace:'pad',name:'read',call_id:'compact_read',arguments:'{"n":9007199254740993}'}, {type:'function_call_output',call_id:'compact_read',output:'exact result'}, {role:'assistant',content:'final tool context'}, {role:'user',content:'CURRENT exact 中文🙂'}];
+  if(withImages){input[3].content=imageInput;input[4].content='before tool original image interpretation'.repeat(200)}
   const p={model,stream:false,input,tools:[tool]};
   // Node local policy accepts tools as an unused option; Go validates declared
   // identities and requires explicit plain-output replay, not opaque state.
@@ -335,7 +336,7 @@ for(const model of ['gpt-5.5','claude-sonnet-4-6','gemini-2.5-flash']){
   assert.ok(!JSON.stringify(nf.output).includes('before tool'));assert.ok(JSON.stringify(gf.output).includes('before tool'));
   assert.equal((await(await fetch(handoff.mock_url+'/capture')).json()).length,0,'local checkpoint must not send upstream');
   console.log('DIFFERENCE Go explicit checkpoint preserves whole tool-bearing turn and original user/developer items; Node local policy keeps selected calls/results and labels/repackages text');
-  console.log('PASS uniform blackbox '+model+' explicit local compact');
+  console.log('PASS uniform blackbox '+model+' explicit local compact'+(withImages?' exact retained images':''));
  }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
 }
 for(const status of [200,404]){
@@ -356,4 +357,4 @@ for(const status of [200,404]){
   console.log('PASS uniform blackbox explicit native compact '+status+'; one upstream request, no fallback/local envelope, synthetic capability only');
  }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
 }
-console.log('PASS '+(cases.length+5)+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+console.log('PASS '+(cases.length+8)+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

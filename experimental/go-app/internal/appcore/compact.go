@@ -16,7 +16,7 @@ const checkpointPrefix = "[MOMO explicit lossy checkpoint; historical assistant 
 var errCompactBudget = errors.New("checkpoint exceeds replay budget")
 
 // Local checkpointing is explicit and intentionally conservative: retain every
-// instruction/user item, the most recent assistant text, and entire tool-bearing
+// instruction/user item, the most recent assistant text, and entire tool/image-bearing
 // turns in original order. Only older ordinary assistant text can be omitted.
 // The returned ordinary output is replayed explicitly, never encrypted_content,
 // a provider state token or a previous_response_id anchor.
@@ -46,17 +46,11 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 		return nil, err
 	}
 	p["input"] = items
-	// The same strict IR rejects media, unknown fields, malformed/duplicate/orphan
+	// The same strict IR rejects unsupported media, unknown fields, malformed/duplicate/orphan
 	// calls, interrupted parallel results and undeclared namespace identities.
 	checked, _ := json.Marshal(p)
 	if ir, err := parseRoutedRequest(checked); err != nil || ir.loading != nil {
 		return nil, errRouted // deferred lifecycle checkpoint support must not be guessed
-	} else {
-		for _, message := range ir.messages {
-			if hasImages(message.parts) {
-				return nil, errRouted
-			}
-		} // image checkpoint retention not yet implemented
 	}
 	objects := make([]map[string]any, len(items))
 	lastUser, latestAssistant := -1, -1
@@ -77,17 +71,24 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 		if end < len(items) && objects[end]["role"] != "user" {
 			continue
 		}
-		hasTool := false
+		protectedTurn := false
 		for i := start; i < end; i++ {
+			if values, ok := objects[i]["content"].([]any); ok {
+				for _, value := range values {
+					if obj(value)["type"] == "input_image" {
+						protectedTurn = true
+					}
+				}
+			} // retain interpretations of retained images, not just the image bytes
 			switch str(objects[i]["type"]) {
 			case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output":
-				hasTool = true
+				protectedTurn = true
 			}
 			if objects[i]["role"] == "assistant" {
 				latestAssistant = i
 			}
 		}
-		if hasTool {
+		if protectedTurn {
 			for i := start; i < end; i++ {
 				protected[i] = true
 			}

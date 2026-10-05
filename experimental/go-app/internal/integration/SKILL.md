@@ -64,8 +64,10 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   is not full pixel/content validation; no local fetch or DNS/redirect validation.
   Gemini URL requires explicit mime_type; Chat preserves detail:auto/low/high,
   Claude/Gemini reject low/high (omitted/auto only, not quality equivalence).
-  No files/file_id, tool-result images, uploads/assets, generation or image local
-  compact. Fixed unsupported_image_input error; native/default bytes unchanged.
+  No files/file_id, tool-result images, uploads/assets or generation. Local compact
+  retains whole image-bearing turns including assistant interpretation; no useful
+  safe reduction rejects instead of dropping required images. Fixed
+  unsupported_image_input error; native/default bytes unchanged.
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures and other media are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;
@@ -107,7 +109,8 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   tools. Keep every instruction/user item, whole tool-bearing turns and latest
   assistant in order; only older ordinary assistant text is replaced by a smaller
   disclosed assistant marker with normalized JSON byte count/SHA-256, not encryption.
-  A trailing current user is required. Unknown/opaque/media/pending tools/no useful
+  A trailing current user is required. Whole image-bearing user turns retained,
+  including assistant interpretation. Unknown/opaque/unsupported media/pending tools/no useful
   reduction reject422; oversize413. No automatic trigger, upstream call or hidden
   state. Replay response.compaction.output explicitly as input. cmp_ IDs are NOT
   previous_response_id anchors; no encrypted_content envelope/restart guarantee.

@@ -23,6 +23,7 @@ func probeCompactRequests(core *appcore.Core) error {
 	defer client.CloseIdleConnections()
 	for _, model := range []string{"gpt-5.5", "claude-sonnet-4-6", "gemini-2.5-flash"} {
 		input := []any{map[string]any{"role": "developer", "content": "exact constraint"}, map[string]any{"role": "user", "content": "old"}, map[string]any{"role": "assistant", "content": strings.Repeat("old-text ", 400)}, map[string]any{"role": "user", "content": "recent"}, map[string]any{"role": "assistant", "content": "latest"}, map[string]any{"role": "user", "content": "CURRENT 中文🙂"}}
+		input[3] = map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "recent"}, map[string]any{"type": "input_image", "image_url": probeImageURL}, map[string]any{"type": "input_image", "image_url": "https://images.example.invalid/a", "mime_type": "image/jpeg"}}}
 		b, _ := json.Marshal(map[string]any{"model": model, "input": input, "stream": false})
 		req, _ := http.NewRequest("POST", base+"/responses/compact", strings.NewReader(string(b)))
 		req.Header.Set("Content-Type", "application/json")

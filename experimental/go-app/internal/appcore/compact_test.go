@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -48,6 +49,7 @@ func TestExplicitCheckpointPreservesRequiredStateAndReplay(t *testing.T) {
 				return append([][]byte{}, captures...)
 			}
 			p := checkpointPayload(tc.model)
+			p["input"].([]any)[3] = map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "tool trigger exact"}, imagePart(inlineFixture(t, "image/png")), map[string]any{"type": "input_image", "image_url": "https://images.example/a", "mime_type": "image/jpeg"}}}
 			b, _ := json.Marshal(p)
 			original := p["input"].([]any)
 			code, data, h := request(t, c, endpoint, "/v1/responses/compact", "POST", string(b), nil)
@@ -86,7 +88,7 @@ func TestExplicitCheckpointPreservesRequiredStateAndReplay(t *testing.T) {
 			replay, _ := json.Marshal(p)
 			code, _, _ = request(t, c, endpoint, "/v1/responses", "POST", string(replay), nil)
 			sent := captured()
-			if code != 200 || len(sent) != 1 || !strings.Contains(string(sent[0]), "CURRENT exact") || !strings.Contains(string(sent[0]), "pad__read") || !strings.Contains(string(sent[0]), "pad__write") {
+			if code != 200 || len(sent) != 1 || !strings.Contains(string(sent[0]), "CURRENT exact") || !strings.Contains(string(sent[0]), "pad__read") || !strings.Contains(string(sent[0]), "pad__write") || !strings.Contains(string(sent[0]), "https://images.example/a") {
 				t.Fatal("checkpoint replay failed")
 			}
 			p["previous_response_id"] = final["id"]
@@ -96,6 +98,63 @@ func TestExplicitCheckpointPreservesRequiredStateAndReplay(t *testing.T) {
 				t.Fatal("checkpoint mistaken for history anchor")
 			}
 		})
+	}
+}
+
+func TestCheckpointImagesRetainWholeTurnAndReplay(t *testing.T) {
+	for _, model := range []string{"gpt-5.5", "claude-sonnet-4-6", "gemini-2.5-flash"} {
+		p := checkpointPayload(model)
+		input := p["input"].([]any)
+		url := inlineFixture(t, "image/png")
+		imageUser := map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": "historical image task"}, imagePart(url), map[string]any{"type": "input_image", "image_url": "https://images.example/a", "mime_type": "image/jpeg"}}}
+		imageAnswer := map[string]any{"role": "assistant", "content": strings.Repeat("original image interpretation ", 150)}
+		imageTurn := []any{imageUser, imageAnswer}
+		input = append(append(append([]any{}, input[:3]...), imageTurn...), input[3:]...)
+		p["input"] = input
+		b, _ := json.Marshal(p)
+		final, err := buildLocalCheckpoint(b)
+		if err != nil {
+			t.Fatal("image checkpoint rejected", model, err)
+		}
+		encoded, _ := json.Marshal(final)
+		out := final["output"].([]json.RawMessage)
+		if len(encoded) >= len(b) || len(out) != len(input) {
+			t.Fatal("no useful image checkpoint")
+		}
+		for i := range input {
+			if i == 2 {
+				continue
+			}
+			got, _ := decodeObject(string(out[i]))
+			want, _ := json.Marshal(input[i])
+			expected, _ := decodeObject(string(want))
+			if !reflect.DeepEqual(got, expected) {
+				t.Fatal("image-bearing turn/other required item changed", model, i)
+			}
+		}
+		p["input"] = out
+		replay, _ := json.Marshal(p)
+		ir, err := parseRoutedRequest(replay)
+		if err != nil {
+			t.Fatal("image checkpoint replay invalid")
+		}
+		images := 0
+		for _, m := range ir.messages {
+			for _, part := range m.parts {
+				if part.image != nil {
+					images++
+				}
+			}
+		}
+		if images != 2 {
+			t.Fatal("checkpoint image loss")
+		}
+		// No benefit if every old assistant belongs to an image-bearing turn.
+		p["input"] = []any{imageUser, imageAnswer, map[string]string{"role": "user", "content": "latest"}, map[string]string{"role": "assistant", "content": "latest answer"}, map[string]string{"role": "user", "content": "CURRENT"}}
+		b, _ = json.Marshal(p)
+		if _, err := buildLocalCheckpoint(b); err == nil {
+			t.Fatal("image interpretation silently omitted")
+		}
 	}
 }
 
@@ -119,7 +178,7 @@ func TestCheckpointRejectsUnknownLossAndNoBenefit(t *testing.T) {
 		func(p map[string]any) { p["input"].([]any)[8].(map[string]any)["call_id"] = "orphan" },
 		func(p map[string]any) { p["input"].([]any)[5].(map[string]any)["encrypted_content"] = "opaque" },
 		func(p map[string]any) {
-			p["input"].([]any)[2].(map[string]any)["content"] = []any{map[string]string{"type": "input_image", "image_url": "https://example.invalid/image"}}
+			p["input"].([]any)[2].(map[string]any)["content"] = []any{map[string]string{"type": "input_image", "image_url": "https://example.invalid/image"}} // assistant images still unsupported
 		},
 	} {
 		p := checkpointPayload("gpt-5.5")
