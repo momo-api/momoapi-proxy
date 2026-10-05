@@ -87,7 +87,7 @@ func TestRoutedChatStreamNamespaceAndRequest(t *testing.T) {
 }
 func TestRoutedPayloadRejectsWithoutSending(t *testing.T) {
 	bad := []string{
-		strings.Replace(routedPayload, `"stream":true`, `"stream":false`, 1),
+		strings.Replace(routedPayload, `"stream":true`, `"stream":"false"`, 1),
 		strings.Replace(routedPayload, `"instructions":"Be concise."`, `"previous_response_id":"resp_private"`, 1),
 		strings.Replace(routedPayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","image_url":"https://example.invalid/a"`, 1),
 		strings.Replace(routedPayload, `"name":"write"`, `"name":"exec"`, 1),

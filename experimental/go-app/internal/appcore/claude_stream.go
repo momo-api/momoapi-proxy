@@ -16,7 +16,7 @@ type claudeBlock struct {
 // Ordered Messages blocks -> neutral events -> the shared Responses encoder.
 // Require start, closed blocks, an accepted stop reason and message_stop.
 func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Reader, plan *chatPlan) error {
-	e, err := newResponseWriter(w, plan.model)
+	e, err := newRoutedResponseWriter(w, plan)
 	if err != nil {
 		return err
 	}

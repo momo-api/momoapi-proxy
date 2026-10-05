@@ -162,11 +162,11 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 6 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 12 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
@@ -335,17 +335,29 @@ func probeRoutedRequest(core *appcore.Core) error {
 	client := http.Client{Timeout: 4 * time.Second}
 	defer client.CloseIdleConnections()
 	for _, tc := range []struct{ payload, text string }{{routedProbeRequest, "routed-ok"}, {claudeProbeRequest, "claude-ok"}, {geminiProbeRequest, "gemini-ok"}} {
-		req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(tc.payload))
-		req.Header.Set("Authorization", "Bearer "+key)
-		req.Header.Set("Content-Type", "application/json")
-		response, err := client.Do(req)
-		if err != nil {
-			return err
-		}
-		data, err := io.ReadAll(response.Body)
-		_ = response.Body.Close()
-		if err != nil || response.StatusCode != 200 || !strings.Contains(string(data), "response.completed") || !strings.Contains(string(data), tc.text) {
-			return errors.New("routed result")
+		for _, payload := range []string{tc.payload, strings.Replace(tc.payload, `"stream":true`, `"stream":false`, 1), strings.Replace(tc.payload, `"stream":true,`, "", 1)} {
+			req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(payload))
+			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("Content-Type", "application/json")
+			response, err := client.Do(req)
+			if err != nil {
+				return err
+			}
+			data, err := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if err != nil || response.StatusCode != 200 || !strings.Contains(string(data), tc.text) {
+				return errors.New("routed result")
+			}
+			if payload == tc.payload {
+				if !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") || !strings.Contains(string(data), "response.completed") {
+					return errors.New("routed SSE result")
+				}
+			} else {
+				var final map[string]any
+				if !strings.HasPrefix(response.Header.Get("Content-Type"), "application/json") || json.Unmarshal(data, &final) != nil || final["object"] != "response" || final["status"] != "completed" || strings.Contains(string(data), "response.completed") {
+					return errors.New("routed JSON result")
+				}
+			}
 		}
 	}
 	return nil

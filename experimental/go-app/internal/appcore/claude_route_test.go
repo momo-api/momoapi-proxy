@@ -170,7 +170,7 @@ func TestClaudeRequestIRHistoryAndStrictness(t *testing.T) {
 		"effort":        strings.Replace(claudePayload, `"stream":true`, `"stream":true,"reasoning":{"effort":"high"}`, 1),
 		"media":         strings.Replace(claudePayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","image_url":"https://example.invalid"`, 1),
 		"reference":     strings.Replace(claudePayload, `"instructions":"Be concise."`, `"previous_response_id":"resp_mock"`, 1),
-		"nonstream":     strings.Replace(claudePayload, `"stream":true`, `"stream":false`, 1),
+		"invalidstream": strings.Replace(claudePayload, `"stream":true`, `"stream":null`, 1),
 		"unknownOption": strings.Replace(claudePayload, `"stream":true`, `"stream":true,"max_output_tokens":4`, 1),
 		"scalarArgs":    strings.Replace(string(b), `{\"n\":9007199254740993}`, `42`, 1),
 	} {
@@ -183,7 +183,7 @@ func TestClaudeRequestIRHistoryAndStrictness(t *testing.T) {
 }
 func TestClaudeRejectsWithoutUpstream(t *testing.T) {
 	c, endpoint := routedClaudeCore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("rejected request sent") }))
-	for _, p := range []string{strings.Replace(claudePayload, `"stream":true`, `"stream":false`, 1), strings.Replace(claudePayload, `"stream":true`, `"stream":true,"reasoning_effort":"high"`, 1)} {
+	for _, p := range []string{strings.Replace(claudePayload, `"stream":true`, `"stream":null`, 1), strings.Replace(claudePayload, `"stream":true`, `"stream":true,"reasoning_effort":"high"`, 1)} {
 		code, _, _ := request(t, c, endpoint, "/v1/responses", "POST", p, nil)
 		if code != 400 {
 			t.Fatal("must reject before upstream")

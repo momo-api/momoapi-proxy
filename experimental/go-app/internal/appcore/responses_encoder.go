@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -18,7 +19,10 @@ type responseWriter struct {
 	written          int
 	index            int
 	completed        bool
+	buffered         bool
 }
+
+var errRoutedWrite = errors.New("routed response write failed")
 
 func newID(prefix string) (string, error) {
 	var b [16]byte
@@ -28,6 +32,24 @@ func newID(prefix string) (string, error) {
 	return prefix + hex.EncodeToString(b[:]), nil
 }
 func (e *responseWriter) event(name string, p map[string]any) error {
+	if e.buffered {
+		if name != "response.completed" {
+			return nil
+		}
+		b, err := json.Marshal(p["response"])
+		if err != nil || len(b) > MaxResponse {
+			return errRouted
+		}
+		if err := http.NewResponseController(e.w).SetWriteDeadline(time.Now().Add(15 * time.Second)); err != nil {
+			return err
+		}
+		e.w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		n, err := e.w.Write(b)
+		if err != nil || n != len(b) {
+			return errRoutedWrite
+		}
+		return nil
+	}
 	p["type"] = name
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -162,14 +184,16 @@ type streamEvent struct {
 	usage map[string]any
 }
 
-func newResponseWriter(w http.ResponseWriter, model string) (*responseWriter, error) {
+func newRoutedResponseWriter(w http.ResponseWriter, plan *chatPlan) (*responseWriter, error) {
 	id, err := newID("resp_")
 	if err != nil {
 		return nil, err
 	}
-	e := &responseWriter{w: w, id: id, model: model, output: []any{}}
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	err = e.event("response.created", map[string]any{"response": map[string]any{"id": id, "object": "response", "status": "in_progress", "model": model, "output": []any{}}})
+	e := &responseWriter{w: w, id: id, model: plan.model, output: []any{}, buffered: !plan.stream}
+	if plan.stream {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	}
+	err = e.event("response.created", map[string]any{"response": map[string]any{"id": id, "object": "response", "status": "in_progress", "model": plan.model, "output": []any{}}})
 	return e, err
 }
 func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {

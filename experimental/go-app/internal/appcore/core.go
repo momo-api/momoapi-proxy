@@ -369,6 +369,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			convertErr = convertChatStream(ctx, w, upstream.Body, routed)
 		}
 		if convertErr != nil {
+			if !routed.stream && !errors.Is(convertErr, errRoutedWrite) {
+				http.Error(w, "upstream conversion failed", 502)
+				return
+			}
 			panic(http.ErrAbortHandler)
 		}
 		return

@@ -108,3 +108,17 @@ Gemini 无 [DONE]：只有 STOP + 干净完整 HTTP EOF 才 complete，继续读
 统一 Node/Go mock 黑盒扩为30组；Node 缺 namespace/忽略 choice/历史裸名/提前 EOF
 完成等差异单独断言。未建立 Gemini 3 签名所有权和跨请求回放之前，严格拒绝签名
 比静默丢失更可靠，但覆盖有限，不可声称完整 Gemini 或 Node 对齐。Muse 不迁移。
+
+## 最终 JSON 增量（2026-10-05）
+
+Chat / Claude / Gemini 子集共用同一 typed request、SSE decoder 与 Responses encoder。
+客户端 stream:true 发事件；false/省略时 encoder 不发送中间事件，直接保留已校验
+的 typed 输出，终端成功后一次编码 Responses JSON。没有把 Responses SSE 作为
+内部存储再解析，没有增加第二次请求或供应商原生 JSON 解码器。原有请求/保留/
+事件/工具/上游物理字节预算保持，最终 JSON 也受16 MiB输出预算与15秒写期限约束。
+
+JSON 转换错误在任何响应写入前返回脱敏502；最终写短写/失败则中止 HTTP，不能
+拼接错误正文或宣称成功。SSE 保持中止而不虚构 completed。新增45组 Node/Go 同
+mock黑盒明确记录 Node 对这些 false/省略请求仍输出 SSE 的差异；单测另验证
+Stop取消、无提前头/正文、写失败边界与默认透传。仍未三方统一测/真实上游验收，
+仍缺 Chat usage、签名续接、compact 与完整客户端兼容；Muse 不在目标内。

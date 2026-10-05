@@ -20,7 +20,7 @@ type chatCall struct {
 // Never manufacture completion on malformed data/truncated EOF/length refusal.
 // Unlike the legacy Node adapter, require finish_reason and [DONE]. No replay.
 func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reader, plan *chatPlan) error {
-	e, err := newResponseWriter(w, plan.model)
+	e, err := newRoutedResponseWriter(w, plan)
 	if err != nil {
 		return err
 	}

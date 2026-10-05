@@ -10,7 +10,7 @@ import (
 // Gemini SSE has no [DONE]. Require STOP plus clean framed EOF, not EOF alone.
 // Consume trailers before completing, so late errors/malformed usage cannot pass.
 func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Reader, plan *chatPlan) error {
-	e, err := newResponseWriter(w, plan.model)
+	e, err := newRoutedResponseWriter(w, plan)
 	if err != nil {
 		return err
 	}

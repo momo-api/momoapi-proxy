@@ -16,9 +16,13 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
 - Responses namespace/custom tools and unknown fields are passed through.
   Skill/MCP tools execute in the agent client, not inside the API proxy.
 - Default is exact same-protocol passthrough. Explicit Mode=momo-routing enables
-  Responses-entry model classification and partial streaming Chat/Claude/Gemini translation:
+  Responses-entry model classification and partial Chat/Claude/Gemini translation:
   text, function/custom tools (excluding exec/apply_patch), namespace restoration.
-  Strictly rejects media/history references/unknown options/non-streaming Chat;
+  stream:true emits SSE; false/omitted stream emits one final Responses JSON,
+  using the same typed encoder and a single upstream SSE request. Conversion
+  failures before JSON writing return redacted 502; partial writes abort HTTP.
+  This is not a verified live-upstream JSON guarantee.
+  Strictly rejects media/history references/unknown options;
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures, media and explicit token-limit options are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;

@@ -55,6 +55,15 @@ const cases=[
  {name:'Gemini premature EOF safety difference',stream:gf([{text:'partial'}]),payload:gp,path:gpath,truncate:true},
  {name:'Gemini system/tool choice',stream:gt,payload:{...gp,tool_choice:'required',input:[{role:'developer',content:'rules'},...gp.input]},path:gpath},
  {name:'Gemini usage-only trailer',stream:gf([{text:'中文🙂'}],'STOP')+gf(null,null,gu),payload:gp,path:gpath},
+ ...[{label:'Chat',payload,stream:text,calls,path:undefined,partial:'data: '+JSON.stringify(chunk({content:'partial'}))+'\n\n'},
+     {label:'Claude',payload:cp,stream:claudeText,calls:claudeCalls,path:'/v1/messages',partial:cs+ct(0,'partial')},
+     {label:'Gemini',payload:gp,stream:gt,calls:gc,path:gpath,partial:gf([{text:'partial'}])}].flatMap(f=>[
+  {name:f.label+' JSON text',stream:f.stream,payload:{...f.payload,stream:false},path:f.path,json:true},
+  {name:f.label+' JSON namespace tools',stream:f.calls,payload:{...f.payload,stream:false},path:f.path,json:true},
+  {name:f.label+' omitted stream returns JSON',stream:f.stream,payload:Object.fromEntries(Object.entries(f.payload).filter(([k])=>k!=='stream')),path:f.path,json:true},
+  {name:f.label+' JSON truncated upstream',stream:f.partial,payload:{...f.payload,stream:false},path:f.path,json:true,truncate:true},
+  {name:f.label+' JSON upstream 429',stream:'',status:429,payload:{...f.payload,stream:false},path:f.path,json:true},
+ ]),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -68,6 +77,7 @@ async function launch(fixture){
  return {child,handoff};
 }
 function items(body){
+ try{const response=JSON.parse(body);if(response.object==='response'&&response.status==='completed')return {events:[],completed:{response},json:true,output:response.output.map(({id,status,...item})=>item)}}catch{}
  const events=body.split(/\r?\n\r?\n/).flatMap(block=>{const data=block.split(/\r?\n/).filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');if(!data||data==='[DONE]')return [];try{return [JSON.parse(data)]}catch{return []}});
  const completed=events.find(e=>e.type==='response.completed');
  return {events,completed,output:completed?.response?.output?.map(({id,status,...item})=>item)||[]};
@@ -127,11 +137,12 @@ for(const fixture of cases){
    assert.deepEqual(g,n,fixture.name+' upstream request mismatch');
   }
   for(let i=0;i<count;i++){
-   const n=nodeResults[i],g=goResults[i];assert.equal(g.status,n.status,fixture.name+' HTTP status');
+   const n=nodeResults[i],g=goResults[i];if(!(fixture.json&&fixture.truncate))assert.equal(g.status,n.status,fixture.name+' HTTP status');
    if(fixture.status){assert.equal(g.completed,undefined);assert.equal(n.completed,undefined)}
-   else if(fixture.truncate){assert.equal(g.completed,undefined);assert.equal(g.truncated,true);assert.ok(n.completed);console.log('DIFFERENCE Node completes clean premature EOF; Go aborts without fabricated completion')}
+   else if(fixture.truncate){assert.equal(g.completed,undefined);if(fixture.json){assert.equal(g.status,502);assert.equal(g.truncated,false)}else assert.equal(g.truncated,true);assert.ok(n.completed);console.log('DIFFERENCE Node completes clean premature EOF; Go rejects without fabricated completion')}
    else {
     assert.ok(n.completed&&g.completed,fixture.name+' missing completion');
+    if(fixture.json){assert.equal(g.json,true);assert.equal(n.json,undefined);assert.equal(n.events[0].type,'response.created');console.log('DIFFERENCE Go returns completed JSON for false/omitted stream; legacy Node returns SSE')}
     // Legacy Node drops explicit namespaces on Chat calls; Go restores them.
     const normalized=g.output.map(({namespace,...item})=>item);
     assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
@@ -146,4 +157,4 @@ for(const fixture of cases){
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-console.log('PASS 30 shared mock/resource routing cases; explicit namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');
+console.log('PASS 45 shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');

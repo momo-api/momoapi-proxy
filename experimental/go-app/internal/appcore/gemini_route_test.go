@@ -182,7 +182,7 @@ func TestGeminiRejectsBeforeSend(t *testing.T) {
 		"media":         strings.Replace(geminiPayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","image_url":"https://example.invalid"`, 1),
 		"reference":     strings.Replace(geminiPayload, `"instructions":"Be concise."`, `"previous_response_id":"resp_mock"`, 1),
 		"maxTokens":     strings.Replace(geminiPayload, `"stream":true`, `"stream":true,"max_output_tokens":10`, 1),
-		"nonstream":     strings.Replace(geminiPayload, `"stream":true`, `"stream":false`, 1),
+		"invalidstream": strings.Replace(geminiPayload, `"stream":true`, `"stream":42`, 1),
 		"unsafeModel":   strings.Replace(geminiPayload, "gemini-2.5-flash", "gemini-x/../../models?a=1", 1),
 	} {
 		t.Run(name, func(t *testing.T) {

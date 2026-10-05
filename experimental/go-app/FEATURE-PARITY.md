@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 仅精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses`；无无版本别名，无 compact |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
-| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 新增严格流式文本/function/部分 custom 子集、namespace 恢复；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
+| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/部分 custom 子集、namespace 恢复；支持 SSE 和最终 JSON；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
@@ -60,7 +60,7 @@ Claude 轮统一黑盒扩为20组：增加 Claude Unicode、function/custom、�
 用裸名和 raw；Go 保留 developer/system 指令与 tool_choice，Node 合并为用户文本
 且忽略 choice；Go 输出经校验的 token usage，Node 未输出。两种转换的 Go 都不把
 提前 EOF 当完成。每项差异有独立精确断言，不称全部等价。
-非流式 JSON 转换、Chat usage、DSML、复杂工具/history/媒体仍是未完成门槛。
+该轮之后的 JSON 增量见下；Chat usage、DSML、复杂工具/history/媒体仍是未完成门槛。
 
 Gemini 轮统一黑盒扩为30组：增加原生路径与 alt=sse 查询、Unicode、function/custom、
 无签名配对历史、四并发、401/429/500、缺 STOP 的 EOF、system/tool_choice 与 usage
@@ -71,6 +71,17 @@ Go Gemini 必须 STOP + 干净且帧完整的 HTTP EOF，再发送 response.comp
 signed thoughtSignature/思考块/媒体/partialArgs 明确拒绝，无签名历史并不等于
 Gemini 3 签名续接兼容；不造签名、不使用绕过签名占位符。工具 item.done 也不是
 整个响应成功，须等 response.completed。默认透传与现有 Node 源码不改。
+
+JSON 轮统一黑盒扩为45组：三种转换各增加 false-stream 文本、namespace 工具、
+省略 stream、提前 EOF、429。同一请求在 Go 返回最终 Responses JSON，现有 Node
+返回 SSE；成功输出规范化语义相同，namespace 差异单独断言。失败的 Go JSON 在
+发出任何头/正文前返回脱敏502，Node 该提前 EOF 夹具仍以200 completed结束。
+底层依然一次 SSE 上游请求，不是新增供应商非流式解码器。共享 typed encoder
+直接收集最终对象，不经过内部 SSE 再解析。流式仍中止 HTTP，不生成假完成；
+最终 JSON 短写/写失败中止连接，不追加502。JSON 受最终16 MiB输出与原有上游/
+保留/事件/工具预算约束，不消耗虚构的内部 SSE 字节预算。回归另测无提前写入、
+Stop取消、短写和默认/原生透传不变。真实 WebView 探针验证三协议 SSE / false /
+省略 stream（合计12次物理上游请求）。这些都不等于真实 MOMO 上游非流式已验证。
 
 ## Magpie 借鉴边界
 

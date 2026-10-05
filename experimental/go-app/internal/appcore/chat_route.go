@@ -38,15 +38,17 @@ type routeTool struct {
 	schema      any
 }
 type routeRequest struct {
+	stream                bool
 	model, choice, effort string
 	messages              []routeMessage
 	tools                 []routeTool
 }
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
-	body  []byte
-	model string
-	tools map[string]chatTool
+	stream bool
+	body   []byte
+	model  string
+	tools  map[string]chatTool
 }
 
 func str(v any) string         { s, _ := v.(string); return s }
@@ -106,11 +108,16 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	var p map[string]any
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.UseNumber()
-	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort") || p["stream"] != true {
+	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort") {
 		return nil, errRouted
 	}
+	if v, present := p["stream"]; present {
+		if _, ok := v.(bool); !ok {
+			return nil, errRouted
+		}
+	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
-	ir := &routeRequest{model: plan.model}
+	ir := &routeRequest{model: plan.model, stream: p["stream"] == true}
 	if plan.model == "" {
 		return nil, errRouted
 	}
@@ -443,7 +450,7 @@ func serializePlan(ir *routeRequest, body map[string]any) (*chatPlan, error) {
 	if err != nil || len(b) > MaxRequest {
 		return nil, errRouted
 	}
-	p := &chatPlan{body: b, model: ir.model, tools: map[string]chatTool{}}
+	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, tools: map[string]chatTool{}}
 	for _, t := range ir.tools {
 		p.tools[t.wire] = t.chatTool
 	}
