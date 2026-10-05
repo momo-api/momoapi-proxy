@@ -188,7 +188,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   state and fences late results; remote effects cannot be undone. Native actions
   require origin+page capability and never return tokens to the page.
   No edit/video/disk assets in this subset.
-- Video API subset (NOT video MCP/UI or full existing plugin compatibility):
+- Video API + desktop workbench subset (NOT video MCP or full plugin compatibility):
   explicitly GET /internal/videos/capabilities with the local bearer token.
   This queries token-scoped /v1/models only, authorizing known MiniMax-H3-Max /
   seedance-2.5 availability; parameter constraints are documented static Node
@@ -205,7 +205,13 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   absolute30minTTL, Stop/configure clears. Known task JSON returns normalized
   status/fixed failure text/remote_url as text; never download/play/authenticate
   a remote content URL automatically. Failed delivery may already submit/bill;
-  Stop cancels local work only. GUI/video MCP/legacy Adobe not yet migrated.
+  Stop cancels local work only. Desktop video workbench explicitly queries the
+  catalog, requires manual model/duration/resolution/ratio selection and prompt,
+  accepts supported public HTTPS reference/frame JSON, confirms each potentially
+  billed generation and manually queries the latest task. URLs remain text, no
+  playback/link/download/save. Origin + page capability and shared mutation gate
+  protect native actions; Stop/configure/load clear UI and fence late results.
+  Video MCP/legacy Adobe not yet migrated; no live-inference acceptance claim.
 - Semantic/local summarization, full attachment management, full media suite and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The default `mcp` stdio mode only reports capabilities and exposes this document.
