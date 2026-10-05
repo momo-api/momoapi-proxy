@@ -6,6 +6,9 @@ import (
 )
 
 func TestCodexProviderConfigIsLocalAndCredentialFree(t *testing.T) {
+	if text, err := CodexProviderConfig("http://127.0.0.1:1234#"); err == nil || text != "" {
+		t.Fatal("empty fragment delimiter changed exported base URL")
+	}
 	for _, endpoint := range []string{"", "http://localhost:1234", "http://127.0.0.1", "http://127.0.0.1:0", "http://127.0.0.1:65536", "http://127.0.0.1:01234", "http://user:secret@127.0.0.1:1234", "https://127.0.0.1:1234", "http://127.0.0.1:1234/", "http://127.0.0.1:1234/v1", "http://127.0.0.1:1234?", "http://127.0.0.1:1234#fragment", "http://127.0.0.1:1234/\"\napi_key=\"secret"} {
 		if text, err := CodexProviderConfig(endpoint); err == nil || text != "" {
 			t.Fatal("unsafe client endpoint accepted")

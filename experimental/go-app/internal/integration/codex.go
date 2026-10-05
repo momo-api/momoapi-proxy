@@ -15,7 +15,7 @@ func CodexProviderConfig(endpoint string) (string, error) {
 		return "", errors.New("local endpoint unavailable")
 	}
 	port, err := strconv.Atoi(u.Port())
-	if err != nil || port < 1 || port > 65535 || u.Host != net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) {
+	if err != nil || port < 1 || port > 65535 || endpoint != "http://"+net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) {
 		return "", errors.New("local endpoint unavailable")
 	}
 	// Documented user-level Codex provider fields. No inline bearer token and
