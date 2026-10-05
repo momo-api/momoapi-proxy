@@ -27,6 +27,7 @@ func main() {
 		Mode   string
 		Path   string
 		Search bool
+		JSON   bool
 	}
 	if json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&fixture) != nil {
 		os.Exit(1)
@@ -62,6 +63,9 @@ func main() {
 		captures = append(captures, payload)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
+		if fixture.JSON {
+			w.Header().Set("Content-Type", "application/json")
+		}
 		if fixture.Status != 0 && fixture.Status != 200 {
 			w.WriteHeader(fixture.Status)
 			io.WriteString(w, "redacted synthetic failure")

@@ -129,7 +129,7 @@ async function launch(fixture){
   let line='';const timer=setTimeout(()=>reject(Error('routecheck startup timeout')),10000);
   child.once('error',reject);child.once('exit',()=>{clearTimeout(timer);reject(Error('routecheck exited before handoff'))});
   child.stdout.on('data',b=>{line+=b;if(line.includes('\n')){clearTimeout(timer);resolve(JSON.parse(line.split('\n')[0]))}});
-  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200,Path:fixture.path,Search:fixture.search}));
+  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200,Path:fixture.path,Search:fixture.search,JSON:fixture.upstreamJSON}));
  });
  return {child,handoff};
 }
@@ -140,10 +140,10 @@ function items(body){
  const incomplete=events.find(e=>e.type==='response.incomplete');
  return {events,completed,incomplete,output:(completed||incomplete)?.response?.output?.map(({id,status,...item})=>item)||[]};
 }
-async function invoke(url,token,p,path='/v1/responses'){
+async function invoke(url,token,p,path='/v1/responses',extraHeaders={}){
  return new Promise((resolve,reject)=>{
   const data=JSON.stringify(p);
-  const req=httpRequest(url+path,{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json','content-length':Buffer.byteLength(data)}},response=>{
+  const req=httpRequest(url+path,{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json','content-length':Buffer.byteLength(data),...extraHeaders}},response=>{
    const chunks=[];let settled=false;
    const finish=truncated=>{if(settled)return;settled=true;const body=Buffer.concat(chunks).toString('utf8');resolve({status:response.statusCode,body,truncated,...items(body)})};
    response.on('data',b=>chunks.push(b));response.once('end',()=>finish(false));response.once('error',()=>finish(true));response.once('aborted',()=>finish(true));
@@ -323,4 +323,22 @@ for(const model of ['gpt-5.5','claude-sonnet-4-6','gemini-2.5-flash']){
   console.log('PASS uniform blackbox '+model+' explicit local compact');
  }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
 }
-console.log('PASS '+(cases.length+3)+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+for(const status of [200,404]){
+ const compact={id:'cmp_mock',object:'response.compaction',output:[{type:'compaction',id:'item_mock',encrypted_content:'opaque-synthetic-not-a-real-envelope'}],created_at:1,unknown:{text:'中文🙂'}};
+ const {child,handoff}=await launch({stream:JSON.stringify(compact),status,path:'/v1/responses/compact',upstreamJSON:true});let server;
+ try{
+  const env={MOMO_PROXY_HOME:'unused-routecheck-profile',MOMO_PROXY_CONSOLE_MIRROR:'0'};
+  const loggingRuntime={env,enqueueRequest:()=>true,enqueueDiagnostic:()=>true,snapshot:()=>({})};
+  server=createMomoSwitch({endpoint:'https://api.openai.com',apiKey:'synthetic-unified-only',localToken:'synthetic-node-only',host:'127.0.0.1',port:0,diagnosticsEnabled:false,compactionMode:'native',contextPolicy:{nativeCompactModels:['gpt-5.6-sol'],outboundBodyHardLimitBytes:1048576,outboundBodySoftLimitBytes:1047552},requestAdmission:{maxConcurrent:4,maxQueued:0,maxBodyBudgetMb:4,bodyReadTimeoutMs:15000},outputPolicy:{maxStreamMb:16,maxRetainedMb:1}},
+   {env,loggingRuntime,assetStore:{},attachmentAssetStore:{},fetchImpl:(url,init)=>{const u=new URL(url);return fetch(handoff.mock_url+u.pathname+u.search,init)}});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const p={model:'gpt-5.6-sol',input:[{role:'user',content:'native compact 中文🙂'}],instructions:'retain constraints'};
+  const n=await invoke('http://127.0.0.1:'+server.address().port,'synthetic-node-only',p,'/v1/responses/compact');
+  const g=await invoke(handoff.base_url.replace(/\/v1$/,''),handoff.api_key,p,'/v1/responses/compact',{'X-MOMO-Compact':'native'});
+  assert.equal(n.status,status);assert.equal(g.status,status);
+  const captures=await(await fetch(handoff.mock_url+'/capture')).json();assert.equal(captures.length,2);assert.deepEqual(captures[0],p);assert.deepEqual(captures[1],p);
+  if(status===200){assert.deepEqual(JSON.parse(n.body),compact);assert.deepEqual(JSON.parse(g.body),compact);assert.equal(g.body,JSON.stringify(compact))}else{assert.ok(!g.body.includes('redacted synthetic failure'));assert.ok(!g.body.includes('response.compaction'))}
+  console.log('PASS uniform blackbox explicit native compact '+status+'; one upstream request, no fallback/local envelope, synthetic capability only');
+ }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
+}
+console.log('PASS '+(cases.length+5)+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

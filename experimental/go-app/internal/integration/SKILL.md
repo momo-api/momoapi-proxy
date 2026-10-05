@@ -44,6 +44,20 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   abort without completion/history. Required text-only completion fails; incomplete
   may have no call but cannot bypass the set. Re-declare selection each turn.
   Returned tools run in the client, not MOMO.
+  Client search requires per-request momo_tool_loading:"client-search" and
+  parallel_tool_calls:false. One top-level tool_search (execution:"client",
+  object parameters) returns tool_search_call with object arguments and call_id.
+  Client replies with matched tool_search_output, execution:"client", tools array;
+  status:"completed" optional. Returned defer_loading:true definitions activate
+  only after that result; empty results are valid. Input order/identity is enforced,
+  no future declaration authorizes an old call, and only one call per response.
+  Ordinary function tool_search is distinct from the reserved search wire alias.
+  additional_tools only accepts developer nonempty explicitly loaded definitions;
+  defer:true there rejects. strict:true is bounded local schema validation, NOT
+  upstream constrained generation; $ref/unions/pattern/other vocabulary reject.
+  Native/default exact bytes remain untouched. This is not native deferred
+  prompt/cache layout, hosted search or actual Codex discovery acceptance.
+  No search/MCP/skill execution; search lifecycle local compact unsupported.
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures and media are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;
@@ -70,7 +84,16 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   only the existing anchor; never extends TTL or resurrects in-flight missing state.
   Native/default passthrough delegates history unchanged. Cross-model/provider and signed continuation
   remain unsupported. This is not remote-delivery acknowledgement.
-- POST /v1/responses/compact is a separate explicit routing-mode local checkpoint,
+- POST /v1/responses/compact with explicit request header X-MOMO-Compact:native
+  and a native Responses model forwards original JSON to the same upstream route.
+  This is a deliberate capability attempt, not a verified backend/model allowlist.
+  JSON output only, no retry/fallback/local envelope. Valid response.compaction
+  framing is checked, bytes/encrypted_content preserved; do not decode, fabricate,
+  translate or treat opaque output as local/cross-provider state. Explicitly replay
+  returned output to the same provider/model through native Responses. Provider
+  acceptance/encryption/semantic reduction is unverified by mock tests. Default
+  headerless behavior remains unchanged (501 passthrough/local mode below).
+- Headerless POST /v1/responses/compact is a separate explicit routing-mode local checkpoint,
   not native provider compact or a semantic summary. Chat/Claude/unsigned Gemini
   only; payload accepts model/input/tools and optional stream:false. Redeclare
   tools. Keep every instruction/user item, whole tool-bearing turns and latest
@@ -81,7 +104,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   state. Replay response.compaction.output explicitly as input. cmp_ IDs are NOT
   previous_response_id anchors; no encrypted_content envelope/restart guarantee.
   Omitted content is unknown; never infer task completion or retry an old task.
-- Native/semantic compaction, attachment management, media generation and
+- Semantic/local summarization, attachment management, media generation and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The built-in stdio MCP only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.

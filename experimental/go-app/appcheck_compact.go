@@ -47,5 +47,44 @@ func probeCompactRequests(core *appcore.Core) error {
 			}
 		}
 	}
+	return probeNativeCompactRequests(core)
+}
+
+const nativeCompactProbeJSON = ` {"id":"cmp_native_mock","object":"response.compaction","created_at":1,"output":[{"type":"compaction","id":"native_item","encrypted_content":"opaque-synthetic-not-a-real-envelope"}],"unknown":"中文🙂"} `
+
+func probeNativeCompactUpstream(w http.ResponseWriter, r *http.Request, data []byte) bool {
+	if !strings.Contains(string(data), "native-compact-probe") {
+		return false
+	}
+	valid := r.URL.Path == "/v1/responses/compact" && r.Header.Get("X-MOMO-Compact") == "" && r.Method == "POST"
+	if !valid {
+		w.WriteHeader(400)
+		return true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	io.WriteString(w, nativeCompactProbeJSON)
+	return true
+}
+
+func probeNativeCompactRequests(core *appcore.Core) error {
+	base, key, err := probeCredentials(core)
+	if err != nil {
+		return err
+	}
+	client := http.Client{Timeout: 4 * time.Second}
+	defer client.CloseIdleConnections()
+	req, _ := http.NewRequest("POST", base+"/responses/compact", strings.NewReader(` {"model":"gpt-5.6-sol","input":[{"role":"user","content":"native-compact-probe"}],"unknown":"中文🙂"} `))
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-MOMO-Compact", "native")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	data, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || resp.StatusCode != 200 || string(data) != nativeCompactProbeJSON {
+		return errors.New("native compact exact envelope probe")
+	}
 	return nil
 }

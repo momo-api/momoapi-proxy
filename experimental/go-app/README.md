@@ -31,7 +31,7 @@ support; no signature bypass, replay cache or artificial signature is introduced
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
-It rejects unknown payload fields/options, media, foreign/expired history references, opaque/provider compaction,
+It rejects unknown payload fields/options, media, foreign/expired history references, opaque/provider compaction on converted paths,
 hosted built-in tools, grammar on converted paths, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
@@ -44,6 +44,23 @@ Converted grammar/unknown formats return 400 unsupported_tool_format before any
 upstream send; native Responses/default passthrough preserve format bytes unchanged
 and delegate enforcement to the upstream. This is not grammar support or full
 Codex exec compatibility. Custom format is forbidden on function declarations.
+
+### Explicit native compact attempt
+
+POST /v1/responses/compact with X-MOMO-Compact:native explicitly attempts the
+configured upstream's native endpoint for a native Responses-classified model.
+Available in passthrough and routing modes; headerless default remains unchanged
+(501 in passthrough; local checkpoint in routing mode). One upstream JSON request,
+exact request/response bytes and opaque encrypted_content preserved; no automatic
+retry/fallback/local envelope, history anchor, decryption or state conversion.
+stream:true, converted models and unknown/duplicate policy headers reject before
+send. Successful response must have response.compaction/nonempty typed output;
+compaction items require nonempty encrypted_content. Existing auth/origin, public
+HTTPS endpoint, Stop/deadline, 1MiB request/16MiB response limits remain in force.
+Explicitly replay native output to the same provider/model; converted paths still
+reject opaque state. This is an opt-in capability attempt, not a backend/model
+verification or semantic/encryption guarantee; all tests use synthetic mock data.
+No automatic context_management/compaction_trigger or semantic summary is added.
 
 ### Explicit client-search compatibility (not native deferred loading)
 
@@ -168,7 +185,7 @@ continuation, native/semantic compact and signed Gemini history remain unsupport
 
 ### Explicit local checkpoint (not a semantic summary)
 
-POST /v1/responses/compact is a local-only operation, enabled only in momo-routing
+Headerless POST /v1/responses/compact is a local-only operation, enabled only in momo-routing
 for the strict converted Chat/Claude/unsigned Gemini subset. Default mode returns
 501; native Responses/Muse reject422. It accepts only model/input/tools and optional
 stream:false, with a trailing current user turn and fully paired declared tools.
@@ -425,7 +442,7 @@ WebView state/configure+remember/change-config/load/start; native client uses au
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
-(61 physical upstream requests in total, including twelve client-search/load continuation requests, an explicit model-catalog check, six allowed-tools and twelve raw exec/apply_patch SSE/JSON requests and three-protocol history continuation
+(62 physical upstream requests in total, including one explicit native compact attempt, twelve client-search/load continuation requests, an explicit model-catalog check, six allowed-tools and twelve raw exec/apply_patch SSE/JSON requests and three-protocol history continuation
 and output-limit SSE/JSON incomplete terminals),
 then three local checkpoint JSON requests (zero additional upstream calls),
 checking exact namespace/unknown-field/Unicode bytes; native client

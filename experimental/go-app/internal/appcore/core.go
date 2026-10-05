@@ -213,6 +213,11 @@ func (c *Core) Handler() http.Handler {
 	})
 }
 func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
+	nativeCompact, validCompactHeader := nativeCompactRequested(r)
+	if !validCompactHeader {
+		http.Error(w, "invalid compact policy", 400)
+		return
+	}
 	c.mu.Lock()
 	if !c.running {
 		c.mu.Unlock()
@@ -284,8 +289,18 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 		stream = string(payload["stream"]) == "true"
 		if r.URL.Path == "/v1/responses/compact" {
-			c.localCheckpoint(ctx, w, body, config)
-			return
+			if !nativeCompact {
+				c.localCheckpoint(ctx, w, body, config)
+				return
+			}
+			if resolveProtocol(model) != "responses" {
+				http.Error(w, "native compact requires a Responses model", 422)
+				return
+			}
+			if stream {
+				http.Error(w, "native compact requires JSON output", 400)
+				return
+			}
 		}
 		if r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" {
 			var seed *historySeed
@@ -445,7 +460,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		if ctx.Err() != nil {
 			panic(http.ErrAbortHandler)
 		}
-		if err != nil || len(data) > MaxResponse || !json.Valid(data) {
+		if err != nil || len(data) > MaxResponse || !json.Valid(data) || nativeCompact && !validateNativeCompactResponse(data) {
 			http.Error(w, "upstream body rejected", 502)
 			return
 		}

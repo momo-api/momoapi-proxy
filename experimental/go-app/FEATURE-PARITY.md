@@ -8,14 +8,14 @@
 
 | 能力 | Node 版实现依据（仓库根目录相对路径） | Go 预览实际范围 |
 | --- | --- | --- |
-| 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与显式本地 `/v1/responses/compact`；无无版本别名，无原生 compact |
+| 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与 `/v1/responses/compact`；compact 显式 native 请求可尝试原生透传（非真实能力证明），另有本地 checkpoint；无无版本别名 |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
 | Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/媒体/grammar 等拒绝，不宣称完整兼容 |
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
-| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换路径支持同模型有界内存 previous_response_id 回放；新增显式本地有损 checkpoint/普通 output 手动回放。无原生/语义摘要 compact、opaque envelope、跨模型/供应商状态 |
+| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 手动复制本地连接配置；新增明确点击的 Key 模型列表检查/本地筛选，不代表推理验证；无自动接入或更新 |
@@ -232,6 +232,21 @@ Prism此前230.375s静态建议不是测试/批准，未采纳与官方返回def
 接入同一assistant块序列，允许同回合后续assistant文本但拒绝user/system打断。
 同时补调用ID/总历史call数量的输出回放闭环门禁，不称顾问执行或批准。
 本增量本地/三平台执行结果以PR回执为准，不把新增测试源码当作已通过。
+
+### 显式原生 compact 增量（2026-10-05）
+
+独立POST /v1/responses/compact增加请求级X-MOMO-Compact:native；仅Responses模型
+明确尝试相同上游接口，默认/headerless策略不变，不增加已验证模型列表、不自动
+触发、不重试或降级成本地摘要。精确保留请求与JSON响应/opaque字节，仅校验
+response.compaction、非空typed output与compaction的非空encrypted_content。不解密/
+伪造/翻译供应商状态、不建local anchor；后续原生Responses按同模型/供应商显式
+回放，转换仍拒绝opaque。真实能力/语义压缩/密文安全未被mock证明。
+官方参考：https://developers.openai.com/api/reference/resources/responses/methods/compact
+统一TCP增加原生成功/404无回退两组，合计188；Node使用合成native allowlist，
+双方相同mock/资源。WebView新增1次原生尝试，总62；3次local仍零上游。
+单测覆原字节/回放/no local state、显式门禁、未知header/stream、错误码/格式/大小
+与一次发送。内置Skill/MCP同步披露search/strict和native尝试边界；非真实钱包或
+第三方MCP执行支持。当前增量执行/CI回执未完成前不称通过。
 
 ## Magpie 借鉴边界
 
