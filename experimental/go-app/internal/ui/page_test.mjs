@@ -26,7 +26,7 @@ const context = vm.createContext({
   document:{hidden:false,getElementById:id=>nodes.get(id),createElement:()=>element()},
   Option:function(text,value){Object.assign(this,element(),{textContent:text,value})},
   window:{addEventListener:(name,fn)=>listeners.set(name,fn)},
-  bridgeNonce:'synthetic-page-capability',AbortController,confirm:()=>allowConfirm,
+  bridgeNonce:'synthetic-page-capability',AbortController,TextEncoder,confirm:()=>allowConfirm,
   setTimeout:fn=>{timers.push(fn);return timers.length},clearTimeout:()=>{},
   setInterval:fn=>{intervals.push(fn)},
   fetch:async(url,options)=>{calls.push({url,options});return handler?handler(url,options):response(200)}
@@ -254,7 +254,7 @@ await nodes.get('video-mcp-copy').onclick();assert.equal(calls.at(-1).url,'/app/
 assert.equal(calls.filter(c=>c.url==='/app/image-mcp-config').length,1);
 assert.equal(calls.find(c=>c.url==='/app/image-mcp-config').options.body,undefined);
 assert.equal(calls.find(c=>c.url==='/app/image-mcp-config').options.headers['X-MOMO-Bridge'],'synthetic-page-capability');
-const catalog={models:[{id:'image-test',available:true,parameters:['prompt','n','quality'],allowed_n:[1,2]}],expires_at:new Date(Date.now()+300000).toISOString()};
+const catalog={models:[{id:'image-test',available:true,operations:['generate','edit'],max_reference_images:2,edit_transport:'images-edits-json-images',parameters:['prompt','n','quality','reference_images'],allowed_n:[1,2]}],expires_at:new Date(Date.now()+300000).toISOString()};
 handler=url=>url==='/app/images/catalog'?response(200,catalog):response(200);
 await nodes.get('image-catalog').onclick();
 assert.equal(nodes.get('image-model').value,'');assert.equal(nodes.get('image-generate').disabled,true);
@@ -270,6 +270,17 @@ handler=url=>url==='/app/images/task'?response(200,{images:[{url:'https://images
 await nodes.get('image-task').onclick();assert.equal(nodes.get('image-task').disabled,true);assert.equal(nodes.get('image-preview').src,undefined);
 const card=nodes.get('image-results').children[0];assert.equal(card.children[1].textContent,'https://images.example/a');assert.equal(card.children[1].href,undefined);card.children[2].onclick();assert.equal(nodes.get('image-preview').src,'data:image/png;base64,'+png);
 assert.equal(calls.filter(c=>c.url==='/app/images/task').length,1);
+nodes.get('image-operation').value='edit';nodes.get('image-consent').checked=true;nodes.get('image-operation').onchange();
+assert.equal(nodes.get('image-consent').checked,false);assert.equal(nodes.get('image-reference-field').hidden,false);assert.equal(nodes.get('image-generate').disabled,true);
+nodes.get('image-references').value='data:image/png;base64,'+png;nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();assert.equal(nodes.get('image-generate').disabled,false);
+handler=url=>url==='/app/images/edit'?response(200,{images:[],task_id:'edit_gui',raw_status:'submitted',terminal:false}):response(200);
+assert.equal(await nodes.get('image-generate').onclick(),true);assert.equal(nodes.get('image-consent').checked,false);
+const editRequest=JSON.parse(calls.find(c=>c.url==='/app/images/edit').options.body);assert.deepEqual(editRequest.request.reference_images,['data:image/png;base64,'+png]);assert.equal(editRequest.confirmed,true);assert.equal(nodes.get('image-task').disabled,false);
+handler=url=>url==='/app/images/task'?response(200,{images:[{url:'https://images.example/edited.png'}],task_id:'edit_gui',terminal:true}):response(200);
+await nodes.get('image-task').onclick();assert.equal(nodes.get('image-results').children[0].children[1].textContent,'https://images.example/edited.png');assert.equal(nodes.get('image-task').disabled,true);
+nodes.get('image-references').value='x'.repeat(150000);nodes.get('image-prompt').value='中'.repeat(10000);nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();
+assert.equal(await nodes.get('image-generate').onclick(),false);assert.equal(calls.filter(c=>c.url==='/app/images/edit').length,1);assert.match(nodes.get('image-result-note').textContent,/160 KiB/);
+nodes.get('image-prompt').value='hi';nodes.get('image-operation').value='generate';nodes.get('image-operation').onchange();
 nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();const blockedImage=pending();handler=url=>url==='/app/images/generate'?blockedImage.promise:response(200);const generating=nodes.get('image-generate').onclick();await flush();assert.equal(nodes.get('configure').disabled,true);assert.equal(nodes.get('stop').disabled,false);assert.equal(nodes.get('quit').disabled,false);assert.equal(await nodes.get('image-generate').onclick(),false);
 const genOptions=calls.at(-1).options;timers.at(-1)();assert.equal(genOptions.signal.aborted,true);
 state={...state,Running:false};await nodes.get('stop').onclick();blockedImage.resolve(response(200,{images:[{url:'https://images.example/stale'}],terminal:true}));await generating;assert.equal(nodes.get('image-results').children.length,0);assert.equal(nodes.get('image-preview').src,undefined);assert.equal(run('imageCatalog'),null);

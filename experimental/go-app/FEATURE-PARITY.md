@@ -17,7 +17,7 @@
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；已完成搜索/加载/调用结果支持显式本地 checkpoint 与手动回放；hosted/复杂 schema 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或签名供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
-| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询，编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
+| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询；新增目录授权图片 JSON reference 编辑，mask/Chat-media 编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；新增显式本地脱敏aggregate快照/离线CLI，不查询客户端账号或上游、不代表完整doctor；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
 | Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有首行，另有可复制无Key配置的 mcp-images-connect（客户端显式local session env）接入当前gateway；独立显式视频 MCP 私有配置/连接现有 gateway 子集；非现有插件直接兼容，完整媒体/通用第三方管理未迁移 |
@@ -35,6 +35,27 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 这些不是“兼容性改进”，不能直接替代 Node 的策略与附件限制。
 
 ## 本次实际验证范围
+
+### 图片参考编辑工作流（2026-10-06；本地已验证，新HEAD三平台待验收）
+
+新增同Core的POST /internal/images/edit、桌面操作/参考图/逐次确认与image_edit
+MCP；显式目录operations edit，不能从token模型列表推断。Web两alias固定JSON
+images至/v1/images/edits，Adobe/GPT/APIMart固定image_urls至generations。
+目录count允许值/上下界与安全上限4/16/1取交；不信任任意catalog endpoint，
+显式transport冲突禁用edit。保持reference字节/顺序，inline PNG/JPEG/静态
+GIF/WebP头部/framing校验；仅APIMart可委托lexically public HTTPS，不查DNS/
+内容、不抓取/上传文件。mask/Chat媒体编辑/assetID/文件/自动fallback不支持。
+同300s/shared admission/catalog5min/task64+30min/Stop clear，failed delivery
+仍保留已提交任务，碰撞不覆盖、失败refresh撤销权限；MCP/desktop160KiB，
+duplicate/UTF8/depth64在重序列化前拒绝，readonly/video模式不获得edit。
+先红测404再绿；36组新增同mock/resources/exactinput黑盒，统一431组通过，
+Node下载/持久化与Go返回URL/inline差异各自断言，不伪装产品完整对齐。
+Windows真实WebView181次TLSmock通过（新增8次API/direct+connectedMCP/DOM
+edit+manualtask），普通Winbinary/官方SDK1.32.1模式与目录失败门禁通过。
+Stop夹具初次未consume POST body导致server不能观测断开且test超时；修正
+消费body和有界清理，保留取消3s/单send/零task门禁，不放宽production。
+Prism启动toolerror，无专家批准。无真实账号/付费推理/本机installer。
+本增量仍须exact新HEAD三平台CI和fresh产物验收，不引用旧7197199为通过。
 
 ### 接入页收尾（2026-10-06；本地验证，新HEAD待验收）
 

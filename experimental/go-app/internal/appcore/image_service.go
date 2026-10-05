@@ -76,13 +76,13 @@ func (c *Core) imageRequest(ctx context.Context, w http.ResponseWriter, r *http.
 		c.refreshImageCatalog(ctx, w, config, generation)
 		return
 	}
-	if r.URL.Path == "/internal/images/generate" {
+	if r.URL.Path == "/internal/images/generate" || r.URL.Path == "/internal/images/edit" {
 		typ, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || typ != "application/json" {
 			http.Error(w, "JSON required", 415)
 			return
 		}
-		p, err := decodeObject(string(body))
+		p, err := decodeVideoObject(body)
 		if err != nil {
 			http.Error(w, "invalid image request", 400)
 			return
@@ -102,7 +102,14 @@ func (c *Core) imageRequest(ctx context.Context, w http.ResponseWriter, r *http.
 			http.Error(w, "query image capabilities and select an available model", 409)
 			return
 		}
-		wire, n, err := buildImageGeneration(body, profile)
+		var wire []byte
+		var n int
+		upstreamPath := "/v1/images/generations"
+		if r.URL.Path == "/internal/images/edit" {
+			wire, n, upstreamPath, err = buildImageEdit(body, profile)
+		} else {
+			wire, n, err = buildImageGeneration(body, profile)
+		}
 		if err != nil {
 			http.Error(w, "unsupported image request", 400)
 			return
@@ -133,7 +140,7 @@ func (c *Core) imageRequest(ctx context.Context, w http.ResponseWriter, r *http.
 			}
 			c.mu.Unlock()
 		}()
-		data, status := c.imageJSON(ctx, config, "POST", "/v1/images/generations", wire, MaxResponse)
+		data, status := c.imageJSON(ctx, config, "POST", upstreamPath, wire, MaxResponse)
 		if status != 200 {
 			http.Error(w, "image upstream unavailable or rejected", status)
 			return

@@ -91,7 +91,7 @@ func newLocalMediaDispatch(endpoint, token string, video bool) (ImageDispatch, f
 		switch {
 		case path == "/internal/"+modality+"/capabilities":
 			timeout = 20 * time.Second
-		case path == "/internal/"+modality+"/generate":
+		case path == "/internal/"+modality+"/generate" || !video && path == "/internal/images/edit":
 			method, timeout = "POST", 305*time.Second
 			if video {
 				timeout = 65 * time.Second

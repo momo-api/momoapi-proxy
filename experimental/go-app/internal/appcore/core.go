@@ -266,7 +266,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	c.serial++
 	id := c.serial
 	requestTimeout := 120 * time.Second
-	if image, _ := imageRoute(r.URL.Path, r.Method); image && r.URL.Path == "/internal/images/generate" {
+	if image, _ := imageRoute(r.URL.Path, r.Method); image && (r.URL.Path == "/internal/images/generate" || r.URL.Path == "/internal/images/edit") {
 		requestTimeout = 300 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)

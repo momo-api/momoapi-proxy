@@ -14,6 +14,28 @@ func imageCall(id string, name, args string) string {
 	return `{"jsonrpc":"2.0","id":` + id + `,"method":"tools/call","params":{"name":"` + name + `","arguments":` + args + `}}`
 }
 
+func TestImageMCPEditConfirmationAndModeIsolation(t *testing.T) {
+	var paths []string
+	dispatch := func(ctx context.Context, path string, body []byte) ([]byte, int) {
+		paths = append(paths, path)
+		if string(body) != `{"model":"chosen","prompt":"hi","reference_images":["data"]}` {
+			t.Fatal("edit body changed")
+		}
+		return []byte(`{"images":[],"task_id":"edit","terminal":false}`), 200
+	}
+	good := imageCall("1", "image_edit", `{"confirmed":true,"request":{"model":"chosen","prompt":"hi","reference_images":["data"]}}`)
+	input := strings.Join([]string{imageCall("2", "image_edit", `{"confirmed":false,"request":{}}`), imageCall("3", "image_edit", `{"request":{}}`), imageCall("4", "image_edit", `{"confirmed":false,"confirmed":true,"request":{}}`), good}, "\n") + "\n"
+	var out bytes.Buffer
+	if ServeImageMCP(context.Background(), strings.NewReader(input), &out, dispatch) != nil || len(paths) != 1 || paths[0] != "/internal/images/edit" {
+		t.Fatal("edit confirmation dispatch")
+	}
+	paths = nil
+	out.Reset()
+	if ServeVideoMCP(context.Background(), strings.NewReader(good+"\n"), &out, dispatch) != nil || len(paths) != 0 || !strings.Contains(out.String(), "-32602") {
+		t.Fatal("video gained image edit")
+	}
+}
+
 func TestImageMCPWhitelistConfirmationAndPrecision(t *testing.T) {
 	var paths []string
 	dispatch := func(ctx context.Context, path string, body []byte) ([]byte, int) {
@@ -50,10 +72,10 @@ func TestImageMCPWhitelistConfirmationAndPrecision(t *testing.T) {
 			}
 		}
 	}
-	if json.Unmarshal([]byte(lines[1]), &result) != nil || len(result.Result.Tools) != 4 {
+	if json.Unmarshal([]byte(lines[1]), &result) != nil || len(result.Result.Tools) != 5 {
 		t.Fatal("tool list")
 	}
-	for i, name := range []string{"gateway_capabilities", "image_capabilities", "image_generate", "image_task"} {
+	for i, name := range []string{"gateway_capabilities", "image_capabilities", "image_generate", "image_task", "image_edit"} {
 		if result.Result.Tools[i].Name != name {
 			t.Fatal("tools")
 		}

@@ -109,6 +109,12 @@ func mediaMCPResult(ctx context.Context, method string, params json.RawMessage, 
 			}
 			tools = append(tools, map[string]any{"name": spec.name, "description": spec.description, "inputSchema": schema, "annotations": map[string]any{"readOnlyHint": spec.read, "destructiveHint": !spec.read, "idempotentHint": false, "openWorldHint": true}})
 		}
+		if !video {
+			schema := mediaMCPRequestSchema(false, promptLimit)
+			schema["required"] = []string{"model", "prompt", "reference_images"}
+			schema["properties"].(map[string]any)["reference_images"] = map[string]any{"type": "array", "minItems": 1, "maxItems": 16, "items": map[string]any{"type": "string"}, "description": "Ordered validated inline image data URLs. APIMart also permits lexically public HTTPS delegated upstream; no DNS/content proof. Fresh catalog edit permission and count bounds required. No masks, files, asset IDs or proxy fetching. Total MCP line <=160KiB."}
+			tools = append(tools, map[string]any{"name": "image_edit", "description": generationDescription, "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"confirmed": map[string]any{"type": "boolean", "const": true}, "request": schema}, "required": []string{"confirmed", "request"}, "additionalProperties": false}, "annotations": map[string]any{"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true}})
+		}
 		return map[string]any{"tools": tools}, 0, ""
 	}
 	if method != "tools/call" {
@@ -133,13 +139,19 @@ func mediaMCPResult(ctx context.Context, method string, params json.RawMessage, 
 			return nil, -32602, "Unsupported tool or arguments"
 		}
 		path = "/internal/" + modality + "s/capabilities"
-	case modality + "_generate":
+	case modality + "_generate", "image_edit":
+		if name == "image_edit" && video {
+			return nil, -32602, "Unsupported tool or arguments"
+		}
 		var confirmed bool
 		var request map[string]json.RawMessage
 		if len(args) != 2 || !mcpFields(args, "confirmed", "request") || json.Unmarshal(args["confirmed"], &confirmed) != nil || !confirmed || json.Unmarshal(args["request"], &request) != nil || request == nil {
 			return nil, -32602, "Explicit generation confirmation and request required"
 		}
 		path, body = "/internal/"+modality+"s/generate", args["request"]
+		if name == "image_edit" {
+			path = "/internal/images/edit"
+		}
 	case modality + "_task":
 		var id string
 		if len(args) != 1 || !mcpFields(args, "task_id") || json.Unmarshal(args["task_id"], &id) != nil || len(id) == 0 || len(id) > 256 || id == "." || id == ".." || strings.Trim(id, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:-") != "" {

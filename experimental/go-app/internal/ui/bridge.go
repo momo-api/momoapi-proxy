@@ -74,7 +74,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/task"
+		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/task"
 		videoAction := r.URL.Path == "/app/videos/catalog" || r.URL.Path == "/app/videos/generate" || r.URL.Path == "/app/videos/task"
 		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config" || r.URL.Path == "/app/video-mcp-config" || r.URL.Path == "/app/codex-catalog" || r.URL.Path == "/app/diagnostics") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
@@ -121,21 +121,25 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 					TaskID    string          `json:"task_id"`
 				}
 				d := json.NewDecoder(bytes.NewReader(data))
+				var fields map[string]json.RawMessage
 				d.DisallowUnknownFields()
 				var trailing any
-				if d.Decode(&input) != nil || d.Decode(&trailing) != io.EOF {
+				if !strictVideoAction(data) || json.Unmarshal(data, &fields) != nil || fields == nil || d.Decode(&input) != nil || d.Decode(&trailing) != io.EOF {
 					http.Error(w, "invalid image action", 400)
 					return
 				}
-				if r.URL.Path == "/app/images/generate" {
-					if !input.Confirmed || input.TaskID != "" || len(input.Request) == 0 {
+				if r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/edit" {
+					if len(fields) != 2 || !input.Confirmed || input.TaskID != "" || len(input.Request) == 0 {
 						http.Error(w, "explicit generation confirmation required", 400)
 						return
 					}
 					path = "/internal/images/generate"
+					if r.URL.Path == "/app/images/edit" {
+						path = "/internal/images/edit"
+					}
 					body = input.Request
 				} else {
-					if input.Confirmed || input.Request != nil {
+					if len(fields) != 1 || input.Confirmed || input.Request != nil {
 						http.Error(w, "invalid task action", 400)
 						return
 					}

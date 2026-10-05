@@ -460,7 +460,7 @@ func TestImageRouteSecurityAndFailedRefreshRevokesCatalog(t *testing.T) {
 		{"/internal/images/capabilities", "GET", "{}", nil, 400},
 		{"/internal/images/generate", "GET", "", nil, 405},
 		{"/internal/images/generate", "POST", "{}", map[string]string{"Content-Type": "text/plain"}, 415},
-		{"/internal/images/edit", "POST", "{}", nil, 404},
+		{"/internal/images/edit", "POST", "{}", nil, 409},
 		{"/internal/images/assets", "GET", "", nil, 404},
 		{"/internal/images/tasks/foreign", "GET", "", nil, 404},
 		{"/internal/images/tasks/%2e%2e", "GET", "", nil, 400},

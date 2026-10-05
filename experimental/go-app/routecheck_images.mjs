@@ -11,7 +11,7 @@ async function localGET(url,headers){
 // Same TCP upstream, budgets and exact canonical request on Node and Go. Node
 // asset persistence is an in-memory test stub; URL downloading is intentionally
 // rejected by the fixture, not a parity/real image storage or generation proof.
-export async function imageBlackbox(launch,invoke){
+export async function imageBlackbox(launch,invoke,edit=false){
  const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
  const profiles=[
   {model:'momoapi-gpt-image-2-5-flare',extra:{aspect_ratio:'16:9',quality:'high'},want:{size:'16:9',quality:'high'}},
@@ -19,12 +19,19 @@ export async function imageBlackbox(launch,invoke){
   {model:'momoapi-gemini-nano-banana-3',extra:{resolution:'4k'},want:{aspect_ratio:'1:1',resolution:'4k'}},
   {model:'gpt-image-2',extra:{aspect_ratio:'16:9',resolution:'4k'},want:{size:'1536x1024',quality:'high'}},
  ];
+ if(edit)profiles.push(
+  {model:'momoapi-gpt-image-2-5-sunburst',extra:{aspect_ratio:'16:9',quality:'high'},want:{size:'16:9',quality:'high'}},
+  {model:'momoapi-gpt-image-2-5-prism',extra:{aspect_ratio:'4:3',quality:'low'},want:{aspect_ratio:'4:3',quality:'low'}},
+ );
  let count=0;
  for(const f of profiles)for(const shape of ['inline','url','task','401','429','500']){
   const status=/^\d/.test(shape)?Number(shape):200;
   const output=shape==='inline'?{data:[{b64_json:png}]}:shape==='url'?{data:[{url:'https://images.example/generated.png'}]}:{data:[{task_id:'task_shared',status:'submitted'}]};
-  const catalog={models:[{id:f.model,modality:'image',available:true,operations:['generate'],parameters:{}}]};
-  const {child,handoff}=await launch({path:'/v1/images/generations',stream:JSON.stringify(output),upstreamJSON:true,status,image:true,imageCatalog:JSON.stringify(catalog)});let server;
+  const reference='data:image/png;base64,'+png;
+  const references=edit?[reference,...(f.model==='gpt-image-2'?[]:[reference])]:undefined;
+  const web=f.model==='momoapi-gpt-image-2-5-flare'||f.model==='momoapi-gpt-image-2-5-sunburst';
+  const catalog={models:[{id:f.model,modality:'image',available:true,operations:edit?['generate','edit']:['generate'],parameters:edit?{max_reference_images:{maximum:2}}:{}}]};
+  const {child,handoff}=await launch({path:edit&&web?'/v1/images/edits':'/v1/images/generations',stream:JSON.stringify(output),upstreamJSON:true,status,image:true,imageCatalog:JSON.stringify(catalog)});let server;
   try{
    const env={MOMO_PROXY_HOME:'unused-image-routecheck',MOMO_PROXY_CONSOLE_MIRROR:'0'};
    const loggingRuntime={env,enqueueRequest:()=>true,enqueueDiagnostic:()=>true,snapshot:()=>({})};
@@ -34,13 +41,14 @@ export async function imageBlackbox(launch,invoke){
    await new Promise(r=>server.listen(0,'127.0.0.1',r));
    const nodeURL='http://127.0.0.1:'+server.address().port,goURL=handoff.base_url.replace(/\/v1$/,'');
    const capability=await localGET(goURL+'/internal/images/capabilities',{authorization:'Bearer '+handoff.api_key});assert.equal(capability.status,200);
-   const cap=await capability.json();assert.equal(cap.models.length,1);assert.equal(cap.models[0].id,f.model);assert.deepEqual(cap.models[0].operations,['generate']);
-   const request={model:f.model,prompt:' 中文🙂 ',n:1,...f.extra};
-   const n=await invoke(nodeURL,'synthetic-node-only',request,'/internal/images/generate',{'x-local-token':'synthetic-node-only'});
-   const g=await invoke(goURL,handoff.api_key,request,'/internal/images/generate');
+   const cap=await capability.json();assert.equal(cap.models.length,1);assert.equal(cap.models[0].id,f.model);assert.deepEqual(cap.models[0].operations,edit?['generate','edit']:['generate']);
+   const request={model:f.model,prompt:' 中文🙂 ',n:1,...f.extra,...(edit?{reference_images:references}:{})};
+   const localPath=edit?'/internal/images/edit':'/internal/images/generate';
+   const n=await invoke(nodeURL,'synthetic-node-only',request,localPath,{'x-local-token':'synthetic-node-only'});
+   const g=await invoke(goURL,handoff.api_key,request,localPath);
    const nodeStatus=shape==='url'?502:status===500?502:status;assert.equal(n.status,nodeStatus,f.model+' '+shape+' Node '+n.body);assert.equal(g.status,status);
    const captures=await(await fetch(handoff.mock_url+'/capture')).json();assert.equal(captures.length,2,'one generation send each, no fallback');
-   const want={model:f.model,prompt:'中文🙂',n:1,...f.want};assert.deepEqual(captures[0],want);assert.deepEqual(captures[1],want);
+   const want={model:f.model,prompt:'中文🙂',n:1,...f.want,...(edit?{[web?'images':'image_urls']:references}:{})};assert.deepEqual(captures[0],want);assert.deepEqual(captures[1],want);
    if(status===200){
     const nr=JSON.parse(n.body),gr=JSON.parse(g.body);
     if(shape==='inline'){assert.equal(nr.images.length,1);assert.equal(gr.images.length,1);assert.equal(nr.images[0].asset_id,'img_'+ 'a'.repeat(64));assert.equal(nr.images[0].b64_json,undefined);assert.equal(stored[0].b64_json,png);assert.equal(gr.images[0].b64_json,png);assert.equal(gr.images[0].mime_type,'image/png');assert.equal(gr.terminal,true)}
@@ -52,7 +60,7 @@ export async function imageBlackbox(launch,invoke){
      const paths=(await(await fetch(handoff.mock_url+'/capture')).json()).slice(2);assert.deepEqual(paths,[{task_path:'/v1/tasks/task_shared'},{task_path:'/v1/tasks/task_shared'}]);
     }
    }else{assert.ok(!g.body.includes('redacted synthetic failure'));assert.ok(!g.body.includes('b64_json'))}
-   console.log('PASS shared image blackbox '+f.model+' '+shape+'; no live image/storage/MCP proof');count++;
+   console.log('PASS shared image '+(edit?'edit':'generate')+' blackbox '+f.model+' '+shape+'; no live image/storage/MCP proof');count++;
   }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
  }
  return count;

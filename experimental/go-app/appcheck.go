@@ -254,11 +254,11 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 173 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || codexCatalogCopies.Load() != 1 || imageMCPCopies.Load() != 1 || videoMCPCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 181 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || codexCatalogCopies.Load() != 1 || imageMCPCopies.Load() != 1 || videoMCPCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (173 upstream requests; explicit converted provider replay and bounded long tool aliases/history and explicit single-tool constraint and ordinary nullable strict arguments and completed search lifecycle checkpoint/replay/paired second turn; desktop video catalog/explicit controls/confirmed generation/manual task/URL text/Stop clear + desktop image catalog/generation/task/explicit inline preview + image/video API subsets + opt-in direct and connected image/video MCP catalog/generation/task streams) + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (181 upstream requests; explicit converted provider replay and bounded long tool aliases/history and explicit single-tool constraint and ordinary nullable strict arguments and completed search lifecycle checkpoint/replay/paired second turn; desktop video catalog/explicit controls/confirmed generation/manual task/URL text/Stop clear + desktop image catalog/generation/edit references/task/explicit inline preview + image/video API subsets + opt-in direct and connected image/video MCP catalog/generation/task streams plus direct/connected image edit lifecycle) + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
@@ -304,7 +304,7 @@ func check() error {
 		close(appReady)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/app/videos/catalog", "/app/videos/generate", "/app/videos/task", "/app/images/catalog", "/app/images/generate", "/app/images/task", "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/codex-catalog", "/app/skill", "/app/mcp-config", "/app/image-mcp-config", "/app/video-mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
+			case "/app/videos/catalog", "/app/videos/generate", "/app/videos/task", "/app/images/catalog", "/app/images/generate", "/app/images/edit", "/app/images/task", "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/codex-catalog", "/app/skill", "/app/mcp-config", "/app/image-mcp-config", "/app/video-mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
 				latestStep.Store(r.URL.Path)
 			}
 			if r.URL.Path == "/" {

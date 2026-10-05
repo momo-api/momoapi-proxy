@@ -540,19 +540,36 @@ returned references, disk persistence or image content/safety verification.
 Base64 checks recognized image headers/framing and bounded dimensions only.
 Only known JSON envelopes accepted, not arbitrary recursive extraction/SSE.
 
+Image reference editing: POST /internal/images/edit requires fresh catalog
+operations edit (model-list fallback NEVER permits editing). Same model/prompt/N
+and controls, plus ordered reference_images strings. Web aliases send JSON
+images to /v1/images/edits; Adobe and gpt-image-2 send image_urls to
+/v1/images/generations; APIMart 2.5 sends image_urls to that same fixed path.
+Inline PNG/JPEG/static GIF/WebP data URLs are bounded and header/framing checked,
+not full content/safety validated. Only APIMart permits lexically public HTTPS
+delegated upstream; no proxy fetch/DNS/content guarantee. Catalog count controls
+intersect safety ceilings Web/Adobe4, APIMart16, GPT1 (not live upstream maxima).
+An explicit conflicting catalog edit transport denies editing. Unknown/duplicate
+fields, masks, file/asset references and Chat-media edits reject before send.
+Same single send, 300s context, admission, task reservation/TTL, manual task lookup
+and Stop/configure behavior; no fallback/retry/remote rollback. Desktop operation
+selector and reference textarea reuse consent and task UI, with a 160KiB total
+envelope. Opt-in image_edit MCP has confirmed:true and the same160KiB line limit;
+client affirmation is NOT verified human consent. No filepicker or auto upload.
+
 Manually GET /internal/images/tasks/<id> for IDs returned by this Core only;
 one GET /v1/tasks/<id>, no auto-poll or alternate endpoint fallback. 64 slots
 reserved before generation (pending included), absolute30minTTL, no refresh.
 Stop/configure clears local catalog/tasks, not remote jobs or billed effects;
 delivery failure can leave submitted/tracked task, no rollback or auto-retry.
-No edits/video/cloud assets/filepicker/disk assets in this subset.
+Catalog-authorized JSON reference edits are described below; no masks/Chat-media edit/video/cloud assets/filepicker/disk assets in this subset.
 Readonly MCP exposes this contract as image_generation; media:false still means
 the full Node media suite is not implemented. Node remains primary.
 
 Desktop workbench: explicit catalog button, manual model/count selection, prompt
 and supported advanced JSON controls, per-request consent checkbox and confirmation
 dialog. No automatic catalog query/model selection/generation/task polling/retry.
-Fixed /app/images/catalog|generate|task native asset actions require exact Origin
+Fixed /app/images/catalog|generate|edit|task native asset actions require exact Origin
 and per-page capability even on Windows; shared mutation lock keeps Stop/Quit/state
 available. Backend confirmation:true required for generation; upstream/local tokens
 never reach the page. Reuses Core admission/300s/Stop/session/response contracts via
@@ -591,7 +608,7 @@ launches no arbitrary processes. Protocol version 2024-11-05; not a universal MC
 client/manager, HTTP MCP transport or media server. Tested normal packaged binary.
 
 Separate opt-in `momo-preview mcp-images` owns a Core with image_capabilities,
-image_generate and image_task tools, plus existing capability/Skill reads. Its
+image_generate, image_edit and image_task tools, plus existing capability/Skill reads. Its
 first stdin line MUST be private JSON config (exact Endpoint/APIKey/optional Mode,
 8192 bytes before newline); later lines are MCP. No listener, connection token
 handoff, env/vault/account discovery or config file read. A trusted launcher must

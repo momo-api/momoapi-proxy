@@ -36,7 +36,11 @@ func TestImageDesktopBridgeRequiresPageCapabilityConfirmationAndExactActions(t *
 			{"/app/images/catalog", origin, "", "", 403}, {"/app/images/generate", origin, "wrong", `{"confirmed":true,"request":{}}`, 403}, {"/app/images/task", "https://evil.example", nonce, `{"task_id":"a"}`, 403},
 			{"/app/images/catalog", origin, nonce, "{}", 400}, {"/app/images/catalog", origin, nonce, "", 503},
 			{"/app/images/generate", origin, nonce, `{"request":{}}`, 400}, {"/app/images/generate", origin, nonce, `{"confirmed":false,"request":{}}`, 400}, {"/app/images/generate", origin, nonce, `{"confirmed":true,"request":{},"extra":1}`, 400}, {"/app/images/generate", origin, nonce, `{"confirmed":true,"request":{}}{}`, 400}, {"/app/images/generate", origin, nonce, `{"confirmed":true,"request":{}}`, 503},
-			{"/app/images/task", origin, nonce, `{"task_id":"../a"}`, 400}, {"/app/images/task", origin, nonce, `{"task_id":"a","confirmed":true}`, 400}, {"/app/images/task", origin, nonce, `{"task_id":"a","request":{}}`, 400}, {"/app/images/task", origin, nonce, `{"task_id":"a"}`, 503}, {"/app/images/edit", origin, nonce, "", 404},
+			{"/app/images/task", origin, nonce, `{"task_id":"../a"}`, 400}, {"/app/images/task", origin, nonce, `{"task_id":"a","confirmed":true}`, 400}, {"/app/images/task", origin, nonce, `{"task_id":"a","request":{}}`, 400}, {"/app/images/task", origin, nonce, `{"task_id":"a"}`, 503}, {"/app/images/edit", origin, nonce, "", 400},
+			{"/app/images/edit", origin, "", `{"confirmed":true,"request":{}}`, 403},
+			{"/app/images/edit", origin, nonce, `{"confirmed":true,"request":{}}`, 503},
+			{"/app/images/edit", origin, nonce, `{"confirmed":false,"confirmed":true,"request":{}}`, 400},
+			{"/app/images/edit", origin, nonce, `{"confirmed":true,"request":{"model":"a","model":"b"}}`, 400},
 			{"/app/images/generate", origin, nonce, strings.Repeat("a", (160<<10)+1), 413}, {"/app/images/generate", origin, nonce, "\xff", 413}, {"/app/images/catalog?x=1", origin, nonce, "", 400},
 		} {
 			r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))

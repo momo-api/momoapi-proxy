@@ -113,7 +113,7 @@ def check_image_mcp(binary):
     replies = [json.loads(line) for line in result.stdout.splitlines()]
     require([r["id"] for r in replies] == [m["id"] for m in messages], "image MCP buffered input/ID precision")
     require([t["name"] for t in replies[1]["result"]["tools"]] ==
-            ["gateway_capabilities", "image_capabilities", "image_generate", "image_task"], "image MCP whitelist")
+            ["gateway_capabilities", "image_capabilities", "image_generate", "image_task", "image_edit"], "image MCP whitelist")
     require(replies[2]["error"]["code"] == -32602 and
             all(r["result"]["isError"] for r in replies[3:]), "image MCP confirmation/catalog/task/DNS gates")
 

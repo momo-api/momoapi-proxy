@@ -24,7 +24,29 @@ func probeMediaUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"models":[{"id":"momoapi-gpt-image-2-5-flare","modality":"image","available":true,"operations":["generate"],"parameters":{}}]}`)
+		io.WriteString(w, `{"models":[{"id":"momoapi-gpt-image-2-5-flare","modality":"image","available":true,"operations":["generate","edit"],"parameters":{"max_reference_images":{"maximum":2}}}]}`)
+	case "/v1/images/edits":
+		var body map[string]any
+		if r.Method != "POST" || json.Unmarshal(data, &body) != nil || len(body) != 4 || body["model"] != "momoapi-gpt-image-2-5-flare" || body["n"] != float64(1) {
+			w.WriteHeader(400)
+			return true
+		}
+		prompt, ok := body["prompt"].(string)
+		refs, refsOK := body["images"].([]any)
+		const reference = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+		if !ok || !refsOK || len(refs) != 1 || refs[0] != reference || !includesProbeEditPrompt(prompt) {
+			w.WriteHeader(400)
+			return true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"task_id":"task_`+prompt+`","status":"submitted"}`)
+	case "/v1/tasks/task_edit-api", "/v1/tasks/task_edit-mcp", "/v1/tasks/task_edit-connected", "/v1/tasks/task_edit-gui":
+		if r.Method != "GET" || len(data) != 0 {
+			w.WriteHeader(400)
+			return true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"task_id":"`+strings.TrimPrefix(r.URL.Path, "/v1/tasks/")+`","status":"completed","url":"https://images.example/edited.png"}`)
 	case "/v1/images/generations":
 		if r.Method != "POST" || (string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"media-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"gui-inline-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"mcp-probe"}` && string(data) != `{"model":"momoapi-gpt-image-2-5-flare","n":1,"prompt":"mcp-connected-probe"}`) {
 			w.WriteHeader(400)
@@ -113,5 +135,49 @@ func probeMediaRequests(core *appcore.Core) error {
 	if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &output, dispatch) != nil || strings.Count(output.String(), "\n") != 3 || strings.Contains(output.String(), `"isError":true`) || !strings.Contains(output.String(), "https://images.example/connected.png") || strings.Contains(output.String(), key) {
 		return errors.New("image MCP connected TCP probe")
 	}
+	if err := probeImageEditRequests(core); err != nil {
+		return err
+	}
 	return probeVideoRequests(core)
+}
+
+func includesProbeEditPrompt(s string) bool {
+	return s == "edit-api" || s == "edit-mcp" || s == "edit-connected" || s == "edit-gui"
+}
+
+func probeImageEditRequests(core *appcore.Core) error {
+	const reference = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	base, key, err := probeCredentials(core)
+	if err != nil {
+		return err
+	}
+	request := func(prompt string) string {
+		raw, _ := json.Marshal(map[string]any{"model": "momoapi-gpt-image-2-5-flare", "prompt": prompt, "reference_images": []string{reference}})
+		return string(raw)
+	}
+	// First API path, then both explicit MCP dispatch modes: 6 physical TLS sends.
+	_, code := core.DesktopImages(context.Background(), "/internal/images/edit", []byte(request("edit-api")))
+	if code != 200 {
+		return errors.New("API image edit submit")
+	}
+	data, code := core.DesktopImages(context.Background(), "/internal/images/tasks/task_edit-api", nil)
+	if code != 200 || !strings.Contains(string(data), "edited.png") {
+		return errors.New("API image edit task")
+	}
+	connected, closeClient, err := integration.NewLocalImageDispatch(strings.TrimSuffix(base, "/v1"), key)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
+	for _, tc := range []struct {
+		prompt   string
+		dispatch integration.ImageDispatch
+	}{{"edit-mcp", core.DesktopImages}, {"edit-connected", connected}} {
+		input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"image_edit","arguments":{"confirmed":true,"request":` + request(tc.prompt) + `}}}` + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"image_task","arguments":{"task_id":"task_` + tc.prompt + `"}}}` + "\n"
+		var out bytes.Buffer
+		if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &out, tc.dispatch) != nil || strings.Count(out.String(), "\n") != 2 || strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "edited.png") || strings.Contains(out.String(), key) {
+			return errors.New("image edit MCP submit/task")
+		}
+	}
+	return nil
 }

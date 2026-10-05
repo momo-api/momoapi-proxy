@@ -23,7 +23,7 @@ func (c *Core) DesktopVideos(ctx context.Context, path string, body []byte) ([]b
 
 func (c *Core) desktopMedia(ctx context.Context, path string, body []byte, video bool) ([]byte, int) {
 	method := "GET"
-	if path == "/internal/images/generate" || path == "/internal/videos/generate" {
+	if path == "/internal/images/generate" || path == "/internal/images/edit" || path == "/internal/videos/generate" {
 		method = "POST"
 	}
 	known, allowed := imageRoute(path, method)

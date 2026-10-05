@@ -10,11 +10,19 @@ import (
 // Static transport implementations intersect token-scoped catalog permission.
 // Unknown knobs reject, no model defaults/substitution or silently dropped controls.
 func buildImageGeneration(data []byte, p imageProfile) ([]byte, int, error) {
-	request, err := decodeObject(string(data))
+	request, err := decodeVideoObject(data)
 	if err != nil || !utf8.Valid(data) || len(data) > MaxRequest || !p.Available || request["model"] != p.ID {
 		return nil, 0, errImage
 	}
-	allowed := append([]string{"model"}, p.Parameters...)
+	if !includes(p.Operations, "generate") {
+		return nil, 0, errImage
+	}
+	allowed := []string{"model"}
+	for _, key := range p.Parameters {
+		if key != "reference_images" {
+			allowed = append(allowed, key)
+		}
+	}
 	if !only(request, allowed...) {
 		return nil, 0, errImage
 	}

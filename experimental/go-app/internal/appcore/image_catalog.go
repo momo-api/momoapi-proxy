@@ -36,20 +36,23 @@ func (s *imageSession) expire(now time.Time) {
 }
 
 type imageProfile struct {
-	ID             string   `json:"id"`
-	Available      bool     `json:"available"`
-	Operations     []string `json:"operations"`
-	Parameters     []string `json:"parameters"`
-	MaxN           int      `json:"max_n"`
-	AllowedN       []int    `json:"allowed_n"`
-	Qualities      []string `json:"qualities,omitempty"`
-	Ratios         []string `json:"aspect_ratios,omitempty"`
-	Resolutions    []string `json:"resolutions,omitempty"`
-	Availability   string   `json:"availability"`
-	ProtocolStatus string   `json:"protocol_status"`
-	profile        string
-	nValues        []int
-	Controls       map[string]imageControl `json:"constraints,omitempty"`
+	ID               string   `json:"id"`
+	Available        bool     `json:"available"`
+	Operations       []string `json:"operations"`
+	Parameters       []string `json:"parameters"`
+	MaxN             int      `json:"max_n"`
+	AllowedN         []int    `json:"allowed_n"`
+	Qualities        []string `json:"qualities,omitempty"`
+	Ratios           []string `json:"aspect_ratios,omitempty"`
+	Resolutions      []string `json:"resolutions,omitempty"`
+	Availability     string   `json:"availability"`
+	ProtocolStatus   string   `json:"protocol_status"`
+	profile          string
+	nValues          []int
+	Controls         map[string]imageControl `json:"constraints,omitempty"`
+	MaxReferences    int                     `json:"max_reference_images"`
+	EditTransport    string                  `json:"edit_transport,omitempty"`
+	referenceControl imageControl
 }
 
 type imageControl struct {
@@ -117,7 +120,7 @@ func includes(values []string, s string) bool {
 // endpoints, arbitrary controls, account metadata, defaults or fallback models.
 // Missing controls use this proxy's documented static profile, NOT a live proof.
 func parseImageCatalog(data []byte) (map[string]imageProfile, error) {
-	p, err := decodeObject(string(data))
+	p, err := decodeVideoObject(data)
 	if err != nil {
 		return nil, errImage
 	}
@@ -147,17 +150,34 @@ func parseImageCatalog(data []byte) (map[string]imageProfile, error) {
 		if !ok || len(operations) > 4 {
 			return nil, errImage
 		}
-		generate := false
+		generate, edit := false, false
+		seenOperations := map[string]bool{}
 		for _, op := range operations {
+			name, ok := op.(string)
+			if !ok || seenOperations[name] {
+				return nil, errImage
+			}
+			seenOperations[name] = true
 			if op == "generate" {
 				generate = true
 			}
+			if op == "edit" {
+				edit = true
+			}
 		}
-		profile.Available = available && generate
+		profile.Operations = []string{}
+		if generate {
+			profile.Operations = append(profile.Operations, "generate")
+		}
+		profile.Available = available && (generate || edit)
 		parameters := obj(row["parameters"])
 		if parameters == nil {
 			return nil, errImage
 		}
+		if err := configureImageEdit(&profile, row, parameters, edit); err != nil {
+			return nil, err
+		}
+		profile.Available = available && len(profile.Operations) > 0
 		profile.Controls = map[string]imageControl{}
 		for _, key := range []string{"size", "output_format", "background", "moderation", "output_compression", "n"} {
 			value, present := parameters[key]
@@ -355,7 +375,7 @@ func publicImageCatalog(profiles map[string]imageProfile, checked time.Time) map
 			models = append(models, p)
 		}
 	}
-	return map[string]any{"version": 1, "models": models, "checked_at": checked, "expires_at": checked.Add(imageCatalogTTL), "catalog_status": "available", "notes": "Generate only; explicitly select model. Catalog permission/controls are not live inference proof. No automatic fallback, edits, downloads, persistence or video. Query again after Stop/reconfigure or five minutes.", "limits": map[string]any{"request_bytes": MaxRequest, "response_bytes": MaxResponse, "active": 4, "generate_timeout_seconds": 300, "max_session_tasks": maxImageTasks, "task_ttl_seconds": int(imageTaskTTL.Seconds())}}
+	return map[string]any{"version": 1, "models": models, "checked_at": checked, "expires_at": checked.Add(imageCatalogTTL), "catalog_status": "available", "notes": "Explicit catalog-permitted generate/edit only. Edit references are validated inline data URLs; APIMart also accepts lexically public HTTPS delegated to upstream (no DNS/content guarantee). Static count ceilings are proxy safety limits, not verified upstream maxima. No masks, Chat media edits, fallback, fetching, downloads, persistence or video. Query again after Stop/reconfigure or five minutes.", "limits": map[string]any{"request_bytes": MaxRequest, "response_bytes": MaxResponse, "active": 4, "generate_timeout_seconds": 300, "edit_timeout_seconds": 300, "max_session_tasks": maxImageTasks, "task_ttl_seconds": int(imageTaskTTL.Seconds())}}
 }
 
 func validImageTaskID(id string) bool {
@@ -373,7 +393,7 @@ func imageRoute(path, method string) (bool, bool) {
 	if path == "/internal/images/capabilities" {
 		return true, method == "GET"
 	}
-	if path == "/internal/images/generate" {
+	if path == "/internal/images/generate" || path == "/internal/images/edit" {
 		return true, method == "POST"
 	}
 	if id, ok := strings.CutPrefix(path, "/internal/images/tasks/"); ok && validImageTaskID(id) {

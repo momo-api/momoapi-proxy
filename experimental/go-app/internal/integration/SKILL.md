@@ -299,7 +299,16 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The default `mcp` stdio mode only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.
-- Separate explicit `mcp-images` supports image_capabilities, image_generate and
+- Image editing uses explicit image_edit {confirmed:true,request:{model,prompt,
+  reference_images:["data:image/png;base64,..."],...controls}}. Query catalog first:
+  operations must contain edit; model-list fallback never permits editing.
+  Web aliases JSON images -> /v1/images/edits; Adobe/GPT/APIMart image_urls ->
+  /v1/images/generations. Inline validated bounded PNG/JPEG/static GIF/WebP only;
+  APIMart also permits lexically public HTTPS delegated upstream (no DNS proof).
+  Ordered references and catalog counts intersect fixed safety ceilings4/16/1.
+  No mask/Chat-media editing/file/asset IDs/fetch/upload/fallback. Same task TTL,
+  manual lookup/Stop/no retry/no remote cancellation.160KiB total MCP line.
+- Separate explicit `mcp-images` supports image_capabilities, image_generate, image_edit and
   image_task through an owned Core. A trusted launcher must write one private
   config JSON line (exact Endpoint/APIKey/optional Mode) to stdin BEFORE normal
   newline MCP; this is not direct generic client config compatibility. Never put
@@ -314,7 +323,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   No auto-poll/retry/fallback. Failed delivery may already submit/bill. Sequential
   calls: EOF observed between operations; disconnect during one is not immediate
   cancellation (Core deadlines still bound it); signal cancels local operations,
-  not remote jobs. No history/quota/key export, edit/video/disk assets or general
+  not remote jobs. No history/quota/key export, masks/Chat-media-edit/video/disk assets or general
   third-party MCP runner.
 - Desktop can separately copy credential-free image MCP config using
   `mcp-images-connect --endpoint http://127.0.0.1:<currentPort>`. This standard
