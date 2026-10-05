@@ -142,7 +142,7 @@ func probeFileRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return nil
+	return probeMediaRequests(core)
 }
 
 func probeRegisterAttachment(client http.Client, base, key string, part any) (string, error) {

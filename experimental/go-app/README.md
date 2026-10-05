@@ -72,7 +72,7 @@ than silently removing the requested contract.
 
 User images and explicitly paired tool image results are converted. Bounded PDF
 inputs/results are described below; file_id, non-PDF files/audio/video,
-assistant/system images, cloud asset uploads and image generation are not
+assistant/system images and cloud asset uploads on converted text routes are not
 implemented. Invalid input returns fixed unsupported_image_input without echoing
 image bytes/URLs; no fallback or local fetching. Local compact retains every
 image-bearing user turn, including its assistant interpretation, without replacing
@@ -407,6 +407,35 @@ optional OS-vault actions. No fake routing editor, historical usage, remote
 sharing or upstream-health indicator. Full gap audit and migration gates:
 [FEATURE-PARITY.md](FEATURE-PARITY.md). HTML/CSS/JS are embedded from
 `internal/ui/page.html`; no external assets, fonts or framework.
+
+### Explicit image generation API subset
+
+Authenticated, non-browser API only (not a GUI generator or media MCP). First
+GET /internal/images/capabilities, explicitly select a catalog-authorized model,
+then POST /internal/images/generate with model/prompt/n and supported controls.
+No automatic model choice/fallback/retry; generation can bill. Permission is valid
+five minutes. A failed refresh revokes old permission; only catalog404/405 can
+use model-list fallback for minimal Web one-image generation, not edits/controls.
+Known static profiles intersect available/generate/N and enum constraints;
+final wire defaults/aliases obey catalog size/output controls and numeric bounds.
+Missing controls are documented static implementations, NOT live proof.
+
+One POST /v1/images/generations, 300s bounded context (text timeout unchanged),
+1MiB request/16MiB response, shared4active/32TCP, redacted upstream errors.
+Response images contain delegated public HTTPS URL or canonical b64_json/mime_type,
+optional task_id/raw_status/terminal. No URL downloads, DNS/redirect checks of
+returned references, disk persistence or image content/safety verification.
+Base64 checks recognized image headers/framing and bounded dimensions only.
+Only known JSON envelopes accepted, not arbitrary recursive extraction/SSE.
+
+Manually GET /internal/images/tasks/<id> for IDs returned by this Core only;
+one GET /v1/tasks/<id>, no auto-poll or alternate endpoint fallback. 64 slots
+reserved before generation (pending included), absolute30minTTL, no refresh.
+Stop/configure clears local catalog/tasks, not remote jobs or billed effects;
+delivery failure can leave submitted/tracked task, no rollback or auto-retry.
+No edits/video/cloud assets/filepicker/GUI generator/media MCP in this subset.
+Readonly MCP exposes this contract as image_generation; media:false still means
+the full Node media suite is not implemented. Node remains primary.
 
 ### Skill / MCP and quota
 

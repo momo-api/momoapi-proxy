@@ -22,12 +22,14 @@ import (
 // Never compiled/distributed in production; no user key/profile reads.
 func main() {
 	var fixture struct {
-		Stream string
-		Status int
-		Mode   string
-		Path   string
-		Search bool
-		JSON   bool
+		Stream       string
+		Status       int
+		Mode         string
+		Path         string
+		Search       bool
+		JSON         bool
+		Image        bool
+		ImageCatalog string
 	}
 	if json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&fixture) != nil {
 		os.Exit(1)
@@ -43,6 +45,19 @@ func main() {
 			defer mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(captures)
+			return
+		}
+		if fixture.Image && r.Method == "GET" && r.URL.Path == "/agent/media-capabilities" && r.Header.Get("Authorization") == "Bearer synthetic-unified-only" {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, fixture.ImageCatalog)
+			return
+		}
+		if fixture.Image && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Header.Get("Authorization") == "Bearer synthetic-unified-only" {
+			mu.Lock()
+			captures = append(captures, map[string]any{"task_path": r.URL.Path})
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"data":{"id":"task_shared","status":"completed","result":{"images":[{"url":["https://images.example/generated.png"]}]}}}`)
 			return
 		}
 		data, err := io.ReadAll(io.LimitReader(r.Body, appcore.MaxRequest+1))

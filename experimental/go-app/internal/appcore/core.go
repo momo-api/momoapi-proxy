@@ -52,6 +52,7 @@ type Core struct {
 	client      *http.Client
 	history     responseHistory
 	attachments attachmentStore
+	images      imageSession
 }
 
 func New() (*Core, error) {
@@ -131,6 +132,7 @@ func (c *Core) Configure(config Config) error {
 	c.config = config
 	c.history.clear()
 	c.attachments.clear()
+	c.images.clear()
 	return nil
 }
 func (c *Core) State() State {
@@ -161,6 +163,7 @@ func (c *Core) Stop() {
 	c.running = false
 	c.history.clear()
 	c.attachments.clear()
+	c.images.clear()
 	for _, cancel := range c.cancels {
 		cancel()
 	}
@@ -205,11 +208,12 @@ func (c *Core) Handler() http.Handler {
 			return
 		}
 		attachmentRoute, attachmentMethod := attachmentRoute(r.URL.Path, r.Method)
-		if !attachmentRoute && r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/v1/responses/compact" {
+		imageRoute, imageMethod := imageRoute(r.URL.Path, r.Method)
+		if !imageRoute && !attachmentRoute && r.URL.Path != "/v1/models" && r.URL.Path != "/v1/responses" && r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/v1/responses/compact" {
 			http.NotFound(w, r)
 			return
 		}
-		if attachmentRoute && !attachmentMethod || !attachmentRoute && (r.URL.Path == "/v1/models" && r.Method != "GET" || r.URL.Path != "/v1/models" && r.Method != "POST") {
+		if imageRoute && !imageMethod || attachmentRoute && !attachmentMethod || !imageRoute && !attachmentRoute && (r.URL.Path == "/v1/models" && r.Method != "GET" || r.URL.Path != "/v1/models" && r.Method != "POST") {
 			http.Error(w, "method denied", 405)
 			return
 		}
@@ -242,7 +246,11 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	generation := c.history.generation
 	c.serial++
 	id := c.serial
-	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	requestTimeout := 120 * time.Second
+	if image, _ := imageRoute(r.URL.Path, r.Method); image && r.URL.Path == "/internal/images/generate" {
+		requestTimeout = 300 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	c.cancels[id] = cancel
 	c.active++
 	c.mu.Unlock()
@@ -270,6 +278,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	if local, _ := attachmentRoute(r.URL.Path, r.Method); local {
 		c.attachmentRequest(ctx, w, r, body, config, generation)
+		return
+	}
+	if image, _ := imageRoute(r.URL.Path, r.Method); image {
+		c.imageRequest(ctx, w, r, body, config, generation)
 		return
 	}
 	stream := false

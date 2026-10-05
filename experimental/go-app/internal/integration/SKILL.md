@@ -167,7 +167,23 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   state. Replay response.compaction.output explicitly as input. cmp_ IDs are NOT
   previous_response_id anchors; no encrypted_content envelope/restart guarantee.
   Omitted content is unknown; never infer task completion or retry an old task.
-- Semantic/local summarization, attachment management, media generation and
+- Image generation subset: after explicit user intent (may bill), require GET
+  /internal/images/capabilities with the local Bearer token; explicitly select
+  an available model and POST /internal/images/generate with model/prompt/n and
+  only returned supported controls. Catalog expires after five minutes; failed
+  refresh revokes previous permission. No automatic fallback/model substitution.
+  Only 404/405 media catalog may query models for minimal Web generation n:1;
+  model-list permission is not advanced controls/edit permission. Generation has
+  bounded 300s context; one upstream POST, no retry or auto-poll. Output is bounded
+  JSON images (public HTTPS URL or validated canonical b64_json/mime_type) and/or
+  task_id/raw_status/terminal. URLs are NOT downloaded or DNS/redirect-validated;
+  Base64 header/framing/dimensions are not pixel integrity/safety verification.
+  Manually GET /internal/images/tasks/<task_id> only for IDs this Core returned;
+  64 session slots reserved before generation, absolute30minTTL, no refresh.
+  Stop/configure clears catalog/tasks, not remote jobs or paid upstream effects.
+  Failed response delivery may already have submitted a task: do not auto-retry.
+  No edit/video/disk assets/media MCP or GUI image generator in this subset.
+- Semantic/local summarization, full attachment management, full media suite and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The built-in stdio MCP only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.

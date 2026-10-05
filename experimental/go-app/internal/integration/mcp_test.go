@@ -8,6 +8,9 @@ import (
 )
 
 func TestMCPAndSkillExports(t *testing.T) {
+	if Capabilities()["image_generation"] == nil || Capabilities()["media"] != false || !strings.Contains(Skill, "/internal/images/generate") || !strings.Contains(Skill, "no retry or auto-poll") {
+		t.Fatal("stale generation subset exports")
+	}
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,

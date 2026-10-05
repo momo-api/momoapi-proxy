@@ -17,7 +17,7 @@
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
-| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
+| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成子集：显式查询目录、选模型、单次请求，URL/Base64/本进程任务手动查询；不自动下载/保存/轮询，编辑、视频、媒体 MCP 与 GUI 生成器未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
 | Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | Go 新增可复制 Skill、只读 stdio 能力工具/Skill 资源；媒体 MCP 和通用第三方管理仍未迁移 |
@@ -35,6 +35,15 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 这些不是“兼容性改进”，不能直接替代 Node 的策略与附件限制。
 
 ## 本次实际验证范围
+
+图片生成增量：统一 TCP 黑盒由251扩为275组（4配置 × inline/URL/task/
+401/429/500），双方共享同一上游、请求预算并精确比较实际生成和任务路径。
+Node 使用测试内存存储桩；不证明真实磁盘资产。外部输出 URL 下载被夹具拒绝，
+Node 因无法 materialize/persist 返回502，Go 不下载而返回委托 URL；内联 Node
+输出资产 metadata，Go 输出 Base64；Node 将500映射502，Go保留500。差异单独
+断言，不掩饰为等价。目录与本进程任务边界、取消/并发预留/碰撞/TTL/最终参数
+约束/MIME/UTF8/输出预算另有回归；真实 WebView 探针新增3次目录/生成/任务
+物理上游请求（共95）。不证明真实图片推理、计费、编辑/视频或媒体 MCP。
 
 `internal/appcore/` 回归覆盖原协议 JSON/SSE、namespace/未知字段保留、Chat 工具调用、
 Claude/Gemini Unicode/大整数/文本工具交错/usage/错误截断/取消、鉴权/地址策略/资源限制/重启；`internal/ui/page_test.mjs` 覆盖已交付页面脚本、
