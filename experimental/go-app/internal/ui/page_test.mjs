@@ -103,7 +103,7 @@ assert.ok(source.includes('可能计费'));
 assert.ok(source.includes('图片工作台支持明确生成'));
 assert.ok(source.includes('独立显式图片 MCP（可复制配置连接当前本地网关，客户端显式设置本地 Key）'));
 assert.ok(source.includes('无编辑或磁盘保存'));
-assert.ok(source.includes('两种 APIMart API 子集（无视频界面 / MCP）'));
+assert.ok(source.includes('两种 APIMart API 子集（视频工作台 + API，无视频 MCP）'));
 assert.ok(!source.includes('图片视频生成仍未迁移'));
 assert.ok(source.includes('部分支持 · 有界内存'));
 assert.ok(source.includes('Stop 或重新配置即清空；store:false 不保存新响应'));
@@ -125,6 +125,9 @@ nodes.get('nav-integrations').onkeydown({key:'ArrowRight',preventDefault:()=>{}}
 assert.equal(nodes.get('view-images').hidden,false);
 assert.equal(focused,'nav-images');
 nodes.get('nav-images').onkeydown({key:'ArrowRight',preventDefault:()=>{}});
+assert.equal(nodes.get('view-videos').hidden,false);
+assert.equal(focused,'nav-videos');
+nodes.get('nav-videos').onkeydown({key:'ArrowRight',preventDefault:()=>{}});
 assert.equal(nodes.get('view-settings').hidden,false);
 nodes.get('nav-settings').onkeydown({key:'Home',preventDefault:()=>{}});
 assert.equal(focused,'nav-overview');
@@ -224,6 +227,44 @@ state={...state,Running:false};await nodes.get('stop').onclick();blockedImage.re
 state={...state,Running:true};handler=url=>url==='/app/images/catalog'?response(200,{...catalog,expires_at:new Date(Date.now()-1000).toISOString()}):response(200);await run("action('state')");await nodes.get('image-catalog').onclick();assert.equal(nodes.get('image-generate').disabled,true);assert.equal(nodes.get('image-model').disabled,true);
 for(const status of [401,404,409,502]){handler=()=>response(status);await nodes.get('image-catalog').onclick();assert.equal(run('imageCatalog'),null);assert.equal(nodes.get('image-model').disabled,true);assert.equal(nodes.get('image-generate').disabled,true)}
 handler=()=>response(200,{models:[{id:'bad',available:true,allowed_n:[1]}],expires_at:catalog.expires_at});await nodes.get('image-catalog').onclick();assert.equal(run('imageCatalog'),null);
+// Shipped video DOM actions: explicit controls and consent, no playback/download,
+// exact native bridge only, Stop fences a late response while staying available.
+const videoCatalog={models:[{id:'seedance-2.5',available:true,durations:[4,5,6],resolutions:['480p','720p','1080p'],aspect_ratios:['16:9','adaptive'],max_reference_images:30}],expires_at:new Date(Date.now()+300000).toISOString()};
+state={...state,Configured:true,Running:true};handler=()=>response(200);await run("action('state')");
+nodes.get('nav-videos').onclick();assert.equal(nodes.get('view-videos').hidden,false);assert.equal(nodes.get('page-title').textContent,'视频工作台');
+handler=url=>url==='/app/videos/catalog'?response(200,videoCatalog):response(200);
+await nodes.get('video-catalog').onclick();assert.equal(nodes.get('video-model').value,'');assert.equal(nodes.get('video-generate').disabled,true);
+nodes.get('video-model').value='seedance-2.5';nodes.get('video-model').onchange();
+assert.equal(nodes.get('video-duration').value,'');assert.equal(nodes.get('video-resolution').value,'');assert.equal(nodes.get('video-ratio').value,'');
+nodes.get('video-duration').value='5';nodes.get('video-resolution').value='720p';nodes.get('video-ratio').value='adaptive';nodes.get('video-prompt').value=' 中文🙂 ';nodes.get('video-options').value='{}';nodes.get('video-consent').checked=true;nodes.get('video-consent').oninput();
+assert.equal(nodes.get('video-generate').disabled,false);allowConfirm=false;let videoBefore=calls.length;await nodes.get('video-generate').onclick();assert.equal(calls.length,videoBefore);allowConfirm=true;
+nodes.get('video-options').value='{"model":"overwrite"}';await nodes.get('video-generate').onclick();assert.equal(calls.length,videoBefore);
+nodes.get('video-options').value='{"reference_images":["https://images.example/a"],"first_frame_image":"https://images.example/b"}';await nodes.get('video-generate').onclick();assert.equal(calls.length,videoBefore);
+nodes.get('video-options').value='{}';
+handler=url=>url==='/app/videos/generate'?response(200,{task_id:'task_video',status:'queued',terminal:false}):response(200);
+await nodes.get('video-generate').onclick();let videoSend=calls.at(-1);
+assert.equal(videoSend.url,'/app/videos/generate');assert.equal(videoSend.options.headers['X-MOMO-Bridge'],'synthetic-page-capability');
+assert.equal(videoSend.options.headers.authorization,undefined);
+assert.deepEqual(JSON.parse(videoSend.options.body),{confirmed:true,request:{model:'seedance-2.5',prompt:' 中文🙂 ',duration:5,resolution:'720p',aspect_ratio:'adaptive'}});
+assert.equal(nodes.get('video-consent').checked,false);assert.equal(nodes.get('video-task').disabled,false);
+handler=url=>url==='/app/videos/task'?response(200,{task_id:'task_video',status:'completed',terminal:true,remote_url:'https://video.example/result.mp4',progress:100}):response(200);
+await nodes.get('video-task').onclick();assert.deepEqual(JSON.parse(calls.at(-1).options.body),{task_id:'task_video'});
+assert.equal(nodes.get('video-result-state').textContent,'视频已完成');assert.equal(nodes.get('video-task').disabled,true);
+assert.equal(nodes.get('video-results').children[0].textContent,'https://video.example/result.mp4');
+assert.equal(nodes.get('video-results').children[0].src,undefined);assert.equal(nodes.get('video-results').children[0].href,undefined);
+assert.doesNotMatch(source,/<video\b|<iframe\b/i);
+nodes.get('video-consent').checked=true;nodes.get('video-consent').oninput();const blockedVideo=pending();handler=url=>url==='/app/videos/generate'?blockedVideo.promise:response(200);
+const videoGenerating=nodes.get('video-generate').onclick();await flush();assert.equal(nodes.get('stop').disabled,false);assert.equal(nodes.get('quit').disabled,false);assert.equal(nodes.get('image-catalog').disabled,true);assert.equal(await nodes.get('video-generate').onclick(),false);
+const videoOptions=calls.at(-1).options;timers.at(-1)();assert.equal(videoOptions.signal.aborted,true);
+state={...state,Running:false};await nodes.get('stop').onclick();blockedVideo.resolve(response(200,{task_id:'task_late',status:'completed',terminal:true,remote_url:'https://video.example/late.mp4'}));await videoGenerating;
+assert.equal(run('videoCatalog'),null);assert.equal(run('videoTaskID'),'');assert.equal(nodes.get('video-results').children.length,0);
+state={...state,Running:true};handler=()=>response(200,state);await run("action('state')");
+handler=()=>response(200,{...videoCatalog,expires_at:new Date(Date.now()-1000).toISOString()});await nodes.get('video-catalog').onclick();assert.equal(nodes.get('video-model').disabled,true);assert.equal(nodes.get('video-generate').disabled,true);
+for(const status of [401,404,409,502]){handler=()=>response(status);await nodes.get('video-catalog').onclick();assert.equal(run('videoCatalog'),null)}
+handler=()=>response(200,{models:[{id:'bad',available:true}],expires_at:videoCatalog.expires_at});await nodes.get('video-catalog').onclick();assert.equal(run('videoCatalog'),null);
+for(const models of [[videoCatalog.models[0],videoCatalog.models[0]],[{...videoCatalog.models[0],max_reference_images:999}],[{...videoCatalog.models[0],durations:[4,4]}],[{...videoCatalog.models[0],durations:[31]}],[{...videoCatalog.models[0],resolutions:['480P']}],[null]]){
+ handler=()=>response(200,{...videoCatalog,models});await nodes.get('video-catalog').onclick();assert.equal(run('videoCatalog'),null);assert.equal(nodes.get('video-generate').disabled,true);
+}
 state={...initial};handler=()=>response(200);await run("action('state')");
 
 const saved=pending();
@@ -323,4 +364,4 @@ timers.at(-1)();assert.equal(options.signal.aborted,true);
 wait.resolve(response(200));await one;
 assert.equal(run('statePending'),false);
 assert.equal(calls.filter(c=>c.options.body?.includes('synthetic-page-input-only')).length,1);
-console.log('PASS shipped page: navigation/keyboard/status/capability gaps/Load/pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout + image catalog/selection/confirmation/manual task/data-only opt-in preview/Stop epoch');
+console.log('PASS shipped page: navigation/keyboard/status/capability gaps/Load/pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout + image catalog/selection/confirmation/manual task/data-only opt-in preview/Stop epoch + video explicit controls/confirmation/manual task/URL text/shared busy/Stop epoch');

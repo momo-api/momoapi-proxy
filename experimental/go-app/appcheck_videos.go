@@ -20,6 +20,11 @@ func probeVideoUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 		return true
 	}
 	if r.URL.Path == "/v1/video/generations" {
+		if r.Method == "POST" && string(data) == `{"aspect_ratio":"adaptive","duration":4,"model":"seedance-2.5","prompt":"video-gui-probe","resolution":"480p"}` {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"task_id":"task_video_gui_probe","status":"submitted"}`)
+			return true
+		}
 		if r.Method != "POST" || string(data) != `{"aspect_ratio":"adaptive","duration":4,"model":"seedance-2.5","prompt":"video-api-probe","resolution":"480p"}` {
 			w.WriteHeader(400)
 			return true
@@ -28,13 +33,14 @@ func probeVideoUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 		io.WriteString(w, `{"task_id":"task_video_probe","status":"submitted"}`)
 		return true
 	}
-	if r.URL.Path == "/v1/videos/task_video_probe" {
+	if r.URL.Path == "/v1/videos/task_video_probe" || r.URL.Path == "/v1/videos/task_video_gui_probe" {
 		if r.Method != "GET" || len(data) != 0 {
 			w.WriteHeader(400)
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"code":200,"data":{"task_id":"task_video_probe","status":"SUCCESS","result_url":"https://video.example/probe.mp4","progress":100}}`)
+		id := strings.TrimPrefix(r.URL.Path, "/v1/videos/")
+		json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"task_id": id, "status": "SUCCESS", "result_url": "https://video.example/probe.mp4", "progress": 100}})
 		return true
 	}
 	return false

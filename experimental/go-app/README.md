@@ -707,7 +707,7 @@ Do not disable OS protections globally to run them.
 Compilation NOT native lifecycle/tray/clipboard/install/signing/notarization/
 reboot/high-DPI/Linux desktop/system shutdown acceptance.
 
-## Video API subset (not video GUI/MCP yet)
+## Video API and desktop workbench subset (not video MCP yet)
 
 Explicit authenticated non-browser GET /internal/videos/capabilities queries
 token-scoped /v1/models: only MiniMax-H3-Max and seedance-2.5 APIMart JSON
@@ -732,14 +732,23 @@ Known JSON envelopes only: normalized task status, fixed failure text, delegated
 HTTPS remote_url as text. No playback/download/authenticated content URL/export
 of upstream metadata. Failed delivery may already submit/track/bill; do not retry
 uncertain submission. Lexical URL validation is NOT DNS/redirect/content safety.
-No video workbench/video MCP/complete Node media plugin compatibility claim.
+The desktop video workbench uses fixed native actions with Origin and per-page
+capability, shared native admission and Core limits. Query the catalog, select
+model/duration/resolution/ratio manually (no automatic selection), enter prompt
+and optional HTTPS reference/frame JSON, then confirm each potentially billed
+generation. Query only the latest returned task manually; output URLs are text
+only, never video/iframe/link playback or download. Stop/configure/load clear
+catalog, consent, task and results and fence late responses. No video MCP or
+complete Node media plugin compatibility claim.
 
 12 additional same-mock TCP Node/Go cases compare exact generation/task wire,
 including401/429/500,queued/completed/failed. Status submitted->queued, redacted
 task errors and omitted authenticated-content URLs are independent differences,
 not forced equivalence. Native probe adds3 actual video API TLS-mock calls
-(108 total); no video UI click/real generation proof. Current CI must verify
-this commit, not use prior275/105 proof as current287/108 acceptance.
+(108 total). The workbench adds3 physical catalog/generation/task mock calls
+(111 total), exercising shipped DOM handlers in a real WebView and Stop clear.
+This is not ordinary installed GUI physical-click or real generation proof.
+Current CI must verify this commit, not reuse prior287/108 acceptance.
 
 ## Unsigned installer previews
 

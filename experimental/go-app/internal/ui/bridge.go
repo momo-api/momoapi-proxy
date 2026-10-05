@@ -73,16 +73,17 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			return
 		}
 		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/task"
-		if (imageAction || r.URL.Path == "/app/image-mcp-config") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
+		videoAction := r.URL.Path == "/app/videos/catalog" || r.URL.Path == "/app/videos/generate" || r.URL.Path == "/app/videos/task"
+		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
 			return
 		}
-		if !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" && r.URL.Path != "/app/image-mcp-config" {
+		if !videoAction && !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" && r.URL.Path != "/app/image-mcp-config" {
 			http.NotFound(w, r)
 			return
 		}
 		limit := 8192
-		if imageAction {
+		if imageAction || videoAction {
 			limit = 160 << 10
 		}
 		data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
@@ -98,6 +99,10 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 				return
 			}
 			defer actionMu.Unlock()
+		}
+		if videoAction {
+			serveVideoAction(w, r, core, data)
+			return
 		}
 		if imageAction {
 			path := "/internal/images/capabilities"
