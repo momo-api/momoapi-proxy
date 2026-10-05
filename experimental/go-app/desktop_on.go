@@ -55,6 +55,31 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 	var app *application.App
 	store := vault.System() // construction does not read the credential store
 	assets := ui.HandlerWithActions(origin, core, ui.Actions{
+		SaveImage: func(ctx context.Context, mime string, data []byte) (bool, error) {
+			if ctx.Err() != nil {
+				return false, errors.New("save cancelled")
+			}
+			ext := appcore.LocalImageExtension(mime)
+			if ext == "" {
+				return false, errors.New("image type unavailable")
+			}
+			path, err := app.Dialog.SaveFile().SetFilename("momo-image"+ext).AddFilter("Image", "*"+ext).AllowsOtherFileTypes(false).SetMessage("选择新文件；不会覆盖现有文件").PromptForSingleSelection()
+			// Pinned Wails beta.24 Windows adapter returns its internal sentinel
+			// as this exact error; macOS/Linux cancellation returns empty path.
+			if runtime.GOOS == "windows" && err != nil && err.Error() == "cancelled by user" {
+				return false, nil
+			}
+			if err != nil {
+				return false, errors.New("image dialog unavailable")
+			}
+			if path == "" {
+				return false, nil
+			}
+			if err := writeSelectedImage(ctx, path, mime, data); err != nil {
+				return false, err
+			}
+			return true, nil
+		},
 		SaveProfile: store.Save, LoadProfile: store.Load, ForgetProfile: store.Forget,
 		AllowOpaqueOrigin: runtime.GOOS != "windows",
 		CopyConnection: func() error {

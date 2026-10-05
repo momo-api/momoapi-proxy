@@ -3,6 +3,7 @@ package ui
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -18,6 +19,8 @@ import (
 
 // Native actions return no credentials to the WebView. Nil disables the action.
 type Actions struct {
+	// A trusted native dialog selects the path; never return that path to JS.
+	SaveImage          func(context.Context, string, []byte) (bool, error)
 	SaveProfile        func(appcore.Config) error
 	LoadProfile        func() (appcore.Config, error)
 	ForgetProfile      func() error
@@ -74,7 +77,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/task" || r.URL.Path == "/app/images/validate-references"
+		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/task" || r.URL.Path == "/app/images/validate-references" || r.URL.Path == "/app/images/save"
 		videoAction := r.URL.Path == "/app/videos/catalog" || r.URL.Path == "/app/videos/generate" || r.URL.Path == "/app/videos/task"
 		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config" || r.URL.Path == "/app/video-mcp-config" || r.URL.Path == "/app/codex-catalog" || r.URL.Path == "/app/diagnostics") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
@@ -90,6 +93,9 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		}
 		if r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/validate-references" {
 			limit = appcore.MaxRequest
+		}
+		if r.URL.Path == "/app/images/save" {
+			limit = appcore.MaxResponse
 		}
 		data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
 		if err != nil || len(data) > limit || !utf8.Valid(data) {
@@ -110,6 +116,10 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			return
 		}
 		if imageAction {
+			if r.URL.Path == "/app/images/save" {
+				serveImageSave(w, r, actions, data)
+				return
+			}
 			if r.URL.Path == "/app/images/validate-references" {
 				if r.Context().Err() != nil {
 					http.Error(w, "validation cancelled", 400)

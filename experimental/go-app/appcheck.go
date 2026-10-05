@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -100,6 +103,7 @@ func check() error {
 		}
 		var upstreamRequests, savedProfiles, loadedProfiles, quotaQueries, skillCopies, mcpCopies, codexCopies, imageMCPCopies, videoMCPCopies atomic.Int32
 		var codexCatalogCopies atomic.Int32
+		var imageSaves atomic.Int32
 		var stalled []net.Conn
 		var savedProfile appcore.Config
 		closeMock := appcore.InstallProbeMock(core, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -245,6 +249,12 @@ func check() error {
 			}
 		}))
 		options.PostShutdown = func() {
+			savedImage, saveErr := os.ReadFile(filepath.Join(profile, "synthetic-save.png"))
+			wantImage, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+			if imageSaves.Load() != 1 || saveErr != nil || string(savedImage) != string(wantImage) {
+				fmt.Println("FAIL native explicit image save")
+				os.Exit(1)
+			}
 			for _, conn := range stalled {
 				_ = conn.Close()
 			}
@@ -258,10 +268,18 @@ func check() error {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (181 upstream requests; explicit converted provider replay and bounded long tool aliases/history and explicit single-tool constraint and ordinary nullable strict arguments and completed search lifecycle checkpoint/replay/paired second turn; desktop video catalog/explicit controls/confirmed generation/manual task/URL text/Stop clear + desktop image catalog/generation/local FileReader references/pure metadata validation/explicit local preview/edit/task/Stop reference clear + image/video API subsets + opt-in direct and connected image/video MCP catalog/generation/task streams plus direct/connected image edit lifecycle) + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (181 upstream requests; explicit converted provider replay and bounded long tool aliases/history and explicit single-tool constraint and ordinary nullable strict arguments and completed search lifecycle checkpoint/replay/paired second turn; desktop video catalog/explicit controls/confirmed generation/manual task/URL text/Stop clear + desktop image catalog/generation/local FileReader references/pure metadata validation/explicit local preview/edit/task/native explicit inline save byte readback/Stop reference clear + image/video API subsets + opt-in direct and connected image/video MCP catalog/generation/task streams plus direct/connected image edit lifecycle) + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
+			// Isolated synthetic native destination, not an OS dialog test.
+			SaveImage: func(ctx context.Context, mime string, data []byte) (bool, error) {
+				if err := writeSelectedImage(ctx, filepath.Join(profile, "synthetic-save.png"), mime, data); err != nil {
+					return false, err
+				}
+				imageSaves.Add(1)
+				return true, nil
+			},
 			AllowOpaqueOrigin: runtime.GOOS != "windows",
 			SaveProfile:       func(c appcore.Config) error { savedProfile = c; savedProfiles.Add(1); return nil },
 			LoadProfile:       func() (appcore.Config, error) { loadedProfiles.Add(1); return savedProfile, nil },

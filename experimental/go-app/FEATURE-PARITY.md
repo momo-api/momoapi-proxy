@@ -36,7 +36,25 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### 本地参考图选择器（2026-10-06；本地验证，当前增量 CI 待验收）
+### 内联结果明确另存（2026-10-06；本地验证，当前增量CI待验收）
+
+新增结果旁明确另存按钮→确认→native Wails新文件对话框，仅内联字节，
+不下载远端URL；固定native save route需Origin+page capability、strict重复/
+UTF8/depth64、16MiB、exact confirmed/mime/base64，无网页path/filename输入。
+共享结果格式头部/静态GIF/WebP门禁、字节不变、无网络/Core会话/目录/凭据。
+O_EXCL拒绝已有文件/最终symlink、匹配扩展名；Windows拒绝UNC/设备/ADS/
+extended namespace/reserved名字。父目录symlink/用户OS挂载非沙箱隔离，
+Unix新文件0600、Windows继承ACL。取消不创建；部分写/sync/响应失败可能留下
+文件，无自动清理/覆盖/重试。用户对话框无短timeout，Stop/Quit/status仍可处理，
+模态OS窗口可能需先取消；epoch仅拒绝迟到UI结果，不撤销本机写入。
+单测覆盖format/byteexact/权限/拒绝/取消/无publicroute/错误不反射/已有文件
+不变/Windows设备与路径；真实WebView以synthetic inline→同native handler→
+隔离临时新文件且字节回读，零新增上游；不是实际OS对话框点击验收。双tag
+全量各5、两vet/page/packaging、WSL fullrace、Win181TLSmock与普通binary/
+官方SDK图片视频编辑生命周期已本地通过；新HEAD三平台仍须独立验收。
+本机installer/真实推理/签名/跨设备/钱包仍未完成，不把另存等同云资产管理。
+
+### 本地参考图选择器（2026-10-06；5573477已三平台验收）
 
 桌面编辑新增明确选择 File → 原始 FileReader 字节 → native 纯本地格式/元数据
 校验 → 有序列表/移除/明确预览 → 逐次确认编辑 → 手动任务查询。校验不访问
@@ -53,6 +71,11 @@ native校验、显式预览到编辑/任务，校验没有额外上游；不是 
 整批失败、清空/迟到/读取与JSON解码超时、Stop重置和大编辑envelope确认门禁。
 Prism启动工具错误，无审查/批准回执。普通产物与新HEAD三平台/fresh artifact
 结果需独立记录，不能以7d16e52绿灯替代本增量；未执行本机installer/真实推理。
+5573477首轮18checks/6nativejobs全部成功（每native431TCP+181TLS+普通载荷+
+隔离installer；Unix各5独立fullrace），三OS fresh artifact SHA/manifest/
+version/mode/format及下载Windows ordinaryblackbox/官方SDK图片视频+编辑
+生命周期exact2mock发送通过。未执行本机installer、PR仍draft未合并。
+https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6005538652
 
 ### 图片参考编辑工作流（2026-10-06；7d16e52已三平台验收）
 

@@ -304,6 +304,11 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   generation consent. Desktop edit envelope1MiB/Core wire1MiB; MCP stays160KiB
   with no file reads. No filename/path forwarded, resize/transcode/automatic
   upload or persistence. Stop/config/model/operation cancels and clears selection.
+- Desktop inline result Save as is separate: user confirms, native dialog selects
+  a new matching image file; no URL fetch or overwrite. Native16MiB envelope,
+  original validated PNG/JPEG/static GIF/WebP bytes, no path returned to page;
+  cancel creates nothing, failed write may leave a partial file. Stop suppresses
+  late UI result, not disk rollback; no API/MCP file write or automatic save.
 - Image editing uses explicit image_edit {confirmed:true,request:{model,prompt,
   reference_images:["data:image/png;base64,..."],...controls}}. Query catalog first:
   operations must contain edit; model-list fallback never permits editing.

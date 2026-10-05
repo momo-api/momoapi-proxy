@@ -571,6 +571,21 @@ consent. Stop/config/load/model/operation/catalog refresh cancel pending local
 reads/validation and epoch-fence late results. Browser memory is not secure erase.
 MCP keeps160KiB and no file capability; public edit API still1MiB and no local path.
 
+Desktop inline results have an explicit **Save as new file** button. Confirmation
+then a native Wails save dialog selects a destination; native-only POST
+/app/images/save accepts exact confirmed/mime_type/b64_json, Origin+page capability,
+duplicate/UTF8/depth64 and16MiB envelope. No URL/path supplied by the page, no network
+or Core/session/catalog use, no public API/MCP file capability. PNG/JPEG/static
+GIF/WebP use the same header/framing gates as results (not full integrity/safety).
+Bytes are unchanged. O_EXCL refuses existing files/final symlinks; extension must
+match; Windows UNC/device/extended namespace/ADS/reserved names rejected. Parent
+directory links/local filesystem redirection are not a sandbox guarantee. Unix
+new files0600 (Windows permissions inherit OS ACL). Cancellation creates no file;
+write/sync/delivery failure may leave a partial/complete file, no cleanup/overwrite/
+retry. No timeout while choosing a destination; status/Stop/Quit stay available,
+but modal OS dialogs may require cancellation before returning to the window.
+Stop/configuration epoch ignores a late save response, not disk-write rollback.
+
 Manually GET /internal/images/tasks/<id> for IDs returned by this Core only;
 one GET /v1/tasks/<id>, no auto-poll or alternate endpoint fallback. 64 slots
 reserved before generation (pending included), absolute30minTTL, no refresh.
@@ -591,7 +606,8 @@ bounded in-memory native dispatch, not browser HTTP calls with privileged header
 Bridge generate/video160KiB; edit/local validation1MiB (Core wire still1MiB); page generation305s/catalog20s/task125s timeout. Failed delivery
 may already have submitted/billed: no automatic rollback/retry. Results localmemory
 only; URL text never auto-loaded or linked. Explicit inline preview sets data: only
-(CSP img-src data:), not a file-save/image-content safety promise. Stop/Apply/Load
+(CSP img-src data:), not an image-content safety promise; explicit inline save is
+described above, never automatic URL download. Stop/Apply/Load
 clears page catalog/task/results; epoch fence ignores late pending results. Prompt
 cleared on reset; no secure memory erasure. Only latest displayed task is managed;
 other tasks remain API-queryable this Core until TTL. No remote task cancellation.
