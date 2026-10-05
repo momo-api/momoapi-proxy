@@ -11,7 +11,7 @@ async function check(){
  const button=async name=>{ensure(!byId(name).disabled);await byId(name).onclick()};
  const readyDeadline=Date.now()+5000;while((!lastState||statePending)&&Date.now()<readyDeadline)await new Promise(resolve=>setTimeout(resolve,20));
  ensure(lastState);await action('state');ensure(byId('start').disabled&&!byId('configure').disabled);
- await button('nav-routing');ensure(!byId('view-routing').hidden&&byId('view-overview').hidden&&byId('nav-routing').getAttribute('aria-selected')==='true');
+ await button('nav-routing');ensure(!byId('view-routing').hidden&&byId('view-overview').hidden&&byId('nav-routing').getAttribute('aria-selected')==='true');ensure(byId('compact-state').textContent==='默认关闭 · 501'&&!byId('routing-details').open);byId('routing-details').querySelector('summary').click();ensure(byId('routing-details').open);byId('routing-details').querySelector('summary').click();ensure(!byId('routing-details').open);
  await button('nav-settings');ensure(!byId('view-settings').hidden&&byId('view-routing').hidden);
  await button('nav-overview');ensure(!byId('view-overview').hidden);
  await button('nav-integrations');ensure(!byId('view-integrations').hidden);await button('skill-copy');await button('mcp-copy');
@@ -28,7 +28,7 @@ async function check(){
  ensure(!lastState.Running&&!byId('start').disabled&&!byId('configure').disabled);
  ensure(byId('status-label').textContent==='已停止');
  byId('routing-mode').checked=true;byId('key').value='synthetic-appcheck-only';await button('configure');ensure(lastState.Mode==='momo-routing');
- await button('start');ensure(byId('routing-mode').disabled&&byId('routing-state').textContent.includes('已启用'));await request('check-routing');await request('check-stall');await button('stop');await request('check-done');
+ await button('start');ensure(byId('routing-mode').disabled&&byId('routing-state').textContent.includes('已启用')&&byId('compact-state').textContent==='部分支持 · 手动回放');await request('check-routing');await request('check-stall');await button('stop');await request('check-done');
 }
 check().catch(()=>{});
 `
