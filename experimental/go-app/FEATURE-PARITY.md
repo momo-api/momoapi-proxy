@@ -187,6 +187,16 @@ Node不改；同mock已独立断言Node会trim/猜shell包装，Go精确保留�
 真实WebView探针新增12次exec/apply_patch SSE/JSON请求，总上游49（含列表检查）；
 不含3次零上游localcompact。Prism本轮183.469s仅静态建议，不是执行或批准。
 
+### 历史LRU事务修复（2026-10-05）
+
+Prism下一阶段230.375s静态审查指出prepare阶段提升LRU的副作用；先新增回归确认
+失败，再将touch移到完整completed写入/flush后的同一事务。prepare只读取副本，
+非法请求、上游429/截断/incomplete、取消/短写/flush/期限不提升有效anchor；自然
+过期回收仍可发生。成功store:false仅touch已有anchor，无新anchor/TTL延期；在途
+被淘汰、过期或generation失效不复活。两种JSON/SSE、store模式均覆边界。
+同mock协议夹具仍162组，载荷字节不改。审查的tool_search建议仅供后续设计；
+官方search_output示例允许defer_loading:true，未采纳顾问相反的拒绝建议。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

@@ -28,6 +28,7 @@ type historyEntry struct {
 }
 type historySeed struct {
 	model      string
+	previous   string
 	input      []json.RawMessage
 	generation uint64
 	store      bool
@@ -48,6 +49,20 @@ func (h *responseHistory) remove(id string) {
 		if v == id {
 			h.order = append(h.order[:i], h.order[i+1:]...)
 			break
+		}
+	}
+}
+
+// Success-only LRU touch: never recreate an anchor evicted/expired in flight,
+// change its bytes, or extend its absolute TTL.
+func (h *responseHistory) touch(id string) {
+	if _, exists := h.entries[id]; !exists {
+		return
+	}
+	for i, v := range h.order {
+		if v == id {
+			h.order = append(append(h.order[:i], h.order[i+1:]...), id)
+			return
 		}
 	}
 }
@@ -162,13 +177,6 @@ func (c *Core) prepareRoutedHistory(data []byte, model string) ([]byte, *history
 		if !full {
 			items = append(append([]json.RawMessage{}, entry.input...), items...)
 		}
-		c.history.remove(previous)
-		if c.history.entries == nil {
-			c.history.entries = map[string]historyEntry{}
-		}
-		c.history.entries[previous] = entry
-		c.history.bytes += entry.bytes
-		c.history.order = append(c.history.order, previous)
 	}
 	c.mu.Unlock()
 	items, err = normalizedHistory(items)
@@ -183,7 +191,7 @@ func (c *Core) prepareRoutedHistory(data []byte, model string) ([]byte, *history
 	if err != nil || len(b) > MaxRequest {
 		return nil, nil, errRouted
 	}
-	return b, &historySeed{model: model, input: items, generation: generation, store: store}, nil
+	return b, &historySeed{model: model, previous: previous, input: items, generation: generation, store: store}, nil
 }
 
 // Prepare storage BEFORE emitting completed, commit AFTER a successful local
@@ -191,7 +199,15 @@ func (c *Core) prepareRoutedHistory(data []byte, model string) ([]byte, *history
 func (c *Core) historyCompletion(ctx context.Context, seed *historySeed) func(string, []any) (func(), error) {
 	return func(id string, output []any) (func(), error) {
 		if !seed.store {
-			return nil, nil
+			return func() {
+				c.mu.Lock()
+				defer c.mu.Unlock()
+				if ctx.Err() != nil || !c.running || c.history.generation != seed.generation {
+					return
+				}
+				c.history.expire(time.Now())
+				c.history.touch(seed.previous)
+			}, nil
 		}
 		raw, err := json.Marshal(output)
 		if err != nil || len(raw) > MaxRequest {
@@ -220,6 +236,7 @@ func (c *Core) historyCompletion(ctx context.Context, seed *historySeed) func(st
 				return
 			}
 			c.history.expire(time.Now())
+			c.history.touch(seed.previous)
 			if c.history.entries == nil {
 				c.history.entries = map[string]historyEntry{}
 			}

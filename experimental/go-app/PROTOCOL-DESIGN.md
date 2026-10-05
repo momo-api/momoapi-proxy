@@ -205,3 +205,10 @@ grammar需要生成阶段约束，Chat/Claude/unsigned Gemini shim无法保证�
 拒绝unsupported_tool_format，不能以prompt描述代替约束。原生Responses保持原字节，
 由上游实施约束（本轮未做真实上游验证）。162组统一黑盒与新增history/choice/
 write-boundary回归承载该text子集，不称完整Codex grammar兼容。Prism仅静态设计。
+
+### 历史LRU属于成功事务
+
+prepare只读取未过期anchor与合并副本；有效anchor的LRU次序也须等completed完整
+本地write/flush才touch。不仅是新增history，失败请求不能影响未来淘汰顺序。
+touch不改变bytes/绝对expiry、不复活在途缺失anchor；store:false成功也可touch旧
+anchor但不创建新history。继续保留generation/取消检查与自然过期回收。

@@ -64,8 +64,11 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Stop/configure/Close clear it. No disk/vault/State/MCP transcript export. store:false
   does not store the new response; otherwise store defaults true. Oversize history
   fails before completed; no silent truncation. Terminal write/flush failure or
-  cancellation does not commit. Redefine tools/instructions each turn. Native/default
-  passthrough delegates history unchanged. Cross-model/provider and signed continuation
+  cancellation does not commit. Redefine tools/instructions each turn.
+  Anchor LRU promotion also waits for successful completed write/flush; rejected,
+  failed/incomplete/cancelled requests never promote. Successful store:false touches
+  only the existing anchor; never extends TTL or resurrects in-flight missing state.
+  Native/default passthrough delegates history unchanged. Cross-model/provider and signed continuation
   remain unsupported. This is not remote-delivery acknowledgement.
 - POST /v1/responses/compact is a separate explicit routing-mode local checkpoint,
   not native provider compact or a semantic summary. Chat/Claude/unsigned Gemini

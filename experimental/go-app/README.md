@@ -61,6 +61,11 @@ calls abort even when the provider ignores the subset. Duplicate/undeclared/type
 mismatched/ambiguous/built-in selectors reject before sending. Required text-only
 completion rejects; a verified output-limit incomplete may have no call but cannot
 bypass the set. Re-declare selection every turn; no history inheritance or execution.
+History anchor LRU promotion is success-only: reading/validating a continuation,
+upstream failure/incomplete, cancellation and terminal write/flush failure do not
+promote it. A completed successful store:false continuation touches the existing
+anchor without creating one or extending its absolute TTL. In-flight evicted,
+expired or generation-invalidated anchors are never resurrected.
 The shared encoder
 rejects calls under none, wrong calls under a named selector, and a completed
 text-only result under required/named choice. It does not execute returned tools.
