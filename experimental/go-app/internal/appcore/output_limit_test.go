@@ -239,7 +239,7 @@ func TestOutputLimitValidToolsRetainedAndChoiceStillEnforced(t *testing.T) {
 		{"claude-sonnet-4-6", claudeStart() + claudeTool(0, "call_limit", "pad__read", "{}") + claudeEnd("max_tokens")},
 		{"gemini-2.5-flash", geminiFrame([]any{geminiCall("call_limit", "pad__read", map[string]any{})}, "MAX_TOKENS", geminiUsageFixture())},
 	} {
-		for _, choice := range []any{"required", "none", map[string]string{"type": "function", "name": "read", "namespace": "pad"}, map[string]string{"type": "custom", "name": "write", "namespace": "pad"}} {
+		for _, choice := range []any{"required", "none", map[string]string{"type": "function", "name": "read", "namespace": "pad"}, map[string]string{"type": "custom", "name": "write", "namespace": "pad"}, allowedChoice("required", "read"), allowedChoice("auto", "write")} {
 			for _, stream := range []bool{true, false} {
 				c, endpoint := routedClaudeCore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Type", "text/event-stream")
@@ -260,7 +260,8 @@ func TestOutputLimitValidToolsRetainedAndChoiceStillEnforced(t *testing.T) {
 				resp.Body.Close()
 				client.CloseIdleConnections()
 				named, _ := choice.(map[string]string)
-				valid := choice == "required" || named["name"] == "read"
+				allowed, _ := choice.(map[string]any)
+				valid := choice == "required" || named["name"] == "read" || allowed["mode"] == "required"
 				if valid {
 					if resp.StatusCode != 200 || readErr != nil || !strings.Contains(string(data), `"status":"incomplete"`) || !strings.Contains(string(data), `"call_id":"call_limit"`) || !strings.Contains(string(data), `"namespace":"pad"`) || !strings.Contains(string(data), `"arguments":"{}"`) {
 						t.Fatal("valid incomplete tool lost")

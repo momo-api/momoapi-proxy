@@ -50,6 +50,7 @@ type routeRequest struct {
 	maxOutputTokens       int64
 	model, choice, effort string
 	selected              string
+	allowed               map[string]bool
 	messages              []routeMessage
 	tools                 []routeTool
 }
@@ -58,6 +59,7 @@ type chatPlan struct {
 	prepareCompletion func(string, []any) (func(), error)
 	stream            bool
 	choice, selected  string
+	allowed           map[string]bool
 	body              []byte
 	model             string
 	tools             map[string]chatTool
@@ -386,43 +388,30 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 				}
 			} else {
 				selector := obj(v)
-				if selector == nil || !only(selector, "type", "name", "namespace") {
-					return nil, errRouted
-				}
-				kind, name := str(selector["type"]), str(selector["name"])
-				if (kind != "function" && kind != "custom") || !wireName(name) {
-					return nil, errRouted
-				}
-				var tool chatTool
-				var found bool
-				if ns, present := selector["namespace"]; present {
-					s, ok := ns.(string)
-					if !ok || s != "" && !wireName(s) {
+				if str(selector["type"]) == "allowed_tools" {
+					if !only(selector, "type", "mode", "tools") || (selector["mode"] != "auto" && selector["mode"] != "required") {
 						return nil, errRouted
 					}
-					wire := name
-					if s != "" && s != "functions" {
-						wire = s + "__" + name
-					} else {
-						s = ""
+					selectors, ok := selector["tools"].([]any)
+					if !ok || len(selectors) == 0 || len(selectors) > 128 {
+						return nil, errRouted
 					}
-					tool, found = plan.tools[wire]
-					found = found && tool.name == name && tool.namespace == s
-				} else {
-					// A bare selector must be unique even if a top-level tool shares its name.
-					for _, candidate := range plan.tools {
-						if candidate.name == name {
-							if found {
-								return nil, errRouted
-							}
-							tool, found = candidate, true
+					ir.allowed = map[string]bool{}
+					for _, entry := range selectors {
+						tool, err := resolveSelector(obj(entry), plan.tools)
+						if err != nil || ir.allowed[tool.wire] {
+							return nil, errRouted
 						}
+						ir.allowed[tool.wire] = true
 					}
+					ir.choice = str(selector["mode"])
+				} else {
+					tool, err := resolveSelector(selector, plan.tools)
+					if err != nil {
+						return nil, err
+					}
+					ir.choice, ir.selected = "specific", tool.wire
 				}
-				if !found || tool.kind != kind {
-					return nil, errRouted
-				}
-				ir.choice, ir.selected = "specific", tool.wire
 			}
 		}
 	} else if _, present := p["tool_choice"]; present {
@@ -443,6 +432,63 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	}
 	ir.effort = strings.ToLower(effort)
 	return ir, nil
+}
+
+// Named and allowed-set selectors share declared identity resolution. Subset
+// filtering must never turn an otherwise ambiguous bare name into a guessed ID.
+func resolveSelector(selector map[string]any, tools map[string]chatTool) (chatTool, error) {
+	if selector == nil || !only(selector, "type", "name", "namespace") {
+		return chatTool{}, errRouted
+	}
+	kind, name := str(selector["type"]), str(selector["name"])
+	if (kind != "function" && kind != "custom") || !wireName(name) {
+		return chatTool{}, errRouted
+	}
+	var tool chatTool
+	var found bool
+	if ns, present := selector["namespace"]; present {
+		s, ok := ns.(string)
+		if !ok || s != "" && !wireName(s) {
+			return chatTool{}, errRouted
+		}
+		wire := name
+		if s != "" && s != "functions" {
+			wire = s + "__" + name
+		} else {
+			s = ""
+		}
+		tool, found = tools[wire]
+		found = found && tool.name == name && tool.namespace == s
+	} else {
+		for _, candidate := range tools {
+			if candidate.name == name {
+				if found {
+					return chatTool{}, errRouted
+				}
+				tool, found = candidate, true
+			}
+		}
+	}
+	if !found || tool.kind != kind {
+		return chatTool{}, errRouted
+	}
+	return tool, nil
+}
+
+// Provider-neutral allowed-set enforcement: expose only this turn's callable
+// declarations upstream, but keep the full identities for history and decoding.
+// This does not promise native Responses prompt-cache preservation.
+func (ir *routeRequest) callableTools() []routeTool {
+	if ir.allowed == nil {
+		return ir.tools
+	}
+	tools := make([]routeTool, 0, len(ir.allowed))
+	for _, tool := range ir.tools {
+		if ir.allowed[tool.wire] {
+			tools = append(tools, tool)
+		}
+	}
+	return tools
 }
 
 // Bare names are restored only if unambiguous; never guess between namespaces.
@@ -514,7 +560,7 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 		body["max_completion_tokens"] = ir.maxOutputTokens
 	}
 	tools := []any{}
-	for _, t := range ir.tools {
+	for _, t := range ir.callableTools() {
 		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": t.wire, "description": t.description, "parameters": t.schema}})
 	}
 	if len(tools) > 0 {
@@ -533,7 +579,7 @@ func serializePlan(ir *routeRequest, body map[string]any) (*chatPlan, error) {
 	if err != nil || len(b) > MaxRequest {
 		return nil, errRouted
 	}
-	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, choice: ir.choice, selected: ir.selected, tools: map[string]chatTool{}}
+	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, choice: ir.choice, selected: ir.selected, allowed: ir.allowed, tools: map[string]chatTool{}}
 	for _, t := range ir.tools {
 		p.tools[t.wire] = t.chatTool
 	}

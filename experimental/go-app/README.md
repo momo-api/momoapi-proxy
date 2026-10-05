@@ -42,7 +42,17 @@ resolvable; never guess which tool a namespace-stripping upstream intended.
 Named function/custom selectors resolve only declared, kind-matching tool identities;
 explicit namespace uses its exact alias, bare selectors must be unique. Chat emits
 the upstream function selector shape, Claude type:tool, Gemini ANY with one
-allowedFunctionNames entry. allowed_tools lists are not supported. The shared encoder
+allowedFunctionNames entry. allowed_tools accepts auto/required plus a nonempty
+declared function/custom selector set (max128), using the same exact namespace/
+unique-bare identity rules. Converted providers receive only this turn's callable
+declarations and normal auto/required mode, while full declarations remain available
+for paired historical calls/results and output identity validation. This preserves
+the allowed-call contract, not native Responses prompt-cache behavior. Excluded
+calls abort even when the provider ignores the subset. Duplicate/undeclared/type-
+mismatched/ambiguous/built-in selectors reject before sending. Required text-only
+completion rejects; a verified output-limit incomplete may have no call but cannot
+bypass the set. Re-declare selection every turn; no history inheritance or execution.
+The shared encoder
 rejects calls under none, wrong calls under a named selector, and a completed
 text-only result under required/named choice. It does not execute returned tools.
 
@@ -135,7 +145,7 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-114 cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+144 cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
 and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
 and named function/custom selectors with forbidden/wrong-call rejection, explicit
 token-limit mapping and incomplete output. Legacy Node ignores explicit converted
@@ -359,7 +369,7 @@ WebView state/configure+remember/change-config/load/start; native client uses au
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
-(31 physical upstream requests in total, including an explicit model-catalog check and three-protocol history continuation
+(37 physical upstream requests in total, including an explicit model-catalog check, six allowed-tools SSE/JSON requests and three-protocol history continuation
 and output-limit SSE/JSON incomplete terminals),
 then three local checkpoint JSON requests (zero additional upstream calls),
 checking exact namespace/unknown-field/Unicode bytes; native client

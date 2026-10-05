@@ -103,7 +103,7 @@ Gemini 忽略 selector；该custom输入hi被Node改为exec_command包装，Go�
 指定工具外调用、required/指定工具却仅有文本的假成功。原两组 required+文本
 夹具不删，改为断言 Go 拒绝、Node completed。单测另覆盖required成功/失败、
 显式top-level namespace、裸selector歧义与48组三协议输出契约。真实WebView另测
-三协议指定function的SSE/JSON，合计18次物理上游发送。allowed_tools集合未支持。
+三协议指定function的SSE/JSON，合计18次物理上游发送。当时allowed_tools集合未支持；后续增量见下。
 
 历史续接轮扩为89组：三协议 SSE / JSON 的文本、并行function/custom各增加
 首轮成功→suffix续接→完整history回放（实际捕获比对suffix/full上游一致），Node
@@ -154,6 +154,23 @@ assistant文本换成更小的明确有损标记，标记含规范化JSON字节�
 短写/flush/取消/鉴权/默认门禁。真实WebView另测3次compact，本轮上游数仍30。
 Prism本轮105.391s为静态设计建议，不是执行或批准；采纳显式保留/损失披露，
 选择普通output重放，未采纳隐藏cmp_内存引用，避免假装provider opaque状态兼容。
+
+### allowed_tools 子集增量（2026-10-05）
+
+统一黑盒扩为144组：三协议SSE/JSON新增允许function/custom、auto文本、required
+文本拒绝及排除工具拒绝，实际捕获断言声明缩为本轮允许集。请求接受auto/required
+与非空声明function/custom selector集合（最多128），复用namespace/裸名唯一解析；
+重复/歧义/未声明/类型不符/内置工具/未知字段发送前拒绝。不把子集过滤后唯一当
+全声明唯一，输出身份仍按完整声明校验；历史中本轮禁用工具的配对结果不会擦除。
+Chat/Claude/Gemini转换通过可调用声明过滤+auto/required直编码，输出共享encoder
+再次验证允许集。没有声称保留原生Responses prompt-cache优化；默认/原生原字节。
+required已完成文本拒绝，合法incomplete可无工具但不能越过集合；失败/incomplete
+不提交history。每轮重新声明，不继承旧选择。Node这些路径发送全部工具，Chat保留
+原selector，Claude/Gemini忽略selector；不遵守集合仍completed，差异独立精确断言。
+单测另覆两工具混合输出/完整历史/选择不继承/命名身份/未知输入/限制终端；
+真实WebView新增6次允许集SSE/JSON，物理上游合计37（含1次列表检查），无工具执行。
+官方结构参考（不是MOMO真实上游验收）：
+https://developers.openai.com/api/reference/resources/responses/methods/create
 
 ## Magpie 借鉴边界
 

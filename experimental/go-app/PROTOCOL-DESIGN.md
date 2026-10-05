@@ -141,7 +141,7 @@ IR新增单个指定工具的wire身份，仍复用声明/历史/输出映射；
 Chat/Claude/Gemini直编码各自selector，共享encoder对none/required/指定工具进行
 输出契约门禁，防止上游忽略choice却报告completed。77组同mock黑盒精确记录Node
 扁平Chat selector/忽略choice/错误输出仍完成的差异；48组输出契约单测和三平台
-真实WebView命名function探针进入CI。allowed_tools集合/exec/apply_patch仍待迁移，
+真实WebView命名function探针进入CI。当时allowed_tools集合/exec/apply_patch仍待迁移，
 不为通过测试降级约束；默认透传不改，工具执行仍由客户端负责。
 
 ## 成功历史续接增量（2026-10-05）
@@ -185,3 +185,12 @@ cmp_不做内存anchor/opaque envelope，不引入持久签名key；默认不开
 按大小触发，也不截断required state。返回普通response.compaction.output由客户端
 显式重放，不能因此宣称Codex opaque/provider compact已接入。114同mock测试
 中Node local选择工具证据/标签，Go完整工具回合保留，有独立差异断言。
+
+### 允许工具集合增量
+
+allowed_tools加入共享IR的本轮wire身份集合，不另建协议转换器。全部声明继续
+验证历史与输出身份；callableTools只过滤上游本轮声明，模式直接映射auto/required。
+跨Chat/Claude/Gemini可表达调用契约，但不同于原生Responses保留全部工具schema
+以优化缓存；明确披露，不宣称无损provider等价。共享encoder对每个新调用再次
+校验允许集；required文本不complete，合法incomplete不会造工具，也不能越界。
+144同mock精确断言Node发送全声明/忽略限制的差异。默认/原生完全透传不改。

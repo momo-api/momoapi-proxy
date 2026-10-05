@@ -74,7 +74,7 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 		body["systemInstruction"] = map[string]any{"parts": systems}
 	}
 	declarations := []any{}
-	for _, tool := range ir.tools {
+	for _, tool := range ir.callableTools() {
 		declarations = append(declarations, map[string]any{"name": tool.wire, "description": tool.description, "parameters": tool.schema})
 	}
 	if len(declarations) > 0 {

@@ -213,7 +213,7 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 		return e.textDelta(ev.text)
 	case "tool":
 		tool, ok := plan.restoreTool(ev.call.name)
-		if !ok || plan.choice == "none" || plan.selected != "" && tool.wire != plan.selected {
+		if !ok || plan.choice == "none" || plan.selected != "" && tool.wire != plan.selected || plan.allowed != nil && !plan.allowed[tool.wire] {
 			return errRouted
 		}
 		e.toolCount++

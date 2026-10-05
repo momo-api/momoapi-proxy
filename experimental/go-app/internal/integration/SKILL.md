@@ -30,7 +30,14 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Named function/custom tool_choice requires a declared matching identity; bare
   selectors must be unique, explicit namespaces resolve exactly. Calls under none,
   wrong named calls, and text-only completion under required/named choice are rejected.
-  allowed_tools sets remain unsupported. Returned tools run in the client, not MOMO.
+  allowed_tools supports auto/required and a nonempty declared function/custom set
+  (max128). Same exact namespace/unique-bare identity validation; duplicates,
+  undeclared/type-mismatched/built-in selectors reject. Converted providers receive
+  only this turn's callable declarations, not a native prompt-cache guarantee.
+  Full declarations still validate historical calls/results; excluded new calls
+  abort without completion/history. Required text-only completion fails; incomplete
+  may have no call but cannot bypass the set. Re-declare selection each turn.
+  Returned tools run in the client, not MOMO.
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures and media are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;

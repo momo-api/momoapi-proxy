@@ -38,6 +38,7 @@ const claudeSingle=name=>cs+ctool(0,'call_one','pad__'+name,name==='read'?'{}':J
 const geminiSingle=name=>gf([{functionCall:{id:'call_one',name:'pad__'+name,args:name==='read'?{}:{input:'hi'}}}])+gf(null,'STOP',gu);
 const claudeOrdered=cs+ct(0,'before-tool')+ctool(1,'call_read','pad__read','{}')+ct(2,'after-tool')+ctool(3,'call_write','pad__write',JSON.stringify({input:"text('hi')"}))+ce('tool_use');
 const geminiOrdered=gf([{text:'before-tool'},{functionCall:{id:'call_read',name:'pad__read',args:{}}},{text:'after-tool'},{functionCall:{id:'call_write',name:'pad__write',args:{input:"text('hi')"}}}])+gf(null,'STOP',gu);
+const allowedChoice=(mode,name,kind='function')=>({type:'allowed_tools',mode,tools:[{type:kind,name,namespace:'pad'}]});
 const cases=[
  {name:'text Unicode fragmented',stream:text,payload},
  {name:'function custom namespace fragmented',stream:calls,payload},
@@ -93,6 +94,13 @@ const cases=[
   {name:f.label+' explicit output limit '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,max_output_tokens:17},path:f.path,stream:f.text,json:!stream,limit:17},
   {name:f.label+' output limit incomplete '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,max_output_tokens:17},path:f.path,stream:f.limited,json:!stream,limit:17,incomplete:true},
  ])),
+ ...[{label:'Chat',payload,path:undefined,single:chatSingle,text},{label:'Claude',payload:cp,path:'/v1/messages',single:claudeSingle,text:claudeText},{label:'Gemini',payload:gp,path:gpath,single:geminiSingle,text:gt}].flatMap(f=>[true,false].flatMap(stream=>[
+  {name:f.label+' allowed function '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:allowedChoice('required','read')},path:f.path,stream:f.single('read'),json:!stream,allowed:'pad__read',singleNamespace:true},
+  {name:f.label+' allowed custom '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:allowedChoice('required','write','custom')},path:f.path,stream:f.single('write'),json:!stream,allowed:'pad__write',singleNamespace:true,allowedCustom:true},
+  {name:f.label+' allowed auto text '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:allowedChoice('auto','read')},path:f.path,stream:f.text,json:!stream,allowed:'pad__read'},
+  {name:f.label+' allowed required rejects text '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:allowedChoice('required','read')},path:f.path,stream:f.text,json:!stream,allowed:'pad__read',reject:true},
+  {name:f.label+' allowed rejects excluded call '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:allowedChoice('auto','read')},path:f.path,stream:f.single('write'),json:!stream,allowed:'pad__read',reject:true},
+ ])),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -147,9 +155,20 @@ for(const fixture of cases){
     else{assert.deepEqual(g.generationConfig,{maxOutputTokens:17});assert.equal(n.generationConfig,undefined);delete g.generationConfig}
     console.log('DIFFERENCE Go maps explicit max_output_tokens; Node converted route does not honor this limit');
    }
+   if(fixture.allowed){
+    const declared=!fixture.path?n.tools:fixture.path==='/v1/messages'?n.tools:n.tools[0].functionDeclarations;
+    const limited=!fixture.path?g.tools:fixture.path==='/v1/messages'?g.tools:g.tools[0].functionDeclarations;
+    const name=t=>!fixture.path?t.function.name:t.name;
+    assert.equal(declared.length,2);assert.equal(limited.length,1);assert.equal(name(limited[0]),fixture.allowed);
+    assert.deepEqual(limited,declared.filter(t=>name(t)===fixture.allowed));
+    if(!fixture.path){assert.equal(g.tool_choice,fixture.payload.tool_choice.mode);assert.deepEqual(n.tool_choice,fixture.payload.tool_choice);delete n.tool_choice;delete g.tool_choice;g.tools=n.tools}
+    else if(fixture.path==='/v1/messages'){assert.deepEqual(g.tool_choice,{type:fixture.payload.tool_choice.mode==='required'?'any':'auto'});g.tools=n.tools}
+    else{g.tools=n.tools}
+    console.log('DIFFERENCE Go allowed_tools filters callable declarations and enforces output set; Node sends full declarations and does not enforce the set');
+   }
    if(!fixture.path){assert.deepEqual(g.stream_options,{include_usage:true});assert.equal(n.stream_options,undefined);delete g.stream_options;if(fixture.selected){assert.deepEqual(g.tool_choice,{type:'function',function:{name:fixture.selected}});assert.deepEqual(n.tool_choice,fixture.payload.tool_choice);delete g.tool_choice;delete n.tool_choice;console.log('DIFFERENCE Go named Chat selector uses upstream function shape/declared alias; Node keeps flat selector/name/namespace')}}
    if(fixture.path==='/v1/messages'){
-    if(fixture.selected){assert.deepEqual(g.tool_choice,{type:'tool',name:fixture.selected});}else assert.equal(g.tool_choice.type,fixture.payload.tool_choice==='required'?'any':fixture.payload.tool_choice==='none'?'none':'auto');assert.equal(n.tool_choice,undefined);delete g.tool_choice;
+    if(fixture.selected){assert.deepEqual(g.tool_choice,{type:'tool',name:fixture.selected});}else if(!fixture.allowed)assert.equal(g.tool_choice.type,fixture.payload.tool_choice==='required'?'any':fixture.payload.tool_choice==='none'?'none':'auto');assert.equal(n.tool_choice,undefined);delete g.tool_choice;
     if(fixture.systemDifference){assert.equal(g.system,'Be concise.\n\nrules');assert.equal(n.system,'Be concise.');assert.equal(g.messages.length,1);assert.deepEqual(n.messages,[{role:'user',content:[{type:'text',text:'rules'},{type:'text',text:'中文🙂'}]}]);g.system=n.system;g.messages[0].content.unshift({type:'text',text:'rules'});console.log('DIFFERENCE Go keeps system instructions and tool choice; Node Claude maps developer to user and omits choice')}
     if(fixture.historyDifference){
      assert.equal(g.messages.length,3);assert.equal(n.messages.length,3);
@@ -161,7 +180,7 @@ for(const fixture of cases){
     }
    }
    if(fixture.path===gpath){
-    assert.deepEqual(g.toolConfig,{functionCallingConfig:fixture.selected?{mode:'ANY',allowedFunctionNames:[fixture.selected]}:{mode:fixture.payload.tool_choice==='required'?'ANY':fixture.payload.tool_choice==='none'?'NONE':'AUTO'}});assert.equal(n.toolConfig,undefined);delete g.toolConfig;
+    assert.deepEqual(g.toolConfig,{functionCallingConfig:fixture.selected?{mode:'ANY',allowedFunctionNames:[fixture.selected]}:{mode:fixture.allowed?(fixture.payload.tool_choice.mode==='required'?'ANY':'AUTO'):fixture.payload.tool_choice==='required'?'ANY':fixture.payload.tool_choice==='none'?'NONE':'AUTO'}});assert.equal(n.toolConfig,undefined);delete g.toolConfig;
     if(fixture.geminiHistory){
      assert.equal(g.contents.length,3);assert.equal(n.contents.length,3);
      const gcall=g.contents[1].parts[1].functionCall,ncall=n.contents[1].parts[1].functionCall;
@@ -183,7 +202,7 @@ for(const fixture of cases){
     if(fixture.json){assert.equal(g.json,true);assert.equal(n.json,undefined);assert.equal(n.events[0].type,'response.created');console.log('DIFFERENCE Go returns completed JSON for false/omitted stream; legacy Node returns SSE')}
     // Legacy Node drops explicit namespaces on Chat calls; Go restores them.
     const normalized=g.output.map(({namespace,...item})=>item);
-    if(fixture.singleNamespace&&fixture.payload.tool_choice.type==='custom'){assert.equal(g.output[0].input,'hi');assert.equal(n.output[0].input,'await tools.exec_command({ cmd: "hi" });');normalized[0].input=n.output[0].input;console.log('DIFFERENCE Go preserves custom raw input; Node synthesizes an exec_command wrapper for this fixture')}
+    if(fixture.singleNamespace&&(fixture.payload.tool_choice.type==='custom'||fixture.allowedCustom)){assert.equal(g.output[0].input,'hi');assert.equal(n.output[0].input,'await tools.exec_command({ cmd: "hi" });');normalized[0].input=n.output[0].input;console.log('DIFFERENCE Go preserves custom raw input; Node synthesizes an exec_command wrapper for this fixture')}
     assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
     if(fixture.ordered){assert.equal(g.output.length,4);assert.equal(g.output[0].content[0].text,'before-tool');assert.equal(g.output[2].content[0].text,'after-tool');for(const j of [1,3]){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}}
     if(fixture.singleNamespace||fixture.stream===calls||fixture.stream===bare||fixture.stream===claudeCalls||fixture.stream===gc){for(let j=0;j<g.output.length;j++){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}console.log('DIFFERENCE explicit namespace restored in Go; legacy Node output lacks it')}

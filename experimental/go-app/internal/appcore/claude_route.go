@@ -66,7 +66,7 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 		body["system"] = strings.Join(system, "\n\n")
 	}
 	tools := []any{}
-	for _, t := range ir.tools {
+	for _, t := range ir.callableTools() {
 		tools = append(tools, map[string]any{"name": t.wire, "description": t.description, "input_schema": t.schema})
 	}
 	if len(tools) > 0 {
