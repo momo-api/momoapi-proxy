@@ -516,6 +516,12 @@ The page polls state every 1.5s while visible and refreshes on window focus, so
 native/tray Stop is reflected without a manual refresh. Single-flight state polls
 have a 5s abort timeout and response ordering prevents older polls overwriting
 newer action state. Controls follow running/active/pending state; Stop/Quit remain
+available. Short native Start/Stop/Quit/clipboard requests have a10s HTTP abort
+deadline; an abort is NOT native rollback/delivery acknowledgement. The action
+may have executed: refresh state, no automatic retry. Configure/Load/Forget keep
+their OS-vault wait semantics, with Stop/Quit available. The tagged WebView
+watchdog records fixed last-stage labels only, never state/key/error details.
+Controls remain
 available while store operations wait, and duplicate UI mutations are ignored.
 Action warnings live in a separate notice area and polling does not erase them.
 The upstream input is cleared immediately on explicit Apply, and its temporary

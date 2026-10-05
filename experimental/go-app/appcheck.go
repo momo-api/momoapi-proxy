@@ -65,6 +65,8 @@ func check() error {
 	fmt.Println("PROFILE: " + profile)
 	completed := make(chan struct{}, 1)
 	var passed, proxied atomic.Bool
+	var latestStep atomic.Value
+	latestStep.Store("initial")
 	appReady := make(chan struct{})
 	workerDone := make(chan struct{})
 	go func() {
@@ -73,6 +75,7 @@ func check() error {
 		select {
 		case <-completed:
 		case <-time.After(25 * time.Second):
+			fmt.Println("FAIL WebView watchdog stage:", latestStep.Load()) // fixed labels only
 		}
 		application.Get().Quit()
 	}()
@@ -227,6 +230,10 @@ func check() error {
 		})
 		close(appReady)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/skill", "/app/mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
+				latestStep.Store(r.URL.Path)
+			}
 			if r.URL.Path == "/" {
 				recorder := httptest.NewRecorder()
 				original.ServeHTTP(recorder, r)

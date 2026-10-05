@@ -378,6 +378,17 @@ WebView脚本点击新按钮只验证native action契约，不是物理剪贴板
 Prism下一项assets/ops咨询工具300s超时且报告未落盘，不声称获得设计/批准。
 官方参考：https://developers.openai.com/codex/config-reference
 
+### Native 短操作等待边界（2026-10-05）
+
+b0f7c30 push三平台通过，但PR macOS WebView在25s watchdog失败，只有周期status
+200、没有check-proxy或具体assert标签，无法证明根因；不能称当前18项全通过。
+独立DOM回归复现 Start/native clipboard 类短操作无Abort deadline，可能永久保持
+mutationPending；现在这些操作10s请求期限、poll仍5s，超时明确“原生操作可能已执行，
+刷新确认”，不重试、不把HTTP取消当原生动作回滚。OS vault configure/load/forget
+仍允许等待系统解锁，Stop/Quit不阻断。test-only watchdog记录固定最近阶段标签，
+不输出状态/Key/错误/账户，25s门禁保留。这个回归不是原mac失败的根因证明，新提交
+必须重新跑全部验收，保留失败回执，不同提交绿灯不替代当前证据。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

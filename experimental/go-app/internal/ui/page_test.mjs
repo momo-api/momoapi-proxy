@@ -251,6 +251,16 @@ context.document.hidden=true;
 const before=calls.length;intervals[0]();await flush();
 assert.equal(calls.length,before);
 
+// A stalled native Start/clipboard bridge must not leave all actions locked.
+{
+ const stalled=pending();handler=()=>stalled.promise;
+ const starting=run("action('start')");await flush();
+ const options=calls.at(-1).options;
+ assert.ok(options.signal,'short native action lacks abort deadline');
+ timers.at(-1)();assert.equal(options.signal.aborted,true);
+ stalled.resolve(response(503));await starting;
+ assert.equal(run('mutationPending'),false);assert.equal(nodes.get('quit').disabled,false);
+}
 // Polls are single-flight and have an abort deadline; body key is explicit only.
 const wait=pending();handler=()=>wait.promise;
 const one=run("action('state')");await flush();
