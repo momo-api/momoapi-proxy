@@ -162,6 +162,17 @@ sharing or upstream-health indicator. Full gap audit and migration gates:
 
 ### Skill / MCP and quota
 
+Overview also provides an explicit Key/model-list check at the configured
+GET /v1/models. No startup/polling query, inference request or retry. The same
+public pinned HTTPS transport, four-request admission and Stop cancellation
+apply; deadline 8s, response 256KiB, at most 2048 IDs of 160 bytes. Missing/null,
+duplicate/invalid IDs, control/format characters and oversized lists fail closed;
+empty data[] is a real successful empty catalog, not a failed-query placeholder.
+Only sorted IDs and query time reach the page (textContent, never HTML); owner,
+account and other metadata are discarded. Case-insensitive filtering is local.
+Apply/Load clears the snapshot. List authorization does not establish inference,
+model feature availability, account wallet or real MOMO success-path acceptance.
+
 Integrations exports a bundled, secret-free SKILL.md via the native clipboard and
 a generic mcpServers JSON configuration with this executable's absolute path and
 the `mcp` subcommand. Nothing is auto-installed or written into other clients.
@@ -343,7 +354,7 @@ WebView state/configure+remember/change-config/load/start; native client uses au
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
-(30 physical upstream requests in total, including three-protocol history continuation
+(31 physical upstream requests in total, including an explicit model-catalog check and three-protocol history continuation
 and output-limit SSE/JSON incomplete terminals),
 then three local checkpoint JSON requests (zero additional upstream calls),
 checking exact namespace/unknown-field/Unicode bytes; native client

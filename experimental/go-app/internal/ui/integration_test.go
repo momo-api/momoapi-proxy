@@ -14,7 +14,7 @@ func TestExplicitIntegrationAndQuotaBoundary(t *testing.T) {
 	h := HandlerWithActions("http://wails.localhost", c, Actions{
 		CopySkill: func() error { skill++; return nil }, CopyMCPConfig: func() error { mcp++; return nil },
 	})
-	for _, path := range []string{"/app/skill", "/app/mcp-config", "/app/quota"} {
+	for _, path := range []string{"/app/skill", "/app/mcp-config", "/app/quota", "/app/models"} {
 		for _, tc := range []struct {
 			origin, body string
 			want         int
@@ -43,18 +43,20 @@ func TestExplicitIntegrationAndQuotaBoundary(t *testing.T) {
 	if skill != 1 || mcp != 1 {
 		t.Fatal("missing explicit export")
 	}
-	req := httptest.NewRequest("POST", "/app/quota", nil)
-	req.Header.Set("Origin", "http://wails.localhost")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-	if w.Code != 502 {
-		t.Fatal("unconfigured query accepted")
-	}
-	// These actions must not become public local TCP APIs.
-	req = httptest.NewRequest("POST", "/app/quota", nil)
-	w = httptest.NewRecorder()
-	c.Handler().ServeHTTP(w, req)
-	if w.Code != 401 {
-		t.Fatal("TCP account route exposed")
+	for _, path := range []string{"/app/quota", "/app/models"} {
+		req := httptest.NewRequest("POST", path, nil)
+		req.Header.Set("Origin", "http://wails.localhost")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != 502 {
+			t.Fatal("unconfigured query accepted")
+		}
+		// These actions must not become public local TCP APIs.
+		req = httptest.NewRequest("POST", path, nil)
+		w = httptest.NewRecorder()
+		c.Handler().ServeHTTP(w, req)
+		if w.Code != 401 {
+			t.Fatal("TCP diagnostics route exposed")
+		}
 	}
 }

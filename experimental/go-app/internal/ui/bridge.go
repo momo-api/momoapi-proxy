@@ -69,7 +69,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" {
+		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" {
 			http.NotFound(w, r)
 			return
 		}
@@ -114,6 +114,26 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		} else {
 			if len(data) != 0 {
 				http.Error(w, "body denied", 400)
+				return
+			}
+			if r.URL.Path == "/app/models" {
+				models, err := core.QueryModels(r.Context())
+				if err != nil {
+					status := 502
+					if errors.Is(err, appcore.ErrModelsUnauthorized) {
+						status = 401
+					}
+					if errors.Is(err, appcore.ErrModelsUnsupported) {
+						status = 404
+					}
+					if errors.Is(err, appcore.ErrModelsBusy) {
+						status = 409
+					}
+					http.Error(w, "model catalog unavailable", status)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(models)
 				return
 			}
 			if r.URL.Path == "/app/quota" {

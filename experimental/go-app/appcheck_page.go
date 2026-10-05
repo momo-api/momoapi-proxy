@@ -21,6 +21,7 @@ async function check(){
  byId('endpoint').value='https://other.example';byId('key').value='synthetic-other';byId('remember').checked=false;
  await button('configure');await button('nav-settings');await button('load');ensure(byId('endpoint').value==='https://mock.example'&&!byId('view-overview').hidden&&byId('view-settings').hidden);
  await button('quota-refresh');ensure(byId('quota-available').textContent.includes('12,345')&&byId('quota-note').textContent.includes('非账户钱包')&&!byId('state').textContent.includes('private-do-not-render'));
+ await button('models-refresh');ensure(byId('models-state').textContent==='列表权限已验证'&&byId('models-list').textContent==='mock'&&byId('models-note').textContent.includes('不证明模型推理可用'));byId('models-filter').value='absent';byId('models-filter').oninput();ensure(byId('models-list').textContent==='没有匹配的模型');byId('models-filter').value='';byId('models-filter').oninput();ensure(byId('models-list').textContent==='mock');
  await button('start');ensure(lastState.Running&&byId('configure').disabled&&byId('load').disabled&&byId('start').disabled&&!byId('stop').disabled&&!byId('quit').disabled);
  ensure(byId('service-state').textContent==='运行中'&&byId('status-badge').dataset.tone==='good'&&byId('local-url').textContent===lastState.LocalEndpoint+'/v1');
  await request('check-proxy');await request('check-native-stop');
