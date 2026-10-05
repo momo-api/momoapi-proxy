@@ -49,6 +49,9 @@ func (e *responseWriter) event(name string, p map[string]any) error {
 		if err != nil || n != len(b) {
 			return errRoutedWrite
 		}
+		if http.NewResponseController(e.w).Flush() != nil {
+			return errRoutedWrite
+		}
 		return nil
 	}
 	p["type"] = name
@@ -65,7 +68,11 @@ func (e *responseWriter) event(name string, p map[string]any) error {
 	if err = controller.SetWriteDeadline(time.Now().Add(15 * time.Second)); err != nil {
 		return err
 	}
-	if _, err = io.WriteString(e.w, frame); err != nil {
+	var n int
+	if n, err = io.WriteString(e.w, frame); err != nil || n != len(frame) {
+		if err == nil {
+			err = io.ErrShortWrite
+		}
 		return err
 	}
 	return controller.Flush()
@@ -223,7 +230,21 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 		if ev.usage != nil {
 			r["usage"] = ev.usage
 		}
-		return e.event("response.completed", map[string]any{"response": r})
+		var commit func()
+		if plan.prepareCompletion != nil {
+			var err error
+			commit, err = plan.prepareCompletion(e.id, e.output)
+			if err != nil {
+				return err
+			}
+		}
+		if err := e.event("response.completed", map[string]any{"response": r}); err != nil {
+			return err
+		}
+		if commit != nil {
+			commit()
+		}
+		return nil
 	}
 	return errRouted
 }

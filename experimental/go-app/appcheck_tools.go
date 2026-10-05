@@ -90,5 +90,5 @@ func probeNamedRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return nil
+	return probeHistoryRequests(core)
 }

@@ -46,11 +46,12 @@ type routeRequest struct {
 }
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
-	stream           bool
-	choice, selected string
-	body             []byte
-	model            string
-	tools            map[string]chatTool
+	prepareCompletion func(string, []any) (func(), error)
+	stream            bool
+	choice, selected  string
+	body              []byte
+	model             string
+	tools             map[string]chatTool
 }
 
 func str(v any) string         { s, _ := v.(string); return s }
@@ -317,7 +318,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			delete(pending, id)
 			messages = append(messages, routeMessage{role: "tool", resultID: id, text: content})
 		case "", "message":
-			if len(pending) != 0 || !only(m, "type", "role", "content") {
+			if !only(m, "type", "role", "content") {
 				return nil, errRouted
 			}
 			role := str(m["role"])
@@ -329,11 +330,24 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 				return nil, errRouted
 			}
 			content, err := textParts(m["content"])
+			// Preserve upstream text interleaved within one tool-use turn;
+			// never accept user/system or partial-result interruptions.
+			if len(pending) != 0 && (role != "assistant" || len(messages) > 0 && messages[len(messages)-1].role == "tool") {
+				return nil, errRouted
+			}
 			if err != nil {
 				return nil, err
 			}
 			if content == "" && role == "user" {
 				content = "Continue."
+			}
+			if len(pending) > 0 && role == "assistant" && len(messages) > 0 && messages[len(messages)-1].role == "assistant" {
+				last := &messages[len(messages)-1]
+				if last.text != "" && content != "" {
+					last.text += "\n"
+				}
+				last.text += content
+				continue
 			}
 			messages = append(messages, routeMessage{role: role, text: content})
 		default:

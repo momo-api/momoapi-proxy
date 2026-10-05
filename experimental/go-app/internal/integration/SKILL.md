@@ -22,7 +22,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   using the same typed encoder and a single upstream SSE request. Conversion
   failures before JSON writing return redacted 502; partial writes abort HTTP.
   This is not a verified live-upstream JSON guarantee.
-  Strictly rejects media/history references/unknown options;
+  Strictly rejects media/foreign or expired history references/unknown options;
   Chat requests stream_options.include_usage and maps validated input/output/total,
   cached/reasoning tokens (not money). Missing usage is not fabricated; invalid or
   decreasing counts abort without completed. Usage trailers still require [DONE].
@@ -38,7 +38,15 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   requires STOP plus clean framed HTTP EOF; early EOF/errors abort without completed.
   Muse conversion is out of scope and
   muse-auto is rejected in opt-in routing mode. No fallback or duplicate send.
-- History replay, compaction, attachment management, media generation and
+- Converted previous_response_id supports same-model, same-Core memory replay only:
+  64 LRU anchors, 8 MiB total, 1 MiB transcript/request, 2048 items, 30-minute expiry.
+  Stop/configure/Close clear it. No disk/vault/State/MCP transcript export. store:false
+  does not store the new response; otherwise store defaults true. Oversize history
+  fails before completed; no silent truncation. Terminal write/flush failure or
+  cancellation does not commit. Redefine tools/instructions each turn. Native/default
+  passthrough delegates history unchanged. Cross-model/provider and signed continuation
+  remain unsupported. This is not remote-delivery acknowledgement.
+- Compaction, attachment management, media generation and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The built-in stdio MCP only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.

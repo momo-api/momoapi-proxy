@@ -55,7 +55,9 @@ assert.ok(source.includes('不含 thinking/签名'));
 assert.ok(source.includes('不含 thinking/签名/媒体'));
 assert.ok(!source.includes('Gemini 尚未迁移'));
 assert.doesNotMatch(source,/Gemini \/ Claude \/ Muse 尚未迁移/);
-assert.equal((source.match(/>未迁移</g)||[]).length,3);
+assert.equal((source.match(/>未迁移</g)||[]).length,2);
+assert.ok(source.includes('部分支持 · 有界内存'));
+assert.ok(source.includes('Stop 或重新配置即清空；store:false 不保存新响应'));
 assert.doesNotMatch(source,/<(?:script|link|img)[^>]*(?:src|href)=/i);
 
 // Real navigation handlers and accessible keyboard tabs, not fake feature controls.

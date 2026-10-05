@@ -81,6 +81,10 @@ const cases=[
   {name:f.label+' none rejects call '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:'none'},path:f.path,stream:f.single('read'),json:!stream,reject:true},
   {name:f.label+' named rejects wrong call '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:{type:'function',name:'read',namespace:'pad'}},path:f.path,stream:f.single('write'),json:!stream,selected:'pad__read',reject:true},
  ])),
+ ...[{label:'Chat',payload,path:undefined,text,calls},{label:'Claude',payload:cp,path:'/v1/messages',text:claudeText,calls:claudeCalls},{label:'Gemini',payload:gp,path:gpath,text:gt,calls:gc}].flatMap(f=>[true,false].flatMap(stream=>[
+  {name:f.label+' text continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.text,json:!stream,continuation:true},
+  {name:f.label+' tools continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.calls,json:!stream,continuation:true},
+ ])),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -171,10 +175,24 @@ for(const fixture of cases){
     if(fixture.chatUsage){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:8,input_tokens_details:{cached_tokens:2},output_tokens_details:{reasoning_tokens:1}});assert.equal(n.completed.response.usage,undefined);console.log('DIFFERENCE Go requests/maps validated Chat usage; Node does not request/map it')}
    }
   }
+  if(fixture.continuation){
+   const nfirst=nodeResults[0].completed.response,gfirst=goResults[0].completed.response;
+   const suffix=gfirst.output.filter(v=>['function_call','custom_tool_call'].includes(v.type)).map(v=>({type:v.type==='function_call'?'function_call_output':'custom_tool_call_output',call_id:v.call_id,output:'history-result'}));suffix.push({role:'user',content:'continue-now'});
+   const nnext=await invoke(nodeURL,'synthetic-node-only',{...fixture.payload,previous_response_id:nfirst.id,input:suffix});
+   const gnext=await invoke(goURL,handoff.api_key,{...fixture.payload,previous_response_id:gfirst.id,input:suffix});
+   const gfull=await invoke(goURL,handoff.api_key,{...fixture.payload,previous_response_id:gfirst.id,input:[...fixture.payload.input,...gfirst.output,...suffix]});
+   assert.ok(nnext.completed&&gnext.completed&&gfull.completed,fixture.name+' continuation');
+   const all=await(await fetch(handoff.mock_url+'/capture')).json();assert.equal(all.length,5);assert.deepEqual(all[3],all[4],fixture.name+' suffix/full replay equality');
+   const gserialized=JSON.stringify(all[3]),nserialized=JSON.stringify(all[2]);
+   assert.ok(gserialized.includes('中文🙂'));assert.ok(gserialized.includes('continue-now'));assert.ok(!nserialized.includes('中文🙂'));assert.ok(nserialized.includes('continue-now'));
+   assert.ok(!gserialized.includes('previous_response_id'));assert.ok(!gserialized.includes('resp_'));
+   if(suffix.length>1){assert.ok(gserialized.includes('pad__read'));assert.ok(gserialized.includes('pad__write'));assert.ok(gserialized.includes('history-result'))}
+   console.log('DIFFERENCE Go converted previous_response_id replays successful bounded transcript; Node converted path ignores anchor and sends suffix only');
+  }
   console.log('PASS uniform blackbox '+fixture.name);
  }finally{
   if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-console.log('PASS 77 shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');
+console.log('PASS 89 shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');

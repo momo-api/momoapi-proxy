@@ -31,7 +31,7 @@ support; no signature bypass, replay cache or artificial signature is introduced
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
-It rejects unknown payload fields/options, media, history references, compaction,
+It rejects unknown payload fields/options, media, foreign/expired history references, compaction,
 built-in tools, exec/apply_patch normalization, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
@@ -62,7 +62,25 @@ are rejected rather than silently accepted. Usage-only trailers require a prior
 finish_reason and are not terminals: [DONE] is still mandatory. Upstreams rejecting
 include_usage are not retried/fallen back; native/default requests remain unchanged.
 No adapter synthesizes DSML tools;
-only successful full output is completed, with no local history cache.
+only successful full output is completed; bounded converted history is described below.
+
+Converted Responses support previous_response_id through a Core-owned memory
+transcript: 64 LRU anchors, 8 MiB total, 1 MiB per transcript/replayed request,
+2048 items, absolute 30-minute expiry. Same model only; foreign/expired anchors fail
+400 before upstream. Stop/configure/Close clear it; generation checks prevent late
+requests repopulating cleared history. No files/vault/State/MCP history export.
+store:false uses a known anchor without storing the new response; otherwise store
+defaults true. Replay must fit BEFORE completed is emitted. Prepare storage before
+terminal, commit only after successful terminal write+flush; this is local write
+success, not remote-delivery acknowledgement. Failure/cancellation/short write/flush
+failure cannot mint anchors. Use store:false for output exceeding history budget;
+no silent truncation/summarization. New suffix is appended; a complete exact
+normalized prefix is not duplicated; partial overlaps are not guessed or removed.
+Completed id/status metadata is validated then stripped for request IR, preserving
+arguments/namespace/number precision. Redeclare matching tools; results stay paired;
+instructions/knobs are per-turn, not inherited. Branches do not consume anchors.
+Native/default passthrough delegates history unchanged. Cross-model/provider
+continuation, compact and signed Gemini history remain unsupported.
 
 For these opt-in converted subsets, stream:true returns Responses SSE; false or
 omitted stream returns one completed Responses JSON object. The same bounded
@@ -78,11 +96,12 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-Seventy-seven cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+Eighty-nine cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
 and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
 and named function/custom selectors with forbidden/wrong-call rejection. Legacy Node
 emits SSE for converted JSON requests, does not request/map Chat usage, retains a flat
-Chat named selector and does not enforce converted-output choice. Known
+Chat named selector and does not enforce converted-output choice; converted Node
+previous_response_id sends only suffix, while Go replays successful history. Known
 namespace, history schema, system/tool_choice, usage and premature-EOF differences
 are separately asserted/documented in
 [FEATURE-PARITY.md](FEATURE-PARITY.md). Normal build excludes this injection.
@@ -279,7 +298,7 @@ WebView state/configure+remember/change-config/load/start; native client uses au
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
-(18 physical upstream requests in total),
+(24 physical upstream requests in total, including three-protocol history continuation),
 checking exact namespace/unknown-field/Unicode bytes; native client
 holds incomplete fixed-length/chunked uploads before WebView Stop, verifies zero
 active without waiting for the upload timeout, then

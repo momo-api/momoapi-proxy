@@ -143,3 +143,16 @@ Chat/Claude/Gemini直编码各自selector，共享encoder对none/required/指定
 扁平Chat selector/忽略choice/错误输出仍完成的差异；48组输出契约单测和三平台
 真实WebView命名function探针进入CI。allowed_tools集合/exec/apply_patch仍待迁移，
 不为通过测试降级约束；默认透传不改，工具执行仍由客户端负责。
+
+## 成功历史续接增量（2026-10-05）
+
+仅转换路径previous_response_id/store由Core有界内存处理；native/default原字节。
+保存规范化保精度的请求+输出，不把SSE当内部状态存储。默认store=true，64LRU/
+8MiBtotal/1MiBtranscript+request/2048items/30min绝对TTL；超预算不截断，store:false
+不mintanchor。同模型/同Core，Stop与configure递增generation清空，外来anchor400。
+准备状态在completed前、commit在terminal完整write+flush后；失败/取消/shortwrite/
+flusherror不commit，不能声称远端已收到。suffix与完整精确prefix都支持，不猜局部
+重叠；新轮指令/声明由客户端提供，保持工具配对和namespace。89组统一黑盒明确
+Node转换仅suffix的差异；单测验证并行工具/交错assistant/独立分支/并发/作用域/
+预算/失效/写失败；WebView三协议实际续接。尚未compact/跨provider/签名续接，也
+不是现有Node原生状态算法全量等价。

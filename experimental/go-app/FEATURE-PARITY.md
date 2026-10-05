@@ -14,7 +14,7 @@
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
-| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 未迁移；字段原样转交，不提供本地回放 |
+| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换路径支持同模型有界内存 previous_response_id 回放；原生/默认透传不改。compact、跨模型/供应商回放未迁移 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 仅手动复制本地连接配置；无自动接入或更新 |
@@ -104,6 +104,19 @@ Gemini 忽略 selector；该custom输入hi被Node改为exec_command包装，Go�
 夹具不删，改为断言 Go 拒绝、Node completed。单测另覆盖required成功/失败、
 显式top-level namespace、裸selector歧义与48组三协议输出契约。真实WebView另测
 三协议指定function的SSE/JSON，合计18次物理上游发送。allowed_tools集合未支持。
+
+历史续接轮扩为89组：三协议 SSE / JSON 的文本、并行function/custom各增加
+首轮成功→suffix续接→完整history回放（实际捕获比对suffix/full上游一致），Node
+转换路径忽略anchor仅发送suffix，Go发送经校验完整history。不是原生Responses
+状态兼容：原生/默认字节仍原样交上游。Go每Core独立内存，同模型、64LRU anchor、
+总8MiB、单history/请求1MiB、2048item、固定30分钟TTL；Stop/configure/Close清空，
+generation防迟到写入。未知/过期/跨模型anchor400，无磁盘/凭据库/State/MCP导出。
+store:false不生成下一anchor；默认true，超history预算在completed之前失败，不截断。
+prepare在终端之前，commit在终端本地完整写入+flush后；不是客户端收到的确认。
+单测覆盖独立Core/模型/过期/Stop/store:false/LRU字节与条目/并发分支/失败短写flush。
+namespace/工具声明/配对结果、交错assistant文本/大整数保留；必须重新声明工具。
+instructions与选项每轮提供，不继承。仅完整精确语义prefix避免重复，不猜部分重叠。
+真实WebView另测三协议续聊，上游计数24；签名续接/跨provider/compact仍未迁移。
 
 ## Magpie 借鉴边界
 

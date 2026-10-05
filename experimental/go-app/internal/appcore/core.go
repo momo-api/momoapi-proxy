@@ -50,6 +50,7 @@ type Core struct {
 	token    string
 	endpoint string
 	client   *http.Client
+	history  responseHistory
 }
 
 func New() (*Core, error) {
@@ -127,6 +128,7 @@ func (c *Core) Configure(config Config) error {
 	}
 	config.Endpoint = strings.TrimSuffix(config.Endpoint, "/")
 	c.config = config
+	c.history.clear()
 	return nil
 }
 func (c *Core) State() State {
@@ -155,6 +157,7 @@ func (c *Core) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.running = false
+	c.history.clear()
 	for _, cancel := range c.cancels {
 		cancel()
 	}
@@ -281,6 +284,16 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 		stream = string(payload["stream"]) == "true"
 		if r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" {
+			var seed *historySeed
+			protocol := resolveProtocol(model)
+			if protocol == "chat" || protocol == "claude" || protocol == "gemini" {
+				var historyErr error
+				body, seed, historyErr = c.prepareRoutedHistory(body, model)
+				if historyErr != nil {
+					http.Error(w, "unsupported or expired routed history", 400)
+					return
+				}
+			}
 			switch resolveProtocol(model) {
 			case "chat":
 				routedProtocol = "chat"
@@ -316,6 +329,9 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			default:
 				http.Error(w, "model protocol not migrated", 501)
 				return
+			}
+			if routed != nil {
+				routed.prepareCompletion = c.historyCompletion(ctx, seed)
 			}
 		}
 		if r.URL.Path == "/v1/chat/completions" {
