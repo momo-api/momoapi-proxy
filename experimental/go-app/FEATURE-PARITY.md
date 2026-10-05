@@ -36,7 +36,7 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### DSML 工具文本转换（2026-10-06；新 HEAD CI 待验收）
+### DSML 工具文本转换（2026-10-06；核心62312f2已验收，界面增量待新HEAD验收）
 
 新增逐请求X-MOMO-Tool-Text:dsml-v1，仅converted Chat，明确改变text→call信任解释；
 默认关闭、不按model自动启用、不继承history、不forward。native/default/Claude/
@@ -49,9 +49,15 @@ custom仅input:string；mixed structured/DSML、search、畸形/重复/未知/�
 缺finish+[DONE]拒绝，无completed/incomplete/history；Stop/写失败不重发。
 替换原DSML缩写一律拒绝逻辑；parser/split/真实TCP SSE+JSON/失败无history/配对续聊策略不继承/
 Stop/短写门禁回归。统一新增6同mock/resources：三tag形式×SSE/JSON，exactupstream
-独立断言；Go不泄分片markup，Node自动合成丢namespace且泄前缀。计划305统一TCP，
-native新增2实际API→TLSmock SSE/JSON探针计划119。非实际Codex DSML/真实模型/工具
-执行/完整三方性能排名；Node unchanged，Muse excluded，新提交产物需重新验收。
+独立断言；Go不泄分片markup，Node自动合成丢namespace且泄前缀。62312f2的305统一
+TCP/119实际TLSmock/普通发行binary/官方MCP SDK验收通过；18项三平台首轮CI与新
+产物SHA/manifest/version/权限/格式通过。真实Codex0.156 Linux freshHOME、只读
+sandbox/zero retries：fullwidth DSML只读MCP与固定printf分别exit0/exact2 mock请求、
+call_dsml配对及第二轮通过。仅local mock，不代表真实模型、任意工具执行或三方
+性能排名；Node unchanged，Muse excluded。仅新testprofile授权该只读MCP工具，
+不改用户审批。Prism启动失败无本轮审查。保留标签不能嵌套在raw参数中，明确
+拒绝而非无损任意markup编码。界面新增默认关闭/信任解释/参数和审批边界卡片；
+不新增按钮或自动启用。新提交产物需重新验收。
 
 ### Codex 接入界面补齐（2026-10-06；新 HEAD CI 待验收）
 

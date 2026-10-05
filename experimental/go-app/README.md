@@ -320,6 +320,8 @@ Plain <tool_calls>/<invoke>/<parameter> and ASCII/fullwidth DSML-prefixed tags
 are parsed only after finish_reason + [DONE]. A possible marker prefix is held
 across chunks (without splitting UTF-8), so markup does not leak as partial text.
 Ordinary prose containing the acronym DSML remains text, not a tool marker.
+Recognized tag prefixes are reserved: literal nested tool markup in a parameter
+is rejected, even in a raw string. This is not a lossless arbitrary-markup codec.
 Surrounding text retains exact order; malformed/unknown/ambiguous/duplicate tags,
 parameters, unsupported attributes and mixed structured+DSML calls fail. 1MiB
 retained output,128 calls/parameters,1024byte tag header,256byte parameter name,
