@@ -6,6 +6,7 @@ package main
 // Synthetic native test only, never compiled into the distributed application.
 const pageProbeScript = `
 async function check(){
+ const started=await fetch('/check-page-ready',{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});if(!started.ok)throw Error('probe readiness denied');
  let step='initial';
  window.momoProbeStep=()=>step;const ensure=value=>{if(!value)throw Error('page check failed')};
  const request=async name=>{step=name;const r=await fetch('/'+name,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce}});ensure(r.ok)};

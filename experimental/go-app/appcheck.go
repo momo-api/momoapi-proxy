@@ -68,14 +68,27 @@ func check() error {
 	var latestStep atomic.Value
 	latestStep.Store("initial")
 	appReady := make(chan struct{})
+	pageReady := make(chan struct{}, 1)
 	workerDone := make(chan struct{})
 	go func() {
 		defer close(workerDone)
 		<-appReady
-		select {
-		case <-completed:
-		case <-time.After(25 * time.Second):
-			fmt.Println("FAIL WebView watchdog stage:", latestStep.Load()) // fixed labels only
+		overall := make(chan struct{})
+		startup := make(chan struct{})
+		overallTimer := time.AfterFunc(40*time.Second, func() { close(overall) })
+		startupTimer := time.AfterFunc(25*time.Second, func() { close(startup) })
+		defer overallTimer.Stop()
+		defer startupTimer.Stop()
+		result := awaitProbeStartup(pageReady, completed, startup, overall)
+		if result == "ready" {
+			startupTimer.Stop()
+			actions := make(chan struct{})
+			actionsTimer := time.AfterFunc(25*time.Second, func() { close(actions) })
+			result = awaitProbeActions(completed, actions, overall)
+			actionsTimer.Stop()
+		}
+		if result != "completed" {
+			fmt.Println("FAIL WebView watchdog phase:", result, "stage:", latestStep.Load())
 		}
 		application.Get().Quit()
 	}()
@@ -306,13 +319,22 @@ func check() error {
 				_, _ = io.WriteString(w, page)
 				return
 			}
-			if r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-native-stop" || r.URL.Path == "/check-done" || r.URL.Path == "/check-routing" || r.URL.Path == "/check-page-failure" {
+			if r.URL.Path == "/check-page-ready" || r.URL.Path == "/check-proxy" || r.URL.Path == "/check-stall" || r.URL.Path == "/check-native-stop" || r.URL.Path == "/check-done" || r.URL.Path == "/check-routing" || r.URL.Path == "/check-page-failure" {
 				validation := r.Clone(r.Context())
 				validation.URL.Path = "/app/state"
 				auth := httptest.NewRecorder()
 				original.ServeHTTP(auth, validation)
 				if auth.Code != 200 {
 					http.Error(w, "denied", 403)
+					return
+				}
+				if r.URL.Path == "/check-page-ready" {
+					latestStep.Store("page-ready")
+					select {
+					case pageReady <- struct{}{}:
+					default:
+					}
+					w.WriteHeader(204)
 					return
 				}
 				if r.URL.Path == "/check-page-failure" {

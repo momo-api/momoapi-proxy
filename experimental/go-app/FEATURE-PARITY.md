@@ -58,6 +58,13 @@ canonical JSON比较及完整终端流，未放宽生产门禁。回归含标签
 513pass/2fail/3skip（既存log sink多进程ENOTEMPTY）仍保留，不以独立诊断代替。
 Prism启动toolerror，无专家批准。新HEAD三平台CI/产物尚待验收，不用旧HEAD替代。
 
+5f22606首轮main PR/push均成功，native push三平台成功、PR mac/Linux成功，
+Windows PR WebView initial阶段25s watchdog失败：冷启动约6.7s建立环境，
+约21.8s首次state bridge，尚未进入协议测试。保留原始失败，不重跑为成功。
+测试探针新增authenticated page-ready阶段：启动仍25s门禁，页面动作仍25s，
+全进程仍40s上限，不重试/跳断言/变更production deadline。固定阶段回执，
+无timer reset；同步通道选择单测100遍，三平台CI执行。仍须新HEAD重新验收。
+
 ### 普通 function strict 与 nullable schema（2026-10-06；cc44417已三平台验收）
 
 strict:true 不再错误依赖 client-search；strict:false/省略不启用本地 schema

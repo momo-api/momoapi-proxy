@@ -69,6 +69,7 @@ jobs:
           suffix=
           if [ "$RUNNER_OS" = Windows ]; then suffix=.exe; fi
           if [ "$RUNNER_OS" = Linux ]; then tags=appcheck,gtk3,production; fi
+          go test -tags "$tags" -run '^TestProbeWatchdogIndependentStages$' -count=100 .
           go build -tags "$tags" -trimpath -o "$RUNNER_TEMP/momo-appcheck$suffix" .
       - name: Windows and macOS WebView TCP TLS-mock E2E and shutdown
         if: runner.os != 'Linux'
