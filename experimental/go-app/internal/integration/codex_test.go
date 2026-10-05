@@ -24,7 +24,15 @@ func TestCodexProviderConfigIsLocalAndCredentialFree(t *testing.T) {
 				t.Fatal("missing provider contract")
 			}
 		}
-		for _, forbidden := range []string{"experimental_bearer_token", "http_headers", "api_key =", "model =", "auth.json", "approval_policy", "sandbox_mode"} {
+		if !strings.Contains(text, "# http_headers = { \"X-MOMO-Client-Policy\" = \"text-tools-v1\" }") {
+			t.Fatal("optional policy disclosure missing")
+		}
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(line, "http_headers") {
+				t.Fatal("lossy policy enabled by default")
+			}
+		}
+		for _, forbidden := range []string{"experimental_bearer_token", "api_key =", "model =", "auth.json", "approval_policy", "sandbox_mode"} {
 			if strings.Contains(text, forbidden) {
 				t.Fatal("client export exceeded scope")
 			}

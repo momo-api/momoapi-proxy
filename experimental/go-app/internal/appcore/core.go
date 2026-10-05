@@ -225,6 +225,11 @@ func (c *Core) Handler() http.Handler {
 	})
 }
 func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
+	clientPolicy, validClientPolicy := clientPolicyRequested(r)
+	if !validClientPolicy {
+		http.Error(w, "invalid client policy", 400)
+		return
+	}
 	nativeCompact, validCompactHeader := nativeCompactRequested(r)
 	if !validCompactHeader {
 		http.Error(w, "invalid compact policy", 400)
@@ -322,6 +327,15 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		stream = string(payload["stream"]) == "true"
+		protocol := resolveProtocol(model)
+		converted := r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" && (protocol == "chat" || protocol == "claude" || protocol == "gemini")
+		if clientPolicy && converted {
+			body, err = normalizeTextToolsClient(body)
+			if err != nil {
+				http.Error(w, "unsupported text-tools client options", 400)
+				return
+			}
+		}
 		if attachmentInline {
 			protocol := resolveProtocol(model)
 			if config.Mode != "momo-routing" || nativeCompact || protocol != "chat" && protocol != "claude" && protocol != "gemini" {
@@ -396,6 +410,9 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if routed != nil {
+				if clientPolicy {
+					w.Header().Set("X-MOMO-Client-Policy", "text-tools-v1")
+				}
 				routed.prepareCompletion = c.historyCompletion(ctx, seed)
 			}
 		}

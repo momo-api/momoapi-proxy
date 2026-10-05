@@ -54,6 +54,7 @@ const deferredTool={type:'namespace',name:'pad',tools:[{type:'function',name:'re
 const searchHistory=[{type:'tool_search_call',execution:'client',call_id:'search_history',arguments:{goal:'read'}},{type:'tool_search_output',execution:'client',call_id:'search_history',status:'completed',tools:[deferredTool]}];
 const searchCalls={Chat:args=>sse([chunk({tool_calls:[{index:0,id:'search_call',type:'function',function:{name:'tool_search',arguments:JSON.stringify(args)}}]},'tool_calls')]),Claude:args=>cs+ctool(0,'search_call','tool_search',JSON.stringify(args))+ce('tool_use'),Gemini:args=>gf([{functionCall:{id:'search_call',name:'tool_search',args}}],'STOP',gu)};
 const cases=[
+ ...[{label:'Chat',payload,stream:text,path:undefined},{label:'Claude',payload:cp,stream:claudeText,path:'/v1/messages'},{label:'Gemini',payload:gp,stream:gt,path:gpath}].flatMap(f=>[true,false].map(stream=>({name:f.label+' explicit text-tools client options '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,store:false,parallel_tool_calls:true,client_metadata:{session_id:'synthetic-private-label'},prompt_cache_key:'synthetic-private-cache',include:['reasoning.encrypted_content'],reasoning:{summary:'auto'},tools:[{...tool,description:'namespace-context',tools:tool.tools.map(t=>t.type==='function'?{...t,strict:false}:t)}]},stream:f.stream,path:f.path,json:!stream,clientPolicy:true}))),
  ...[{label:'Chat',payload,stream:text,path:undefined},{label:'Claude',payload:cp,stream:claudeText,path:'/v1/messages'},{label:'Gemini',payload:gp,stream:gt,path:gpath}].flatMap(f=>[true,false].map(stream=>({name:f.label+' client typed input message IDs '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,store:false,input:f.payload.input.map((item,i)=>({...item,type:'message',id:'msg_client_shared_'+i}))},stream:f.stream,path:f.path,json:!stream}))),
  ...[{label:'Chat',payload,path:undefined,single:chatSingle},{label:'Claude',payload:cp,path:'/v1/messages',single:claudeSingle},{label:'Gemini',payload:gp,path:gpath,single:geminiSingle}].flatMap(f=>[true,false].flatMap(stream=>[
   {name:f.label+' client search object '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tools:[searchTool,deferredTool],momo_tool_loading:'client-search',parallel_tool_calls:false},path:f.path,stream:searchCalls[f.label]({goal:'read 中文🙂'}),search:true,json:!stream},
@@ -178,7 +179,7 @@ for(const fixture of cases){
   const goURL=handoff.base_url.replace(/\/v1$/,'');
   const count=fixture.concurrent||1;
   const nodeResults=await Promise.all(Array.from({length:count},()=>invoke(nodeURL,'synthetic-node-only',fixture.payload)));
-  let goPayload=fixture.payload, goHeaders={};
+  let goPayload=fixture.payload, goHeaders=fixture.clientPolicy?{'X-MOMO-Client-Policy':'text-tools-v1'}:{};
   if(fixture.attachment){
    goPayload=structuredClone(fixture.payload);
    let registered=0;
@@ -198,6 +199,16 @@ for(const fixture of cases){
   const goResults=await Promise.all(Array.from({length:count},()=>invoke(goURL,handoff.api_key,goPayload,'/v1/responses',goHeaders)));
   const captures=await(await fetch(handoff.mock_url+'/capture')).json();
   assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
+  if(fixture.clientPolicy){
+   for(const capture of captures){assert.ok(!JSON.stringify(capture).includes('synthetic-private'));assert.equal(capture.client_metadata,undefined);assert.equal(capture.include,undefined);assert.equal(capture.prompt_cache_key,undefined)}
+   const g=captures[1];
+   const tools=!fixture.path?g.tools.map(t=>t.function):fixture.path==='/v1/messages'?g.tools:g.tools[0].functionDeclarations;
+   assert.ok(tools.every(t=>t.description.startsWith('namespace-context\n\n')),'Go retains namespace instructions in child descriptions');
+   // Node currently drops namespace descriptions; assert that difference,
+   // then compare the otherwise identical shared wire below.
+   for(const t of tools){t.description=t.description.slice('namespace-context\n\n'.length);if(!t.description)t.description='Codex tool';else if(t.description==='\nRaw freeform input for this tool.')t.description='Codex custom tool'+t.description}
+   console.log('DIFFERENCE explicit Go text-tools-v1 omits reasoning/cache outputs by caller policy and retains namespace context; Node drops this context');
+  }
   // Independently assert the actual Go wire before normalizing this one known
   // Node difference for the remaining payload comparisons. No constraints drop.
   if(fixture.path?.includes(':streamGenerateContent')){

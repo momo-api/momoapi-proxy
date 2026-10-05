@@ -27,5 +27,9 @@ func CodexProviderConfig(endpoint string) (string, error) {
 		"requires_openai_auth = false\n" +
 		"supports_websockets = false\n" +
 		"request_max_retries = 0\n" +
-		"stream_max_retries = 0\n", nil
+		"stream_max_retries = 0\n" +
+		"# OPTIONAL lossy converted text/tool policy. Uncomment ONLY after accepting:\n" +
+		"# no reasoning summary/encrypted continuation or provider prompt-cache guarantee.\n" +
+		"# Native Responses stays exact. Grammar/search/strict:true still unsupported here.\n" +
+		"# http_headers = { \"X-MOMO-Client-Policy\" = \"text-tools-v1\" }\n", nil
 }

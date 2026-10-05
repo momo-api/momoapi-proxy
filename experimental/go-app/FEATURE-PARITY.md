@@ -36,6 +36,31 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 显式客户端 text-tools-v1 策略（2026-10-05；当前增量 CI 待验收）
+
+逐请求 X-MOMO-Client-Policy:text-tools-v1，仅转换 POST /v1/responses。默认不启用，
+Codex provider 导出只附注释，必须审阅接受有损契约后取消注释：不保证摘要、加密
+推理续聊、provider缓存；严格验证后移除client_metadata/prompt_cache_key/唯一
+reasoning.encrypted_content include及summary:auto/none。concise/detailed/其他include、
+未知选项、签名/compaction/grammar/strict:true/search继续拒绝。effort不降级；
+parallel:true许可多调用，false不近似；strict:false仅现有non-strict函数shim。
+namespace说明追加到child说明保留指令，schema/原始工具内容不改。输出item有效
+本地ID仅在本策略归一化，call_id/配对/output依旧严格。header不转发、不存入
+history，native/default字节原样；plan成功responseheader说明采用策略，非功能保证。
+UTF8/重复JSON/depth64检查在history/attachment重序列化前，资源/停止门禁不改。
+
+红测试先复现真实clientoptions400；三协议SSE/JSON回归+6同mockTCP共299。原
+nativehistory夹具加入选项与header，保持117物理mock调用和精确upstream断言。
+真实官方Codex0.156.0 Linux freshHOME/CODEX_HOME/sanitizedenv/ignore-config/rules/
+ephemeral/read-only/零retry/noWebSocket通用未知模型fallback metadata：单turn
+文本exit0/1mock；真实exec_command printf→pairedoutput→第二轮exit0/2mock。
+第一轮工具回传带function_call_output.id被拒绝，补该策略定向回归；无call_id删除。
+缺失bundledbubblewrap先使工具沙箱报错，安装同版本官方helper到测试目录后只读
+执行通过，未禁用沙箱；请求没发现全局skill路径文本不等于证明完全关闭skill扫描。
+gpt-5.5专用metadata实际仍含grammar/search/text选项而拒绝，不能称全面compatible。
+无真实账号/上游/付费调用，旧Windows真实clientfailure保留。当前HEAD三平台/
+产物必须重新验证，不用68c66fe的293/117替代当前299/117。
+
 ### 实际 Codex 输入消息 ID 兼容修复（2026-10-05；本增量 CI 待验收）
 
 本机真实 Codex CLI0.156.0 通过隔离 CODEX_HOME/合成工作目录、ignore-user-config/

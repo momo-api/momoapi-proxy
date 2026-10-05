@@ -60,6 +60,11 @@ func probeHistoryRequests(core *appcore.Core) error {
 		var body map[string]any
 		json.Unmarshal([]byte(payload), &body)
 		body["stream"] = false
+		body["client_metadata"] = map[string]string{"session_id": "synthetic-private-label"}
+		body["prompt_cache_key"] = "synthetic-private-cache"
+		body["include"] = []string{"reasoning.encrypted_content"}
+		body["reasoning"] = map[string]string{"summary": "auto"}
+		body["parallel_tool_calls"] = true
 		// Actual Codex typed input-message labels must not change upstream wire.
 		for _, item := range body["input"].([]any) {
 			message := item.(map[string]any)
@@ -70,6 +75,7 @@ func probeHistoryRequests(core *appcore.Core) error {
 			req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(string(b)))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+key)
+			req.Header.Set("X-MOMO-Client-Policy", "text-tools-v1")
 			response, err := client.Do(req)
 			if err != nil {
 				return err

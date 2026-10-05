@@ -23,6 +23,7 @@ import (
 func main() {
 	var fixture struct {
 		Stream       string
+		Streams      []string
 		Status       int
 		Mode         string
 		Path         string
@@ -95,6 +96,7 @@ func main() {
 		}
 		mu.Lock()
 		captures = append(captures, payload)
+		responseIndex := len(captures) - 1
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
 		if fixture.JSON {
@@ -106,6 +108,13 @@ func main() {
 			return
 		}
 		response := fixture.Stream
+		if len(fixture.Streams) > 0 {
+			if responseIndex >= len(fixture.Streams) {
+				w.WriteHeader(500)
+				return
+			}
+			response = fixture.Streams[responseIndex]
+		}
 		if fixture.Search && strings.Contains(string(data), "momo__client_tool_search") {
 			response = strings.ReplaceAll(response, `"name":"tool_search"`, `"name":"momo__client_tool_search"`)
 		}

@@ -589,6 +589,35 @@ Both modes share core/proxy/auth/admission implementation.
 
 ### Manual Codex provider export
 
+Optional request-scoped converted-client policy: explicitly uncomment
+`http_headers = { "X-MOMO-Client-Policy" = "text-tools-v1" }` in the exported
+provider table ONLY after accepting this lossy text/function/custom-text subset.
+It omits validated private client_metadata and prompt_cache_key (no cache
+guarantee), reasoning.summary auto/none (no summary output), and include
+reasoning.encrypted_content (no encrypted reasoning output or continuation).
+Unknown includes, concise/detailed summaries, signatures/compaction/grammar,
+strict:true and unsupported search remain rejected. Effort/content/instructions,
+call_id pairing and schemas remain authoritative; namespace descriptions are
+prepended to child tool descriptions. strict:false permits the existing non-strict
+shim; parallel_tool_calls:true permits multiple calls, false is not approximated.
+Valid function/custom output item IDs label items only and are removed under this
+policy, never call_id/output. Duplicate JSON/depth>64/invalid UTF-8 rejected before
+history or attachment reserialization. The private header is never forwarded,
+applies only to converted POST /v1/responses, and is not inherited by history;
+native/default bytes stay exact. Successful plan acknowledges the policy in the
+response header, not a guarantee of every requested provider feature.
+
+Actual official Codex0.156.0 Linux CLI with fresh HOME/CODEX_HOME, no inherited
+accounts/config, read-only sandbox and zero retries against synthetic local Core:
+generic unknown-model fallback metadata completed a text turn and an actual
+exec_command `printf`/paired output/second turn (two upstream mock requests).
+No global skill-path text found in captured requests. This does NOT prove all
+skill discovery disabled, Windows real-user isolation, production model behavior
+or gpt-5.5-specific metadata: the latter still rejects grammar/search/text options.
+Missing bundled bubblewrap first caused a sandbox tool failure, not a protocol
+failure; same-version official helper enabled successful read-only execution.
+No real inference, paid calls, client config changes or sandbox bypass.
+
 The Skill/MCP page can explicitly copy a credential-free Codex TOML provider
 snippet for this process's loopback port. It does not read/write config.toml,
 auth.json, client homes or account records, select a model, install a client or
