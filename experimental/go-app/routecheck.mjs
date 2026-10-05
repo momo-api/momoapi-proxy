@@ -89,6 +89,10 @@ const cases=[
  ])),
  ...[{label:'Claude',payload:cp,path:'/v1/messages',stream:claudeOrdered},{label:'Gemini',payload:gp,path:gpath,stream:geminiOrdered}].flatMap(f=>[true,false].map(stream=>({name:f.label+' ordered block continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.stream,json:!stream,continuation:true,ordered:true}))),
  ...[{label:'Chat',payload,path:undefined,stream:bare},{label:'Claude',payload:cp,path:'/v1/messages',stream:claudeSingle('read').replaceAll('pad__read','read')},{label:'Gemini',payload:gp,path:gpath,stream:geminiSingle('read').replaceAll('pad__read','read')}].flatMap(f=>[true,false].map(stream=>({name:f.label+' ambiguous bare output '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}}]}]},path:f.path,stream:f.stream,json:!stream,reject:true}))),
+ ...[{label:'Chat',payload,path:undefined,text,limited:sse([chunk({content:'partial-limit'},'length')])},{label:'Claude',payload:cp,path:'/v1/messages',text:claudeText,limited:cs+ct(0,'partial-limit')+ce('max_tokens')},{label:'Gemini',payload:gp,path:gpath,text:gt,limited:gf([{text:'partial-limit'}],'MAX_TOKENS',gu)}].flatMap(f=>[true,false].flatMap(stream=>[
+  {name:f.label+' explicit output limit '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,max_output_tokens:17},path:f.path,stream:f.text,json:!stream,limit:17},
+  {name:f.label+' output limit incomplete '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,max_output_tokens:17},path:f.path,stream:f.limited,json:!stream,limit:17,incomplete:true},
+ ])),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -102,10 +106,11 @@ async function launch(fixture){
  return {child,handoff};
 }
 function items(body){
- try{const response=JSON.parse(body);if(response.object==='response'&&response.status==='completed')return {events:[],completed:{response},json:true,output:response.output.map(({id,status,...item})=>item)}}catch{}
+ try{const response=JSON.parse(body);if(response.object==='response'&&['completed','incomplete'].includes(response.status))return {events:[],[response.status]:{response},json:true,output:response.output.map(({id,status,...item})=>item)}}catch{}
  const events=body.split(/\r?\n\r?\n/).flatMap(block=>{const data=block.split(/\r?\n/).filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trim()).join('\n');if(!data||data==='[DONE]')return [];try{return [JSON.parse(data)]}catch{return []}});
  const completed=events.find(e=>e.type==='response.completed');
- return {events,completed,output:completed?.response?.output?.map(({id,status,...item})=>item)||[]};
+ const incomplete=events.find(e=>e.type==='response.incomplete');
+ return {events,completed,incomplete,output:(completed||incomplete)?.response?.output?.map(({id,status,...item})=>item)||[]};
 }
 async function invoke(url,token,p){
  return new Promise((resolve,reject)=>{
@@ -136,6 +141,12 @@ for(const fixture of cases){
   assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
   for(let i=0;i<count;i++){
    const n=structuredClone(captures[i]),g=structuredClone(captures[count+i]);
+   if(fixture.limit){
+    if(!fixture.path){assert.equal(g.max_completion_tokens,17);assert.equal(n.max_completion_tokens,undefined);delete g.max_completion_tokens}
+    else if(fixture.path==='/v1/messages'){assert.equal(g.max_tokens,17);assert.equal(n.max_tokens,12240);g.max_tokens=n.max_tokens}
+    else{assert.deepEqual(g.generationConfig,{maxOutputTokens:17});assert.equal(n.generationConfig,undefined);delete g.generationConfig}
+    console.log('DIFFERENCE Go maps explicit max_output_tokens; Node converted route does not honor this limit');
+   }
    if(!fixture.path){assert.deepEqual(g.stream_options,{include_usage:true});assert.equal(n.stream_options,undefined);delete g.stream_options;if(fixture.selected){assert.deepEqual(g.tool_choice,{type:'function',function:{name:fixture.selected}});assert.deepEqual(n.tool_choice,fixture.payload.tool_choice);delete g.tool_choice;delete n.tool_choice;console.log('DIFFERENCE Go named Chat selector uses upstream function shape/declared alias; Node keeps flat selector/name/namespace')}}
    if(fixture.path==='/v1/messages'){
     if(fixture.selected){assert.deepEqual(g.tool_choice,{type:'tool',name:fixture.selected});}else assert.equal(g.tool_choice.type,fixture.payload.tool_choice==='required'?'any':fixture.payload.tool_choice==='none'?'none':'auto');assert.equal(n.tool_choice,undefined);delete g.tool_choice;
@@ -165,6 +176,7 @@ for(const fixture of cases){
   for(let i=0;i<count;i++){
    const n=nodeResults[i],g=goResults[i];if(!(fixture.json&&(fixture.truncate||fixture.reject)))assert.equal(g.status,n.status,fixture.name+' HTTP status');
    if(fixture.status){assert.equal(g.completed,undefined);assert.equal(n.completed,undefined)}
+   else if(fixture.incomplete){assert.equal(g.completed,undefined);assert.ok(g.incomplete);assert.equal(g.incomplete.response.status,'incomplete');assert.deepEqual(g.incomplete.response.incomplete_details,{reason:'max_output_tokens'});assert.equal(g.truncated,false);assert.deepEqual(g.output,n.output);assert.ok(n.completed);console.log('DIFFERENCE Go emits response.incomplete for verified output-limit terminal; Node emits completed')}
    else if(fixture.truncate||fixture.reject){assert.equal(g.completed,undefined);if(fixture.json){assert.equal(g.status,502);assert.equal(g.truncated,false)}else assert.equal(g.truncated,true);assert.ok(n.completed);console.log('DIFFERENCE Node completes '+(fixture.name.includes('ambiguous bare')?'ambiguous bare tool output':fixture.truncate?'clean premature EOF':'invalid usage or tool-choice output')+'; Go rejects without fabricated completion')}
    else {
     assert.ok(n.completed&&g.completed,fixture.name+' missing completion');

@@ -67,6 +67,9 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 		return nil, errRouted
 	}
 	body := map[string]any{"contents": contents}
+	if ir.maxOutputTokens != 0 {
+		body["generationConfig"] = map[string]any{"maxOutputTokens": ir.maxOutputTokens}
+	}
 	if len(systems) > 0 {
 		body["systemInstruction"] = map[string]any{"parts": systems}
 	}

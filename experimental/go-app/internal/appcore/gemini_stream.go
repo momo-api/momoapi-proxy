@@ -15,6 +15,7 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 		return err
 	}
 	finished := false
+	terminal := "complete"
 	retained, callCount := 0, 0
 	ids := map[string]bool{}
 	var usage map[string]any
@@ -170,17 +171,20 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 			}
 		}
 		if reason, present := c["finishReason"]; present {
-			if reason != "STOP" {
+			if reason != "STOP" && reason != "MAX_TOKENS" {
 				return false, errRouted
 			}
 			finished = true
+			if reason == "MAX_TOKENS" {
+				terminal = "incomplete"
+			}
 		}
 		return false, nil
 	}, func() error {
 		if !finished || usage == nil {
 			return errRouted
 		}
-		return e.accept(streamEvent{kind: "complete", usage: usage}, plan)
+		return e.accept(streamEvent{kind: terminal, usage: usage}, plan)
 	})
 }
 func validateGeminiSafety(v any) error {

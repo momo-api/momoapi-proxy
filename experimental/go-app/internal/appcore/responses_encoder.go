@@ -34,7 +34,7 @@ func newID(prefix string) (string, error) {
 }
 func (e *responseWriter) event(name string, p map[string]any) error {
 	if e.buffered {
-		if name != "response.completed" {
+		if name != "response.completed" && name != "response.incomplete" {
 			return nil
 		}
 		b, err := json.Marshal(p["response"])
@@ -218,8 +218,8 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 		}
 		e.toolCount++
 		return e.toolCall(ev.call, tool)
-	case "complete":
-		if (plan.choice == "required" || plan.selected != "") && e.toolCount == 0 {
+	case "complete", "incomplete":
+		if ev.kind == "complete" && (plan.choice == "required" || plan.selected != "") && e.toolCount == 0 {
 			return errRouted
 		}
 		e.completed = true
@@ -227,18 +227,26 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 			return err
 		}
 		r := map[string]any{"id": e.id, "object": "response", "status": "completed", "model": e.model, "output": e.output}
+		if ev.kind == "incomplete" {
+			r["status"] = "incomplete"
+			r["incomplete_details"] = map[string]string{"reason": "max_output_tokens"}
+		}
 		if ev.usage != nil {
 			r["usage"] = ev.usage
 		}
 		var commit func()
-		if plan.prepareCompletion != nil {
+		if ev.kind == "complete" && plan.prepareCompletion != nil {
 			var err error
 			commit, err = plan.prepareCompletion(e.id, e.output)
 			if err != nil {
 				return err
 			}
 		}
-		if err := e.event("response.completed", map[string]any{"response": r}); err != nil {
+		terminal := "response.completed"
+		if ev.kind == "incomplete" {
+			terminal = "response.incomplete"
+		}
+		if err := e.event(terminal, map[string]any{"response": r}); err != nil {
 			return err
 		}
 		if commit != nil {

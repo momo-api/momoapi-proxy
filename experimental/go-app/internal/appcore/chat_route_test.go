@@ -131,7 +131,7 @@ func TestRoutedTruncationAndErrorsNeverComplete(t *testing.T) {
 	streams := []string{
 		strings.TrimSuffix(goodChatSSE(), "data: [DONE]\r\n\r\n"),
 		"data: broken\n\n",
-		chatSSE(choice(map[string]any{"content": "partial"}, "length")),
+		strings.TrimSuffix(chatSSE(choice(map[string]any{"content": "partial"}, "length")), "data: [DONE]\r\n\r\n"),
 		chatSSE(choice(map[string]any{"content": "partial"}, nil)),
 		chatSSE(choice(map[string]any{"tool_calls": []any{map[string]any{"index": 0, "id": "a", "function": map[string]string{"name": "missing", "arguments": "{}"}}}}, "tool_calls")),
 		chatSSE(choice(map[string]any{"content": strings.Repeat("a", maxRoutedEvent+1)}, "stop")),

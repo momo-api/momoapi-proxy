@@ -86,5 +86,5 @@ func probeHistoryRequests(core *appcore.Core) error {
 			body["input"] = []any{map[string]string{"role": "user", "content": "next-history"}}
 		}
 	}
-	return nil
+	return probeLimitsRequests(core)
 }

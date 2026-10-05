@@ -18,7 +18,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
 - Default is exact same-protocol passthrough. Explicit Mode=momo-routing enables
   Responses-entry model classification and partial Chat/Claude/Gemini translation:
   text, function/custom tools (excluding exec/apply_patch), namespace restoration.
-  stream:true emits SSE; false/omitted stream emits one final Responses JSON,
+  stream:true emits SSE; false/omitted stream emits one final completed/incomplete Responses JSON,
   using the same typed encoder and a single upstream SSE request. Conversion
   failures before JSON writing return redacted 502; partial writes abort HTTP.
   This is not a verified live-upstream JSON guarantee.
@@ -32,10 +32,18 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   wrong named calls, and text-only completion under required/named choice are rejected.
   allowed_tools sets remain unsupported. Returned tools run in the client, not MOMO.
   Claude Messages text/tools plus validated token usage are supported; thinking,
-  signatures, media and explicit token-limit options are not. Gemini text/tools,
+  signatures and media are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;
   thinking/signatures/media and signed continuation remain unsupported. Gemini
-  requires STOP plus clean framed HTTP EOF; early EOF/errors abort without completed.
+  requires STOP/MAX_TOKENS plus clean framed HTTP EOF; early EOF/errors abort without completed.
+  max_output_tokens is an integer 1..1048576: Chat max_completion_tokens, Claude
+  max_tokens (12240 when omitted), Gemini generationConfig.maxOutputTokens. A
+  provider's lower limit may reject it; no retry. Verified length/max_tokens/
+  MAX_TOKENS returns response.incomplete or status:incomplete JSON, reason
+  max_output_tokens, not completed. Partial text/valid complete tools are retained;
+  malformed partial tool arguments still fail. Incomplete never creates a history
+  anchor. Required/named choice may end incomplete without a tool; wrong/forbidden
+  calls still fail. Terminal/usage/physical byte limits remain mandatory.
   Muse conversion is out of scope and
   muse-auto is rejected in opt-in routing mode. No fallback or duplicate send.
 - Converted previous_response_id supports same-model, same-Core memory replay only:

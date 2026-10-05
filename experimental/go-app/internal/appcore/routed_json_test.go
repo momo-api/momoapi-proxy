@@ -216,7 +216,7 @@ func TestRoutedJSONNoEarlyWriteAndStop(t *testing.T) {
 func TestRoutedJSONNativeAndDefaultRemainExact(t *testing.T) {
 	for _, tc := range []struct{ model, mode string }{{"gpt-5.6-sol", "momo-routing"}, {"gpt-5.5", ""}, {"claude-sonnet-4-6", ""}, {"gemini-2.5-flash", ""}} {
 		t.Run(tc.model+tc.mode, func(t *testing.T) {
-			payload := fmt.Sprintf(`{"model":%q,"stream":false,"input":[{"role":"user","content":"hi"}],"previous_response_id":"provider_anchor","store":false,"unknown":true}`, tc.model)
+			payload := fmt.Sprintf(`{"model":%q,"stream":false,"input":[{"role":"user","content":"hi"}],"previous_response_id":"provider_anchor","store":false,"max_output_tokens":17,"unknown":true}`, tc.model)
 			native := `{"object":"response","status":"completed","unknown_provider":{"namespace":"pad"}}`
 			c, endpoint, _, _ := testCore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				b, _ := io.ReadAll(r.Body)

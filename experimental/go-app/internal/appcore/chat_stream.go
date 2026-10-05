@@ -28,6 +28,7 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 	order := []int{}
 	retained := 0
 	finished := false
+	terminal := "complete"
 	var usage map[string]any
 	dsmlTail := ""
 	return readRoutedSSE(ctx, body, func(_ string, raw string) (bool, error) {
@@ -50,7 +51,7 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			if err = e.flushText(); err != nil {
 				return false, err
 			}
-			return true, e.accept(streamEvent{kind: "complete", usage: usage}, plan)
+			return true, e.accept(streamEvent{kind: terminal, usage: usage}, plan)
 		}
 		var chunk map[string]json.RawMessage
 		if json.Unmarshal([]byte(raw), &chunk) != nil || chunk == nil {
@@ -170,10 +171,13 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			}
 		}
 		if choice.FinishReason != nil {
-			if finished || (*choice.FinishReason != "stop" && *choice.FinishReason != "tool_calls") {
+			if finished || (*choice.FinishReason != "stop" && *choice.FinishReason != "tool_calls" && *choice.FinishReason != "length") {
 				return false, errRouted
 			}
 			finished = true
+			if *choice.FinishReason == "length" {
+				terminal = "incomplete"
+			}
 			if *choice.FinishReason == "tool_calls" && len(calls) == 0 {
 				return false, errRouted
 			}

@@ -59,6 +59,9 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 	// System-only/later instructions are consolidated explicitly, not turned into user prose.
 	// Match the current Node plain-Claude default (4048 + 8192); not a client option.
 	body := map[string]any{"model": ir.model, "stream": true, "max_tokens": 12240, "messages": messages}
+	if ir.maxOutputTokens != 0 {
+		body["max_tokens"] = ir.maxOutputTokens
+	}
 	if len(system) > 0 {
 		body["system"] = strings.Join(system, "\n\n")
 	}

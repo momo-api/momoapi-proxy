@@ -47,6 +47,7 @@ type routeTool struct {
 }
 type routeRequest struct {
 	stream                bool
+	maxOutputTokens       int64
 	model, choice, effort string
 	selected              string
 	messages              []routeMessage
@@ -119,7 +120,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	var p map[string]any
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.UseNumber()
-	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort") {
+	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens") {
 		return nil, errRouted
 	}
 	if v, present := p["stream"]; present {
@@ -129,6 +130,13 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
 	ir := &routeRequest{model: plan.model, stream: p["stream"] == true}
+	if v, present := p["max_output_tokens"]; present {
+		n, ok := tokenCount(v)
+		if !ok || n == 0 || n > 1048576 {
+			return nil, errRouted
+		}
+		ir.maxOutputTokens = n
+	}
 	if plan.model == "" {
 		return nil, errRouted
 	}
@@ -502,6 +510,9 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 		messages = append([]any{map[string]any{"role": "system", "content": strings.Join(systems, "\n\n")}}, messages...)
 	}
 	body := map[string]any{"model": ir.model, "stream": true, "stream_options": map[string]bool{"include_usage": true}, "messages": messages}
+	if ir.maxOutputTokens != 0 {
+		body["max_completion_tokens"] = ir.maxOutputTokens
+	}
 	tools := []any{}
 	for _, t := range ir.tools {
 		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": t.wire, "description": t.description, "parameters": t.schema}})

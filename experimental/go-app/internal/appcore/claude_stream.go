@@ -21,6 +21,7 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 		return err
 	}
 	started, finished := false, false
+	terminal := "complete"
 	next, retained, toolCount := 0, 0, 0
 	var active *claudeBlock
 	ids := map[string]bool{}
@@ -194,10 +195,10 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 			}
 			d := obj(m["delta"])
 			reason := str(d["stop_reason"])
-			if reason != "end_turn" && reason != "stop_sequence" && reason != "tool_use" {
+			if reason != "end_turn" && reason != "stop_sequence" && reason != "tool_use" && reason != "max_tokens" {
 				return false, errRouted
 			}
-			if (reason == "tool_use") != (toolCount > 0) {
+			if reason != "max_tokens" && (reason == "tool_use") != (toolCount > 0) {
 				return false, errRouted
 			}
 			if !only(d, "stop_reason", "stop_sequence") {
@@ -217,6 +218,9 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 			}
 			outputTokens = n
 			finished = true
+			if reason == "max_tokens" {
+				terminal = "incomplete"
+			}
 		case "message_stop":
 			if !only(m, "type") {
 				return false, errRouted
@@ -225,7 +229,7 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				return false, errRouted
 			}
 			usage := map[string]any{"input_tokens": inputTokens, "output_tokens": outputTokens, "total_tokens": inputTokens + outputTokens}
-			return true, e.accept(streamEvent{kind: "complete", usage: usage}, plan)
+			return true, e.accept(streamEvent{kind: terminal, usage: usage}, plan)
 		default:
 			return false, errRouted
 		}

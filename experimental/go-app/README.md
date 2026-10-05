@@ -48,11 +48,11 @@ text-only result under required/named choice. It does not execute returned tools
 
 Incremental text SSE, bounded events/arguments/text (1 MiB retained, 16 MiB wire,
 128 tool indices, 65536 events), 15s write deadline and existing Stop cancellation.
-Chat requires stop/tool_calls finish_reason plus [DONE]. Claude requires ordered,
-closed blocks, end_turn/stop_sequence/tool_use and message_stop. Malformed/error/
-truncated/length streams abort HTTP without fabricated completed. Claude projects
+Chat requires stop/tool_calls/length finish_reason plus [DONE]. Claude requires ordered,
+closed blocks, end_turn/stop_sequence/tool_use/max_tokens and message_stop. Malformed/error/
+truncated streams abort HTTP without fabricated completed. Claude projects
 input (including cache read/creation) + output + total tokens; no currency mapping
-or full usage detail. Gemini requires STOP plus clean framed HTTP EOF, consumes
+or full usage detail. Gemini requires STOP/MAX_TOKENS plus clean framed HTTP EOF, consumes
 usage-only trailers and rejects late errors/partial frames/physical disconnects.
 It projects prompt/candidate/total tokens plus cached/reasoning counts, without
 claiming reasoning content support. Chat requests stream_options.include_usage=true
@@ -66,6 +66,19 @@ finish_reason and are not terminals: [DONE] is still mandatory. Upstreams reject
 include_usage are not retried/fallen back; native/default requests remain unchanged.
 No adapter synthesizes DSML tools;
 only successful full output is completed; bounded converted history is described below.
+
+Converted requests accept max_output_tokens as an integer 1..1048576. Chat maps it
+to max_completion_tokens, Claude to max_tokens (default 12240 when omitted), and
+Gemini to generationConfig.maxOutputTokens. Provider/model-specific lower limits
+may reject a request; no retry or silent limit substitution. Native/default bytes
+remain unchanged. Verified length/max_tokens/MAX_TOKENS terminals return
+response.incomplete (SSE) or status:incomplete JSON with
+incomplete_details.reason=max_output_tokens. Partial text and validated complete
+tools are retained; malformed partial tool arguments still fail, not fabricated
+as executable calls. Incomplete never creates a history anchor, even when store
+defaults true. Required/named choice does not force a tool from an incomplete
+text-only result; forbidden/wrong tool calls are still rejected. Transport,
+terminal, usage, retention and physical byte budgets remain mandatory.
 
 Converted Responses support previous_response_id through a Core-owned memory
 transcript: 64 LRU anchors, 8 MiB total, 1 MiB per transcript/replayed request,
@@ -88,7 +101,7 @@ Native/default passthrough delegates history unchanged. Cross-model/provider
 continuation, compact and signed Gemini history remain unsupported.
 
 For these opt-in converted subsets, stream:true returns Responses SSE; false or
-omitted stream returns one completed Responses JSON object. The same bounded
+omitted stream returns one completed or incomplete Responses JSON object. The same bounded
 typed encoder collects validated output directly, without reparsing internal SSE.
 Upstream still uses SSE with exactly one physical request. No JSON headers/body
 are written before full success; conversion failure returns a redacted 502. A
@@ -101,9 +114,11 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-Ninety-nine cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+111 cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
 and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
-and named function/custom selectors with forbidden/wrong-call rejection. Legacy Node
+and named function/custom selectors with forbidden/wrong-call rejection, explicit
+token-limit mapping and incomplete output. Legacy Node ignores explicit converted
+limits and reports completed for these output-limit fixtures. Legacy Node
 emits SSE for converted JSON requests, does not request/map Chat usage, retains a flat
 Chat named selector and does not enforce converted-output choice; converted Node
 previous_response_id sends only suffix, while Go replays successful history. Known
@@ -303,7 +318,8 @@ WebView state/configure+remember/change-config/load/start; native client uses au
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
-(24 physical upstream requests in total, including three-protocol history continuation),
+(30 physical upstream requests in total, including three-protocol history continuation
+and output-limit SSE/JSON incomplete terminals),
 checking exact namespace/unknown-field/Unicode bytes; native client
 holds incomplete fixed-length/chunked uploads before WebView Stop, verifies zero
 active without waiting for the upload timeout, then

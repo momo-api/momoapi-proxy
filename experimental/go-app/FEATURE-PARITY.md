@@ -128,6 +128,18 @@ instructions与选项每轮提供，不继承。仅完整精确语义prefix避�
 该夹具仍completed，明确独立断言。单测先复现原误选，再验证拒绝、无history
 写入与确切namespace别名仍可恢复。无工具执行；默认透传不变。
 
+输出上限轮扩为111组：三协议SSE/JSON各增加显式max_output_tokens映射与达到上限的
+incomplete终端。整数1..1048576，Chat→max_completion_tokens，Claude→max_tokens，
+Gemini→generationConfig.maxOutputTokens；默认Claude仍12240。Node转换路径忽略显式
+limit并在这些夹具中报completed，实际上游捕获与输出差异独立精确断言。Go只有
+验证length+[DONE]、max_tokens+闭合块+message_stop、MAX_TOKENS+帧完整且干净EOF
+后才返回response.incomplete / status:incomplete JSON，原因max_output_tokens。
+保留部分文本/有效完整工具，畸形半截参数仍拒绝，不造可执行调用。incomplete
+不生成history anchor；required/named可以未产出工具即incomplete，但错误/禁用
+工具仍拒绝。单测另覆缺终端、lateerror、usage非法/回退、物理断链、JSON短写/
+flush/写期限与不提交history。真实WebView合计30次上游发送，含三协议SSE/JSON
+incomplete。供应商较低token上限可能拒绝；不回退重发，原有物理预算不变。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

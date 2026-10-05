@@ -164,3 +164,14 @@ Node转换仅suffix的差异；单测验证并行工具/交错assistant/独立�
 身份恢复另补歧义门禁：exact namespace alias可直接恢复，但裸top-level name须
 检查所有声明中的同名身份。top-level存在不是namespace剥离上游的消歧证据；
 99组同mock夹具明确Go拒绝/Node completed差异，不将失败输出提交为history。
+
+### 输出上限与明确未完成终端
+
+请求IR新增严格max_output_tokens整数1..1048576，三编码器映射Chat
+max_completion_tokens、Claude max_tokens、Gemini generationConfig.maxOutputTokens。
+中性事件区分complete/incomplete，共享Responses encoder输出相应SSE/JSON；
+incomplete_details.reason=max_output_tokens。只有完整且经校验的协议终端才允许
+incomplete；不是把异常、缺终端、物理断链、非法usage或半截工具参数洗成成功。
+incomplete不prepare/commit历史；仅complete才执行成功状态事务。JSON短写/flush
+仍中止，不追加502。111组同mock黑盒精确比较Node忽略limit与误报completed的
+已知差异；没有改Node，也没有宣称真实供应商limit范围或完整客户端兼容。
