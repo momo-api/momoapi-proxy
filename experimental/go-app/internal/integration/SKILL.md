@@ -104,7 +104,13 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   visible proposals/client execution/upstream billing cannot be rolled back.
   Native/default exact bytes remain untouched. This is not native deferred
   prompt/cache layout, hosted search or actual Codex discovery acceptance.
-  No search/MCP/skill execution; search lifecycle local compact unsupported.
+  No search/MCP/skill execution. Explicit local client-search checkpoint retains
+  whole completed search/loading/call-result turns, including additional_tools,
+  interleaved text and supported media interpretation. Re-declare tools,
+  momo_tool_loading:client-search, parallel_tool_calls:false and applicable media
+  policies on ordinary output replay. No hidden anchor, upstream request,
+  automatic client integration or semantic summary; pending/unsafe/no-benefit
+  checkpoints reject. cmp_ is not a restart or previous_response_id token.
   User input_image supports ordered text/images on Chat/Claude/Gemini, canonical
   inline PNG/JPEG/static GIF/WebP or delegated HTTPS/443 references. Max32 across
   replayed history and existing 1MiB JSON/history budget. Header/framing checking

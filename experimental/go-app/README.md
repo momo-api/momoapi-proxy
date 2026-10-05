@@ -321,7 +321,9 @@ keys/invalid UTF-8/depth>64 before history normalization; strict provider frames
 are checked before object args can be reserialized. Invalid arguments abort SSE or
 return JSON 502, never complete/save history/retry. An earlier valid proposal may
 already be visible; this cannot roll back client execution or upstream billing.
-Local compact does not accept this lifecycle. Actual Codex discovery/live upstream
+Local compact accepts fully completed client-search lifecycle under the same
+explicit policies, preserving whole discovery/loading/call-result turns.
+Actual Codex discovery/live upstream
 acceptance and complete native deferred/strict schema support are still unverified.
 
 An upstream bare output name is rejected when top-level and namespaced declarations
@@ -449,10 +451,17 @@ continuation, native/semantic compact and signed Gemini history remain unsupport
 Headerless POST /v1/responses/compact is a local-only operation, enabled only in momo-routing
 for the strict converted Chat/Claude/unsigned Gemini subset. Default mode returns
 501; native Responses/Muse reject422. It accepts only model/input/tools and optional
-stream:false, plus optional explicit momo_tool_images/momo_tool_files:"user-projection", with a
+stream:false, explicit momo_tool_loading:"client-search" + parallel_tool_calls:false
+when replaying completed discovery, plus applicable momo_tool_images/momo_tool_files:"user-projection", with a
 trailing current user turn and fully paired declared tools.
 No previous_response_id, instructions option, opaque/unsupported media state or automatic trigger.
-Instructions must be explicit input items. Redeclare tools when replaying.
+Instructions must be explicit input items. Redeclare tools and all applicable
+policies when replaying. Completed tool_search_call/tool_search_output and developer
+additional_tools retain whole turns with ordered definitions, identity, schema,
+paired calls/results and interpretations. Empty search results do not activate
+tools. Pending/unsafe discovery rejects; no search/MCP execution or automatic
+Codex checkpoint integration is added. Duplicate/UTF8/depth framing is checked
+before normalization can hide invalid policy/schema/result keys.
 
 Keep all user/system/developer items, whole tool/image-bearing turns (trigger, interleaved
 assistant, calls/results and final text), and the latest assistant item in original

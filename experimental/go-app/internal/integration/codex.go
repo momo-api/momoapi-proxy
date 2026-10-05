@@ -33,6 +33,7 @@ func CodexProviderConfig(endpoint string) (string, error) {
 		"stream_max_retries = 0\n" +
 		"# OPTIONAL lossy converted text/tool policy. Uncomment ONLY after accepting:\n" +
 		"# no reasoning summary/encrypted continuation or provider prompt-cache guarantee.\n" +
-		"# Native Responses stays exact. Grammar/search/strict:true still unsupported here.\n" +
+		"# Native Responses stays exact. Grammar/unsupported search/schema still rejected.\n" +
+		"# Function strict:true uses bounded local validation, not provider constrained generation.\n" +
 		"# http_headers = { \"X-MOMO-Client-Policy\" = \"text-tools-v1\" }\n", nil
 }

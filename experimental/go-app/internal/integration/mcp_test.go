@@ -78,6 +78,9 @@ func TestMCPAndSkillExports(t *testing.T) {
 	if !strings.Contains(Capabilities()["function_strict"].(string), "independent of client-search") || !strings.Contains(Skill, "Ordinary function strict:true is independent") {
 		t.Fatal("stale ordinary strict exports")
 	}
+	if !strings.Contains(Capabilities()["search_checkpoint"].(string), "whole completed") || !strings.Contains(Skill, "whole completed search/loading/call-result turns") || strings.Contains(Skill, "search lifecycle local compact unsupported") {
+		t.Fatal("stale search checkpoint exports")
+	}
 	if !strings.Contains(Skill, "X-MOMO-Compact:native") || !strings.Contains(out.String(), "tool_loading") || !strings.Contains(Skill, "momo_tool_loading") {
 		t.Fatal("stale native compact/search capability exports")
 	}

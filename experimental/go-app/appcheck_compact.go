@@ -51,6 +51,9 @@ func probeCompactRequests(core *appcore.Core) error {
 	if err := probeNativeCompactRequests(core); err != nil {
 		return err
 	}
+	if err := probeSearchCheckpointRequests(core); err != nil {
+		return err
+	}
 	return probeImageRequests(core)
 }
 

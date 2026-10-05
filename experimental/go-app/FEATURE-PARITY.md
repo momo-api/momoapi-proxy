@@ -14,7 +14,7 @@
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
-| 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
+| 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；已完成搜索/加载/调用结果支持显式本地 checkpoint 与手动回放；hosted/复杂 schema 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或签名供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询，编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
@@ -36,7 +36,29 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### 普通 function strict 与 nullable schema（2026-10-06；本地通过，新HEAD三平台待验收）
+### 完整客户端搜索生命周期 checkpoint（2026-10-06；新增验收进行中）
+
+显式 client-search + parallel false 的已完成 search/load/call/result 支持本地
+checkpoint；additional_tools、空结果、长namespace、图片/PDF及解读完整回合保留，
+仅较早普通assistant文本可成为更小有损标记。重声明工具/策略后手动重放，
+不执行搜索/MCP、不自动接入Codex、不生成语义摘要/opaque/anchor。
+同IR校验先于压缩；duplicate/非法UTF8/depth64在normalize前拒绝，pending/
+orphan/futuredefinition/strict-invalid/no-benefit拒绝，无网络/隐式历史。
+已补三协议回归和相同mock/resources/input黑盒；Node本地checkpoint丢search
+记录与Go保留分别断言，恢复比较明确给双方同一canonical完整输入。
+新增18组同输入黑盒，统一395组通过；Node省略search声明/暴露deferred和
+Claude/Gemini历史大整数损失与Go有序集合/精确保留分别验证；test-only raw
+capture避免JSON解码自身损失精度。Windows真实WebView173次TLSmock通过，
+新增12次恢复/结果配对/第二轮，compact和pending拒绝无额外上游。
+native夹具先因map/string类型比较不等、再因Chat缺finish_reason失败；改为
+canonical JSON比较及完整终端流，未放宽生产门禁。回归含标签normalization/
+按本轮schema重验/cross-converted canonical replay/失败写/取消/Stop/无隐式状态。
+本地全量两种tag各5遍、两vet/page/packaging、Win/WSL普通binary及fresh Codex
+七种mock流程通过；无真实账号/付费推理/本机installer。前次根Node npm test
+513pass/2fail/3skip（既存log sink多进程ENOTEMPTY）仍保留，不以独立诊断代替。
+Prism启动toolerror，无专家批准。新HEAD三平台CI/产物尚待验收，不用旧HEAD替代。
+
+### 普通 function strict 与 nullable schema（2026-10-06；cc44417已三平台验收）
 
 strict:true 不再错误依赖 client-search；strict:false/省略不启用本地 schema
 约束。Chat function.strict 保留显式 bool，Claude/Gemini 不捏造字段，schema
@@ -55,7 +77,9 @@ DSML初次夹具未设置 string=false 导致合法数字/ null成为字符串�
 协议夹具，未放宽生产门禁。新增24组同mock/resource/input黑盒全部通过，
 统一总377组通过。Node遗漏strict并接受无效参数与Go显式映射/拒绝分别断言；尚非性能或真实
 provider能力证明。Windows真实WebView161次TLSmock通过（新增12）。Prism
-启动toolerror，无专家批准回执；新HEAD仍须三平台CI与产物验收。
+启动toolerror，无专家批准回执；cc44417首轮18checks/6nativejobs/3OS新产物
+已验收：https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6003657093。
+不替代后续搜索checkpoint增量验收，PR仍draft未合并。
 本地全量单测5遍、两种vet、page/packaging、Windows/WSL普通binary黑盒与
 官方MCP SDK1.32.1图片/视频连接通过。真实Codex0.156 Linux五种fresh只读
 mock流程各exit0/exact2requests及长MCP false约束通过；另新fresh relay明确

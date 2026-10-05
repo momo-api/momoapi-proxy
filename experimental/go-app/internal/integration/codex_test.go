@@ -27,6 +27,9 @@ func TestCodexProviderConfigIsLocalAndCredentialFree(t *testing.T) {
 		if !strings.Contains(text, "# http_headers = { \"X-MOMO-Client-Policy\" = \"text-tools-v1\" }") {
 			t.Fatal("optional policy disclosure missing")
 		}
+		if !strings.Contains(text, "Function strict:true uses bounded local validation") || strings.Contains(text, "strict:true still unsupported") {
+			t.Fatal("stale strict export boundary")
+		}
 		for _, line := range strings.Split(text, "\n") {
 			if strings.HasPrefix(line, "http_headers") {
 				t.Fatal("lossy policy enabled by default")

@@ -63,6 +63,24 @@ func probeSearchUpstream(w http.ResponseWriter, r *http.Request, data []byte) bo
 		w.WriteHeader(400)
 		return true
 	}
+	if strings.Contains(string(data), "search-checkpoint-native") {
+		if !loaded || !strings.Contains(string(data), "checkpoint old result exact") || !strings.Contains(string(data), "CURRENT checkpoint native") || !strings.Contains(string(data), "discovery interpretation") {
+			w.WriteHeader(400)
+			return true
+		}
+		if strings.Contains(string(data), "checkpoint-second-result") {
+			response := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"checkpoint-resumed\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+			if r.URL.Path == "/v1/messages" {
+				response = claudeProbeStream
+			}
+			if strings.HasPrefix(r.URL.Path, "/v1beta/") {
+				response = geminiProbeStream
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			io.WriteString(w, response)
+			return true
+		}
+	}
 	name, id, args := searchProbeWire, "search_probe_call", map[string]any{"goal": "read 中文🙂"}
 	if loaded {
 		name, id, args = "pad__read", "search_probe_read", map[string]any{}

@@ -63,6 +63,8 @@ assert.match(source,/不是原生延迟加载/);
 assert.match(source,/strict 仅做有界本地校验/);
 assert.match(source,/function 的 strict:true 不需要启用工具搜索/);
 assert.match(source,/strict:false 或省略不强加 schema 校验/);
+assert.ok(source.includes('支持已完成的工具搜索 / 动态追加定义完整回合'));
+assert.ok(!source.includes('不支持工具搜索历史'));
 assert.match(source,/X-MOMO-Compact:native/);
 assert.match(source,/能力未验证，不回退/);
 assert.ok(source.includes('Chat / Claude / Gemini 子集 · 实验'));

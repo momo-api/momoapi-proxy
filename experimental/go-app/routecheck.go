@@ -42,7 +42,15 @@ func main() {
 		fixture.Path = "/v1/chat/completions"
 	}
 	captures := []any{}
+	rawCaptures := []string{}
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/capture-raw" {
+			mu.Lock()
+			defer mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(rawCaptures)
+			return
+		}
 		if r.URL.Path == "/capture" {
 			mu.Lock()
 			defer mu.Unlock()
@@ -108,6 +116,7 @@ func main() {
 		}
 		mu.Lock()
 		captures = append(captures, payload)
+		rawCaptures = append(rawCaptures, string(data))
 		responseIndex := len(captures) - 1
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")

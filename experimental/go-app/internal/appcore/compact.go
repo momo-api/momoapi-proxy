@@ -24,8 +24,9 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 	if len(data) > MaxRequest {
 		return nil, errCompactBudget
 	}
-	p, err := decodeObject(string(data))
-	if err != nil || !only(p, "model", "input", "tools", "stream", "momo_tool_images", "momo_tool_files") {
+	// Check before normalization can erase duplicate policy/schema/result keys.
+	p, err := decodeVideoObject(data)
+	if err != nil || !only(p, "model", "input", "tools", "stream", "momo_tool_images", "momo_tool_files", "momo_tool_loading", "parallel_tool_calls") {
 		return nil, errRouted
 	}
 	if _, present := p["stream"]; present && p["stream"] != false {
@@ -49,8 +50,8 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 	// The same strict IR rejects unsupported media, unknown fields, malformed/duplicate/orphan
 	// calls, interrupted parallel results and undeclared namespace identities.
 	checked, _ := json.Marshal(p)
-	if ir, err := parseRoutedRequest(checked); err != nil || ir.loading != nil {
-		return nil, errRouted // deferred lifecycle checkpoint support must not be guessed
+	if _, err := parseRoutedRequest(checked); err != nil {
+		return nil, errRouted
 	}
 	objects := make([]map[string]any, len(items))
 	lastUser, latestAssistant := -1, -1
@@ -81,7 +82,10 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 				}
 			} // retain interpretations of retained images, not just the image bytes
 			switch str(objects[i]["type"]) {
-			case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output":
+			case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output", "tool_search_call", "tool_search_output", "additional_tools":
+				// Discovery is client data, not prose. Retain the whole turn,
+				// including interleaved text and interpretation; replay the same
+				// ordered lifecycle with freshly re-declared request policies.
 				protectedTurn = true
 			}
 			if objects[i]["role"] == "assistant" {
