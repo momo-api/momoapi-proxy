@@ -278,6 +278,16 @@ opaque/anchor/语义摘要。三协议TCP实际compact零上游后显式重放�
 图片保留，物理上游仍68。历史条目中的此前拒绝是38531c4基线，不是当前能力。
 本增量CI回执未完成前不称跨平台通过。
 
+### 图片 framing 静态复核与门禁（2026-10-05）
+
+Prism retry工具300s超时，但随后报告9720bytes落盘；只有静态建议，不是执行/批准。
+先独立回归复现畸形GIF GCE 21f900被接受，再修固定4字节/terminator门禁；application
+固定头校验，plain-text/未知扩展明确拒绝。WebP奇数chunk必须零padding；legacy
+十进制/十六进制numeric host明确拒绝（DNS/重定向仍不验证）。累计图片预算只在
+所有校验成功后commit，计数/精确Base64 decoded-size提前门禁。补合法GCE/未知
+WebPchunk、失败预算不变与普通含0x DNS正例，保留已有单帧截断/动画/边界回归。
+报告依据两文件旧快照，已补的单帧截断测试不重复认定缺失。协议黑盒仍203/68。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

@@ -52,7 +52,8 @@ interleaved with text without regrouping or an invented image-only text marker.
 Inline canonical data:<MIME>;base64,<data> accepts PNG/JPEG/static GIF/WebP;
 strict Base64, declared MIME versus decoded header, dimensions <=16384 per side
 and <=32 million pixels are checked without allocating pixel buffers. GIF framing
-must contain one frame; WebP RIFF framing/animation flags are checked. This is
+must contain one frame, fixed control/application headers and terminators; GIF
+plain-text/unknown extensions reject. WebP RIFF framing/zero padding/animation flags are checked. This is
 header/framing validation, NOT full pixel decoding, content safety or integrity.
 The upstream may still reject the image. Max32 images across the entire replayed
 input; decoded inline total <=1MiB, and the existing 1MiB full JSON/history limits

@@ -11,6 +11,7 @@ import (
 	_ "image/png"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	_ "golang.org/x/image/webp"
@@ -26,6 +27,9 @@ type routeImage struct{ url, mime, data, detail string }
 type imageBudget struct{ count, bytes int }
 
 func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*routeImage, error) {
+	if budget == nil || budget.count >= 32 || budget.bytes > MaxRequest {
+		return nil, errUnsupportedImage
+	}
 	if !only(m, "type", "image_url", "detail", "mime_type") || m["type"] != "input_image" {
 		return nil, errUnsupportedImage
 	}
@@ -51,6 +55,7 @@ func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*rout
 		}
 	}
 	result := &routeImage{url: s, mime: mime, detail: detail}
+	inlineBytes := 0
 	if strings.HasPrefix(s, "data:") {
 		meta, encoded, found := strings.Cut(s, ",")
 		if !found {
@@ -61,6 +66,15 @@ func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*rout
 			return nil, errUnsupportedImage
 		}
 		if strings.ContainsAny(encoded, "\r\n\t ") || len(encoded) > MaxRequest {
+			return nil, errUnsupportedImage
+		}
+		decodedSize := base64.StdEncoding.DecodedLen(len(encoded))
+		if strings.HasSuffix(encoded, "==") {
+			decodedSize -= 2
+		} else if strings.HasSuffix(encoded, "=") {
+			decodedSize--
+		}
+		if decodedSize < 1 || decodedSize > MaxRequest-budget.bytes {
 			return nil, errUnsupportedImage
 		}
 		data, err := base64.StdEncoding.Strict().DecodeString(encoded)
@@ -78,7 +92,7 @@ func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*rout
 			return nil, errUnsupportedImage
 		}
 		result.mime, result.data = inlineMIME, encoded
-		budget.bytes += len(data)
+		inlineBytes = len(data)
 	} else {
 		u, err := url.Parse(s)
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Port() != "" && u.Port() != "443" || len(s) > 8192 {
@@ -93,18 +107,43 @@ func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*rout
 		}
 		// Reject alternate numeric spellings (127.1, 2130706433) rather than
 		// assuming every provider resolves them as ordinary DNS names.
-		if net.ParseIP(host) == nil && strings.Trim(host, "0123456789.") == "" {
+		if net.ParseIP(host) == nil && legacyNumericHost(host) {
 			return nil, errUnsupportedImage
 		}
 		if resolveProtocol(model) == "gemini" && mime == "" {
 			return nil, errUnsupportedImage
 		} // fileData requires explicit MIME, never guess from URL suffix
 	}
-	budget.count++
-	if budget.count > 32 || budget.bytes > MaxRequest {
+	if inlineBytes > MaxRequest-budget.bytes {
 		return nil, errUnsupportedImage
 	}
+	budget.count++
+	budget.bytes += inlineBytes
 	return result, nil
+}
+
+func legacyNumericHost(host string) bool {
+	if strings.Trim(host, "0123456789.") == "" {
+		return true
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) > 4 {
+		return false
+	}
+	for _, part := range parts {
+		base := 10
+		if strings.HasPrefix(part, "0x") {
+			part = strings.TrimPrefix(part, "0x")
+			base = 16
+		}
+		if part == "" {
+			return false
+		}
+		if _, err := strconv.ParseUint(part, base, 32); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // Validate bounded RIFF chunk framing and reject animation flags/chunks. Do
@@ -125,6 +164,9 @@ func staticWebP(data []byte) bool {
 			return false
 		}
 		if kind == "VP8X" && (size != 10 || data[start]&2 != 0) {
+			return false
+		}
+		if size%2 != 0 && (end >= uint64(len(data)) || data[end] != 0) {
 			return false
 		}
 		pos = int(end + size%2)
@@ -170,7 +212,23 @@ func singleFrameGIF(data []byte) bool {
 			if pos >= len(data) {
 				return false
 			}
-			pos++ // extension label
+			label := data[pos]
+			pos++
+			if label == 0xf9 { // fixed-size Graphics Control Extension
+				if pos+6 > len(data) || data[pos] != 4 || data[pos+5] != 0 {
+					return false
+				}
+				pos += 6
+				continue
+			}
+			if label == 0xff { // application identifier/authentication header
+				if pos+12 > len(data) || data[pos] != 11 {
+					return false
+				}
+				pos += 12
+			} else if label != 0xfe { // only comments; plain text/unknown rendering unsupported
+				return false
+			}
 			if !skipBlocks() {
 				return false
 			}

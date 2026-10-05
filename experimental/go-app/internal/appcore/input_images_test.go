@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -305,6 +306,67 @@ func TestImageDefaultAndNativeRequestsRemainExact(t *testing.T) {
 		code, b, _ := request(t, c, endpoint, "/v1/responses", "POST", payload, nil)
 		if code != 200 || string(b) != response {
 			t.Fatal("native image bytes")
+		}
+	}
+}
+
+func TestImageReviewFramingAndTransactionalBudget(t *testing.T) {
+	header, _ := hex.DecodeString("47494638396101000100800000000000ffffff")
+	frame, _ := hex.DecodeString("2c00000000010001000002024401003b")
+	for _, gce := range []string{"21f900", "21f9010000", "21f904000000000100"} {
+		bad, _ := hex.DecodeString(gce)
+		data := append(append(append([]byte{}, header...), bad...), frame...)
+		if singleFrameGIF(data) {
+			t.Fatal("malformed GCE accepted", gce)
+		}
+		if _, err := parseRouteImage(imagePart("data:image/gif;base64,"+base64.StdEncoding.EncodeToString(data)), "gpt-5.5", &imageBudget{}); err == nil {
+			t.Fatal("malformed GIF parser accepted")
+		}
+	}
+	goodGCE, _ := hex.DecodeString("21f9040000000000")
+	good := append(append(append([]byte{}, header...), goodGCE...), frame...)
+	if !singleFrameGIF(good) {
+		t.Fatal("valid GCE rejected")
+	}
+	for _, ext := range []string{"21ff00", "210100", "21ee00"} {
+		bytes, _ := hex.DecodeString(ext)
+		data := append(append(append([]byte{}, header...), bytes...), frame...)
+		if singleFrameGIF(data) {
+			t.Fatal("invalid/unsupported GIF extension accepted")
+		}
+	}
+	application, _ := hex.DecodeString("21ff0b4e45545343415045322e300301010000")
+	appGIF := append(append(append([]byte{}, header...), application...), frame...)
+	if !singleFrameGIF(appGIF) {
+		t.Fatal("valid application framing rejected")
+	}
+	encoded := "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA"
+	webp, _ := base64.StdEncoding.DecodeString(encoded)
+	bad := append(append([]byte{}, webp...), []byte{'J', 'U', 'N', 'K', 1, 0, 0, 0, 0, 255}...)
+	binary.LittleEndian.PutUint32(bad[4:8], uint32(len(bad)-8))
+	if staticWebP(bad) {
+		t.Fatal("nonzero RIFF padding accepted")
+	}
+	if _, err := parseRouteImage(imagePart("data:image/webp;base64,"+base64.StdEncoding.EncodeToString(bad)), "gpt-5.5", &imageBudget{}); err == nil {
+		t.Fatal("malformed WebP parser accepted")
+	}
+	bad[len(bad)-1] = 0
+	if !staticWebP(bad) {
+		t.Fatal("valid padded unknown chunk rejected")
+	}
+	for _, url := range []string{"https://0x7f.0.0.1/a", "https://0x7f.1/a", "https://0x7f000001./a", "https://127.0.0.0.1/a"} {
+		if _, err := parseRouteImage(imagePart(url), "gpt-5.5", &imageBudget{}); err == nil {
+			t.Fatal("legacy numeric host accepted")
+		}
+	}
+	if _, err := parseRouteImage(imagePart("https://0x7f.images.example/a"), "gpt-5.5", &imageBudget{}); err != nil {
+		t.Fatal("ordinary DNS name rejected")
+	}
+	for _, initial := range []imageBudget{{count: 32}, {bytes: MaxRequest}} {
+		budget := initial
+		part := imagePart(inlineFixture(t, "image/png"))
+		if _, err := parseRouteImage(part, "gpt-5.5", &budget); err == nil || budget != initial {
+			t.Fatal("failed image mutated budget")
 		}
 	}
 }
