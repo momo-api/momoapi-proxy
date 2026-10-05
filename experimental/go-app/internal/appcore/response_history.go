@@ -96,7 +96,10 @@ func normalizedHistory(items []json.RawMessage) ([]json.RawMessage, error) {
 			if typ != "message" && typ != "function_call" && typ != "custom_tool_call" && typ != "tool_search_call" && typ != "tool_search_output" {
 				return nil, errRouted
 			}
-			if typ == "message" && item["role"] != "assistant" {
+			// Typed client input messages may carry local per-item labels. They
+			// are not provider references or history anchors; normalize only ID,
+			// keeping every instruction/content field for strict parsing below.
+			if typ == "message" && !includes([]string{"assistant", "user", "developer", "system"}, str(item["role"])) {
 				return nil, errRouted
 			}
 			delete(item, "id")

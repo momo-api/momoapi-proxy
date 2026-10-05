@@ -60,6 +60,11 @@ func probeHistoryRequests(core *appcore.Core) error {
 		var body map[string]any
 		json.Unmarshal([]byte(payload), &body)
 		body["stream"] = false
+		// Actual Codex typed input-message labels must not change upstream wire.
+		for _, item := range body["input"].([]any) {
+			message := item.(map[string]any)
+			message["type"], message["id"] = "message", "msg_client_native_probe"
+		}
 		for turn := 0; turn < 2; turn++ {
 			b, _ := json.Marshal(body)
 			req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(string(b)))

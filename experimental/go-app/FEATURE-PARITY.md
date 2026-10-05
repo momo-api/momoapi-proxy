@@ -36,6 +36,25 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 实际 Codex 输入消息 ID 兼容修复（2026-10-05；本增量 CI 待验收）
+
+本机真实 Codex CLI0.156.0 通过隔离 CODEX_HOME/合成工作目录、ignore-user-config/
+ignore-rules/ephemeral/read-only/sanitized env/显式本地provider/零retry/无WebSocket
+运行，never-packaged routecheck Core + 本地mock，无真实上游/账号Key/付费调用。
+原Responses透传单请求exit0+finalmarker；gpt-5.5转换exit1/零上游，先因typed
+developer/user消息id被history拒绝。新增红测试复现，允许有效user/developer/
+system消息本地ID仅归一化移除，不删指令/content；assistant与tool既有规则不改，
+status仍仅completed assistant，item_reference/未知role/空非字符串ID继续拒绝。
+
+5遍回归三provider × SSE/JSON实际TCP保留developer/user内容，无ID泄漏、store:false
+不缓存；native已有history请求加入typed user ID并仍精确断言原upstreamwire，
+物理请求仍117。统一TCP新增6组同mock typed user ID，计划293；不是全client验收。
+修复后实际Codex转换仍exit1/零upstream，错误推进为unsupported routed payload：
+client_metadata/include/prompt_cache_key/reasoning等需下一轮显式语义映射，不以
+第一处修复宣称全部compatible。Codex仍读取全局.agents/skills并报告既有坏Skill，
+隔离CODEX_HOME不等于隔离所有skills；未存原始clientpayload/指令，后续需显式隔离。
+本增量三平台/产物需新HEAD验收，不能用3dd8b91的287/117取代293/117。
+
 ### 独立显式视频 MCP 增量（2026-10-05；本增量 CI 待验收）
 
 新增 mcp-videos 私有配置首行模式（独立 owned Core、无listener/token handoff），
