@@ -8,6 +8,9 @@ import (
 )
 
 func TestMCPAndSkillExports(t *testing.T) {
+	if Capabilities()["video_generation"] == nil || !strings.Contains(Skill, "Video API subset") || !strings.Contains(Skill, "NOT video MCP/UI") {
+		t.Fatal("stale video API support boundary")
+	}
 	if !strings.Contains(Capabilities()["image_mcp"].(string), "NOT verified human consent") || !strings.Contains(Skill, "mcp-images") || !strings.Contains(Skill, "trusted launcher") {
 		t.Fatal("stale opt-in MCP boundaries")
 	}

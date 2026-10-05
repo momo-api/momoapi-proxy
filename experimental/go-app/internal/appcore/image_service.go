@@ -18,6 +18,12 @@ import (
 // Test-only wrappers remain injected. Redirect policy remains deny, never follow
 // provider image URLs or add auth to them. No retries or synchronous task polling.
 func (c *Core) imageJSON(ctx context.Context, config Config, method, path string, body []byte, limit int) ([]byte, int) {
+	return c.mediaJSON(ctx, config, method, path, body, limit, false)
+}
+
+// Video explicitly disables reuse so Go's transport cannot replay a task GET
+// on a previously-used connection. Image transport behavior remains unchanged.
+func (c *Core) mediaJSON(ctx context.Context, config Config, method, path string, body []byte, limit int, noReuse bool) ([]byte, int) {
 	req, err := http.NewRequestWithContext(ctx, method, config.Endpoint+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, 502
@@ -31,6 +37,9 @@ func (c *Core) imageJSON(ctx context.Context, config Config, method, path string
 	client.Timeout = 0
 	if transport, ok := client.Transport.(*http.Transport); ok {
 		clone := transport.Clone()
+		if noReuse {
+			clone.DisableKeepAlives = true
+		}
 		clone.ResponseHeaderTimeout = 300 * time.Second
 		client.Transport = clone
 		defer clone.CloseIdleConnections()

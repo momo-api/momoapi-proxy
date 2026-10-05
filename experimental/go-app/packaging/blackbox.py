@@ -276,6 +276,18 @@ class Session:
 
 
 def check_boundaries(session):
+    # New video subset: no catalog means no submission, foreign IDs never query;
+    # ordinary binary uses existing DNS guard, not the test-only mock injector.
+    for path in ("/internal/videos/capabilities", "/internal/videos/tasks/foreign"):
+        session.request("GET", path, 401, authenticated=False)
+        session.request("GET", path, 403, headers={"Origin":"https://foreign.invalid"})
+    session.request("GET", "/internal/videos/tasks/foreign", 404)
+    session.request("GET", "/internal/videos/capabilities", 502)
+    session.request("POST", "/internal/videos/generate", 409, body=b'{"model":"seedance-2.5","prompt":"hi"}')
+    session.request("POST", "/internal/videos/generate", 400, body=b'{"model":"seedance-2.5","model":"other","prompt":"hi"}')
+    session.request("GET", "/internal/videos/generate", 405)
+    session.request("POST", "/internal/videos/capabilities", 405)
+    session.request("GET", "/internal/videos/capabilities?x=1", 400)
     session.request("GET", "/v1/models", 401, authenticated=False)
     session.request("GET", "/v1/models", 401, headers={"Authorization": "Bearer wrong-synthetic-local"})
     for headers in ({"Origin": "https://foreign.invalid"}, {"Origin": "null"},
@@ -353,7 +365,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + video API auth/browser/catalog/foreign-ID/private-DNS/method/duplicate-JSON gates + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":

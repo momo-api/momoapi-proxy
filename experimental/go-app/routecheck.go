@@ -30,6 +30,7 @@ func main() {
 		JSON         bool
 		Image        bool
 		ImageCatalog string
+		Video        bool
 	}
 	if json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&fixture) != nil {
 		os.Exit(1)
@@ -51,6 +52,24 @@ func main() {
 			w.Header().Set("Content-Type", "application/json")
 			io.WriteString(w, fixture.ImageCatalog)
 			return
+		}
+		if fixture.Video && r.Method == "GET" && r.Header.Get("Authorization") == "Bearer synthetic-unified-only" {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/agent/media-capabilities" {
+				io.WriteString(w, `{"models":[]}`)
+				return
+			}
+			if r.URL.Path == "/v1/models" {
+				io.WriteString(w, `{"data":[{"id":"MiniMax-H3-Max"},{"id":"seedance-2.5"}]}`)
+				return
+			}
+			if r.URL.Path == "/v1/videos/task_video_shared" {
+				mu.Lock()
+				captures = append(captures, map[string]any{"task_path": r.URL.Path})
+				mu.Unlock()
+				io.WriteString(w, `{"code":200,"data":{"task_id":"task_video_shared","status":"SUCCESS","result_url":"https://video.example/result.mp4","progress":100}}`)
+				return
+			}
 		}
 		if fixture.Image && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/tasks/") && r.Header.Get("Authorization") == "Bearer synthetic-unified-only" {
 			mu.Lock()

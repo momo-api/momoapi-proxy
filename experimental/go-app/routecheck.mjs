@@ -7,6 +7,7 @@ import {request as httpRequest} from 'node:http';
 import {createMomoSwitch} from '../../src/server.mjs';
 import {fileCases,assertFileCase} from './routecheck_files.mjs';
 import {imageBlackbox} from './routecheck_images.mjs';
+import {videoBlackbox} from './routecheck_videos.mjs';
 const binary=process.argv[2];assert.ok(binary);
 const tool={type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'custom',name:'write'}]};
 const payload={model:'gpt-5.5',stream:true,instructions:'Be concise.',input:[{role:'user',content:[{type:'input_text',text:'中文🙂'}]}],tools:[tool]};
@@ -141,7 +142,7 @@ async function launch(fixture){
   let line='';const timer=setTimeout(()=>reject(Error('routecheck startup timeout')),10000);
   child.once('error',reject);child.once('exit',()=>{clearTimeout(timer);reject(Error('routecheck exited before handoff'))});
   child.stdout.on('data',b=>{line+=b;if(line.includes('\n')){clearTimeout(timer);resolve(JSON.parse(line.split('\n')[0]))}});
-  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200,Path:fixture.path,Search:fixture.search,JSON:fixture.upstreamJSON,Image:fixture.image,ImageCatalog:fixture.imageCatalog}));
+  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200,Path:fixture.path,Search:fixture.search,JSON:fixture.upstreamJSON,Image:fixture.image,ImageCatalog:fixture.imageCatalog,Video:fixture.video}));
  });
  return {child,handoff};
 }
@@ -436,4 +437,5 @@ for(const status of [200,404]){
  }finally{if(server)await new Promise(r=>{server.close(r);server.closeAllConnections()});child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);}
 }
 const imageCount=await imageBlackbox(launch,invoke);
-console.log('PASS '+(cases.length+8+imageCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images use same exact generation/task upstream with distinct output/storage semantics; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+const videoCount=await videoBlackbox(launch,invoke);
+console.log('PASS '+(cases.length+8+imageCount+videoCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

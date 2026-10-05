@@ -12,11 +12,24 @@ import (
 // Reuse proxy admission/cancellation/generation guards and exact image contracts;
 // never issue a loopback HTTP request with a privileged token in browser JS.
 func (c *Core) DesktopImages(ctx context.Context, path string, body []byte) ([]byte, int) {
+	return c.desktopMedia(ctx, path, body, false)
+}
+
+// DesktopVideos uses the same bounded native sink and core admission. Fixed
+// video paths only; never expose a token or arbitrary upstream URL to the page.
+func (c *Core) DesktopVideos(ctx context.Context, path string, body []byte) ([]byte, int) {
+	return c.desktopMedia(ctx, path, body, true)
+}
+
+func (c *Core) desktopMedia(ctx context.Context, path string, body []byte, video bool) ([]byte, int) {
 	method := "GET"
-	if path == "/internal/images/generate" {
+	if path == "/internal/images/generate" || path == "/internal/videos/generate" {
 		method = "POST"
 	}
 	known, allowed := imageRoute(path, method)
+	if video {
+		known, allowed = videoRoute(path, method)
+	}
 	if !known || !allowed || len(body) > MaxRequest {
 		return nil, 400
 	}

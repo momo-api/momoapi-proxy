@@ -17,7 +17,7 @@
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
-| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成子集：显式目录/选模型/单次请求，URL/Base64/本进程任务手动查询；图片工作台与独立 opt-in 图片 MCP；不自动下载/保存/轮询，编辑、视频、完整媒体插件未迁移 |
+| 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 显式目录/生成/本会话任务子集；不自动下载/保存/轮询，编辑、video GUI/MCP、旧视频路线与完整媒体插件未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
 | Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有首行，另有可复制无Key配置的 mcp-images-connect（客户端显式local session env）接入当前gateway；非现有插件直接兼容，视频/完整媒体/通用第三方管理未迁移 |
@@ -438,6 +438,41 @@ Prism有效静态审查指出按原始长度逐前缀加delta使合法空白输�
 非PDF、附件UI选择器、媒体插件或真实客户端/真实模型完整兼容声明。
 
 ## Magpie 借鉴边界
+
+### 显式视频 API 子集增量（2026-10-05）
+
+新增 /internal/videos/capabilities|generate|tasks/<id>，仅 MiniMax-H3-Max /
+seedance-2.5 的现有 Node APIMart JSON 路径。显式目录单查 /v1/models，token
+列表只证可用，不证进阶参数/真实推理；controls 来源静态文档/现有 adapter，
+不自动选模型/替换/回退/付费探测。严格 text/HTTPS references 或首尾帧；不读取/
+上传/抓取/下载/播放文件，不支持 asset/data/audio/video refs 或旧 Adobe/multipart。
+duration/resolution/ratio/数量严格校验，frames/refs 互斥，Seedance refs 用adaptive；
+7000 UTF-16 units 提示词上限对齐 Node，拒绝重复JSON/null/未知字段/别名。
+
+共用 Core4 admission/1MiB body/16MiB response，60s generation/task、15s目录；
+视频 production transport 禁止复用避免透明 GET retry。5min目录权限，失败refresh
+撤销；64预留task slots、绝对30minTTL、同Core返回ID，Stop/configure清空与epoch
+守卫，不取消remotejob/计费。输出有界已知JSON envelope、标准化status/固定失败
+文字/HTTPS remote_url text，不反射metadata/error或认证content URL。URL词法校验
+不是DNS/redirect/SSRF/content证明。写失败中止不重发，已提交任务继续记录，非回滚。
+
+统一实际TCP新增12组（计划287）：同mock/resources对双方exact generation/task
+wire断言，queued/completed/failed与401/429/500。Node submitted不标准化，Go queued；
+Go错误固定脱敏、不输出authenticated-content URL；差异独立断言。Native runner
+新增3实际API→TLS mock请求（计划108），不是video UI/MCP/真实推理。回归覆盖
+TTL/刷新撤销/并发预留/任务碰撞/共享入场/Stop取消/无晚到状态/停机stalled上传/
+deadline/路径/错误/短写flush期限/无重发。普通产物新增auth/browser/DNS/catalog/
+foreignID/route gates。video GUI/MCP/完整插件/签名/跨设备仍未完成；本轮三平台
+当前commit验收前不引用382ef59的275/105回执替代。
+
+本地287实际TCP、108物理mock native探针、普通production blackbox与MCP SDK通过。
+新增探针首轮失败：video mock按Accept误覆盖了已有QueryModels夹具；修正只在
+Running时启用该视频mock，原列表fixture/断言不变，完整探针转绿。重复status红测试
+先复现decodeObject last-value行为，video专用JSON拒绝重复/深度>64，不改默认透传。
+
+参考现有 src/video-service.mjs 及插件 momo-video；官方控制文档（非真实推理证明）：
+https://docs.apimart.ai/en/api-reference/videos/minimax-h3/max
+https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation
 
 ### 图片 MCP 客户端直接接入增量（2026-10-05）
 

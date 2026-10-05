@@ -188,6 +188,24 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   state and fences late results; remote effects cannot be undone. Native actions
   require origin+page capability and never return tokens to the page.
   No edit/video/disk assets in this subset.
+- Video API subset (NOT video MCP/UI or full existing plugin compatibility):
+  explicitly GET /internal/videos/capabilities with the local bearer token.
+  This queries token-scoped /v1/models only, authorizing known MiniMax-H3-Max /
+  seedance-2.5 availability; parameter constraints are documented static Node
+  adapter values, NOT live advanced-control/inference verification. No automatic
+  preferred model, substitution, billed probe or catalog fallback.
+  POST /internal/videos/generate with explicit model,prompt and supported
+  duration,resolution,aspect_ratio,reference_images OR first_frame_image /
+  last_frame_image. APIMart public HTTPS references only, no files/data/asset IDs
+  or upload; frame/reference mixing rejected; Seedance references and explicit
+  frame ratio require adaptive. Unknown fields/aliases/audio/video refs reject.
+  Shared4admission/1MiB request/16MiB response,60s submission/task deadline, one
+  send/no transport-reuse retry. Manually GET /internal/videos/tasks/<task_id>
+  for an ID returned by this gateway Core only;64 slots reserved pre-submission,
+  absolute30minTTL, Stop/configure clears. Known task JSON returns normalized
+  status/fixed failure text/remote_url as text; never download/play/authenticate
+  a remote content URL automatically. Failed delivery may already submit/bill;
+  Stop cancels local work only. GUI/video MCP/legacy Adobe not yet migrated.
 - Semantic/local summarization, full attachment management, full media suite and
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The default `mcp` stdio mode only reports capabilities and exposes this document.

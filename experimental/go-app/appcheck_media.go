@@ -113,5 +113,5 @@ func probeMediaRequests(core *appcore.Core) error {
 	if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &output, dispatch) != nil || strings.Count(output.String(), "\n") != 3 || strings.Contains(output.String(), `"isError":true`) || !strings.Contains(output.String(), "https://images.example/connected.png") || strings.Contains(output.String(), key) {
 		return errors.New("image MCP connected TCP probe")
 	}
-	return nil
+	return probeVideoRequests(core)
 }

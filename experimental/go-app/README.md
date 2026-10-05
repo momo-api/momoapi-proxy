@@ -707,6 +707,40 @@ Do not disable OS protections globally to run them.
 Compilation NOT native lifecycle/tray/clipboard/install/signing/notarization/
 reboot/high-DPI/Linux desktop/system shutdown acceptance.
 
+## Video API subset (not video GUI/MCP yet)
+
+Explicit authenticated non-browser GET /internal/videos/capabilities queries
+token-scoped /v1/models: only MiniMax-H3-Max and seedance-2.5 APIMart JSON
+routes are implemented. Availability is not advanced-parameter/live-inference
+proof; controls derive from the documented existing Node adapter, without model
+preference/substitution, billed capability checks or catalog fallback.
+
+POST /internal/videos/generate accepts explicit model/prompt and supported
+duration/resolution/aspect_ratio/reference_images or first_frame_image /
+last_frame_image. Public HTTPS delegated references only; no fetching/uploading
+local files/data/asset IDs, audio/video references, legacy Adobe or multipart.
+No frame/reference mixing; Seedance references use adaptive. Prompt max7000
+UTF-16 units (same Node cap); unknown controls/aliases/null/duplicate JSON reject.
+Shared4admission/1MiB body/16MiB response;60s upstream generation/task deadlines,
+no automatic retry/poll. Normal production transport disables connection reuse
+for video to prevent transparent reused-connection GET replay.
+
+GET /internal/videos/tasks/<id> manually queries only current Core returned
+IDs:64 slots reserved before generation, absolute30minTTL; Stop/configure clears
+catalog/tasks, cancels local requests but cannot cancel remote jobs or billing.
+Known JSON envelopes only: normalized task status, fixed failure text, delegated
+HTTPS remote_url as text. No playback/download/authenticated content URL/export
+of upstream metadata. Failed delivery may already submit/track/bill; do not retry
+uncertain submission. Lexical URL validation is NOT DNS/redirect/content safety.
+No video workbench/video MCP/complete Node media plugin compatibility claim.
+
+12 additional same-mock TCP Node/Go cases compare exact generation/task wire,
+including401/429/500,queued/completed/failed. Status submitted->queued, redacted
+task errors and omitted authenticated-content URLs are independent differences,
+not forced equivalence. Native probe adds3 actual video API TLS-mock calls
+(108 total); no video UI click/real generation proof. Current CI must verify
+this commit, not use prior275/105 proof as current287/108 acceptance.
+
 ## Unsigned installer previews
 
 CI additionally builds Windows current-user Setup EXE, macOS DMG (drag the app
