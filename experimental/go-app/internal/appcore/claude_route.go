@@ -27,10 +27,14 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 			role = "user"
 			content = append(content, map[string]any{"type": "tool_result", "tool_use_id": m.resultID, "content": m.text})
 		} else {
-			if m.text != "" {
-				content = append(content, map[string]string{"type": "text", "text": m.text})
-			}
-			for _, c := range m.calls {
+			for _, part := range m.parts {
+				if part.call == nil {
+					if part.text != "" {
+						content = append(content, map[string]string{"type": "text", "text": part.text})
+					}
+					continue
+				}
+				c := part.call
 				args, err := decodeObject(c.args)
 				if err != nil {
 					return nil, err

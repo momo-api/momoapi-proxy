@@ -37,10 +37,14 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 			}
 			parts = append(parts, map[string]any{"functionResponse": map[string]any{"id": m.resultID, "name": name, "response": map[string]string{"result": m.text}}})
 		} else {
-			if m.text != "" {
-				parts = append(parts, map[string]string{"text": m.text})
-			}
-			for _, call := range m.calls {
+			for _, part := range m.parts {
+				if part.call == nil {
+					if part.text != "" {
+						parts = append(parts, map[string]string{"text": part.text})
+					}
+					continue
+				}
+				call := part.call
 				args, err := decodeObject(call.args)
 				if err != nil {
 					return nil, err

@@ -133,6 +133,28 @@ func TestRoutedHistoryParallelToolsAndBranching(t *testing.T) {
 			if captured[0] != captured[1] || !strings.Contains(captured[0], "pad__read") || !strings.Contains(captured[0], "pad__write") || !strings.Contains(captured[0], "read-result") || !strings.Contains(captured[0], "write-result") {
 				t.Fatal("paired aliases/results")
 			}
+			if tc.model != "gpt-5.5" {
+				p, err := decodeObject(captured[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				var parts []any
+				if tc.model == "claude-sonnet-4-6" {
+					parts = obj(p["messages"].([]any)[1])["content"].([]any)
+				} else {
+					parts = obj(p["contents"].([]any)[1])["parts"].([]any)
+				}
+				if len(parts) != 4 || obj(parts[0])["text"] != "中文🙂" || obj(parts[2])["text"] != "after" {
+					t.Fatal("assistant block order lost in actual continuation request")
+				}
+				if tc.model == "claude-sonnet-4-6" {
+					if obj(parts[1])["name"] != "pad__read" || obj(parts[3])["name"] != "pad__write" {
+						t.Fatal("Claude ordered calls")
+					}
+				} else if obj(obj(parts[1])["functionCall"])["name"] != "pad__read" || obj(obj(parts[3])["functionCall"])["name"] != "pad__write" {
+					t.Fatal("Gemini ordered calls")
+				}
+			}
 		})
 	}
 }

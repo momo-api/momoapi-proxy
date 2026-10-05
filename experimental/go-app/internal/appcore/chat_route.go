@@ -28,9 +28,17 @@ func resolveProtocol(model string) string {
 
 // routeRequest is the bounded protocol-neutral subset. It never contains client wire JSON.
 type routeCall struct{ id, wire, args string }
+
+// Block-capable providers retain text/tool interleaving within an assistant turn.
+// Chat has only content + tool_calls and cannot express that block order.
+type routePart struct {
+	text string
+	call *routeCall
+}
 type routeMessage struct {
 	role, text, resultID string
 	calls                []routeCall
+	parts                []routePart
 }
 type routeTool struct {
 	chatTool
@@ -302,6 +310,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			}
 			last := &messages[len(messages)-1]
 			last.calls = append(last.calls, call)
+			last.parts = append(last.parts, routePart{call: &call})
 		case "function_call_output", "custom_tool_call_output":
 			if !only(m, "type", "call_id", "output") {
 				return nil, errRouted
@@ -347,9 +356,10 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 					last.text += "\n"
 				}
 				last.text += content
+				last.parts = append(last.parts, routePart{text: content})
 				continue
 			}
-			messages = append(messages, routeMessage{role: role, text: content})
+			messages = append(messages, routeMessage{role: role, text: content, parts: []routePart{{text: content}}})
 		default:
 			return nil, errRouted
 		}

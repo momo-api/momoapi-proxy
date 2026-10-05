@@ -156,3 +156,7 @@ flusherror不commit，不能声称远端已收到。suffix与完整精确prefix�
 Node转换仅suffix的差异；单测验证并行工具/交错assistant/独立分支/并发/作用域/
 预算/失效/写失败；WebView三协议实际续接。尚未compact/跨provider/签名续接，也
 不是现有Node原生状态算法全量等价。
+
+后续审查补有序routePart：Claude/Gemini请求回放保留同一assistant回合中的文本/
+工具交错，不先拼全部文本再拼全部工具。93组同mock夹具逐块核对真实上游续接
+请求；Chat wire只能表示content+tool_calls，无法表达块位置，此限制不掩饰。

@@ -36,6 +36,8 @@ const withChatUsage=(stream,usage)=>stream.replace('data: [DONE]\r\n\r\n',cu(usa
 const chatSingle=name=>sse([chunk({tool_calls:[{index:0,id:'call_one',type:'function',function:{name:'pad__'+name,arguments:name==='read'?'{}':JSON.stringify({input:'hi'})}}]},'tool_calls')]);
 const claudeSingle=name=>cs+ctool(0,'call_one','pad__'+name,name==='read'?'{}':JSON.stringify({input:'hi'}))+ce('tool_use');
 const geminiSingle=name=>gf([{functionCall:{id:'call_one',name:'pad__'+name,args:name==='read'?{}:{input:'hi'}}}])+gf(null,'STOP',gu);
+const claudeOrdered=cs+ct(0,'before-tool')+ctool(1,'call_read','pad__read','{}')+ct(2,'after-tool')+ctool(3,'call_write','pad__write',JSON.stringify({input:"text('hi')"}))+ce('tool_use');
+const geminiOrdered=gf([{text:'before-tool'},{functionCall:{id:'call_read',name:'pad__read',args:{}}},{text:'after-tool'},{functionCall:{id:'call_write',name:'pad__write',args:{input:"text('hi')"}}}])+gf(null,'STOP',gu);
 const cases=[
  {name:'text Unicode fragmented',stream:text,payload},
  {name:'function custom namespace fragmented',stream:calls,payload},
@@ -85,6 +87,7 @@ const cases=[
   {name:f.label+' text continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.text,json:!stream,continuation:true},
   {name:f.label+' tools continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.calls,json:!stream,continuation:true},
  ])),
+ ...[{label:'Claude',payload:cp,path:'/v1/messages',stream:claudeOrdered},{label:'Gemini',payload:gp,path:gpath,stream:geminiOrdered}].flatMap(f=>[true,false].map(stream=>({name:f.label+' ordered block continuation '+(stream?'SSE':'JSON'),payload:{...f.payload,stream},path:f.path,stream:f.stream,json:!stream,continuation:true,ordered:true}))),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -169,6 +172,7 @@ for(const fixture of cases){
     const normalized=g.output.map(({namespace,...item})=>item);
     if(fixture.singleNamespace&&fixture.payload.tool_choice.type==='custom'){assert.equal(g.output[0].input,'hi');assert.equal(n.output[0].input,'await tools.exec_command({ cmd: "hi" });');normalized[0].input=n.output[0].input;console.log('DIFFERENCE Go preserves custom raw input; Node synthesizes an exec_command wrapper for this fixture')}
     assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
+    if(fixture.ordered){assert.equal(g.output.length,4);assert.equal(g.output[0].content[0].text,'before-tool');assert.equal(g.output[2].content[0].text,'after-tool');for(const j of [1,3]){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}}
     if(fixture.singleNamespace||fixture.stream===calls||fixture.stream===bare||fixture.stream===claudeCalls||fixture.stream===gc){for(let j=0;j<g.output.length;j++){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}console.log('DIFFERENCE explicit namespace restored in Go; legacy Node output lacks it')}
     if(fixture.path==='/v1/messages'){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:8});assert.equal(n.completed.response.usage,undefined)}
     if(fixture.path===gpath){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:10,input_tokens_details:{cached_tokens:2},output_tokens_details:{reasoning_tokens:2}});assert.deepEqual(g.completed.response.usage,n.completed.response.usage)}
@@ -187,6 +191,11 @@ for(const fixture of cases){
    assert.ok(gserialized.includes('中文🙂'));assert.ok(gserialized.includes('continue-now'));assert.ok(!nserialized.includes('中文🙂'));assert.ok(nserialized.includes('continue-now'));
    assert.ok(!gserialized.includes('previous_response_id'));assert.ok(!gserialized.includes('resp_'));
    if(suffix.length>1){assert.ok(gserialized.includes('pad__read'));assert.ok(gserialized.includes('pad__write'));assert.ok(gserialized.includes('history-result'))}
+   if(fixture.ordered){
+    const parts=fixture.path==='/v1/messages'?all[3].messages[1].content:all[3].contents[1].parts;
+    assert.equal(parts.length,4);assert.equal(parts[0].text,'before-tool');assert.equal(parts[2].text,'after-tool');
+    if(fixture.path==='/v1/messages'){assert.equal(parts[1].name,'pad__read');assert.equal(parts[3].name,'pad__write')}else{assert.equal(parts[1].functionCall.name,'pad__read');assert.equal(parts[3].functionCall.name,'pad__write')}
+   }
    console.log('DIFFERENCE Go converted previous_response_id replays successful bounded transcript; Node converted path ignores anchor and sends suffix only');
   }
   console.log('PASS uniform blackbox '+fixture.name);
@@ -195,4 +204,4 @@ for(const fixture of cases){
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-console.log('PASS 89 shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');
+console.log('PASS '+cases.length+' shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');

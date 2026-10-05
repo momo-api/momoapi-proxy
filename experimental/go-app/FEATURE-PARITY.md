@@ -118,6 +118,11 @@ namespace/工具声明/配对结果、交错assistant文本/大整数保留；�
 instructions与选项每轮提供，不继承。仅完整精确语义prefix避免重复，不猜部分重叠。
 真实WebView另测三协议续聊，上游计数24；签名续接/跨provider/compact仍未迁移。
 
+块顺序修复轮扩为93组：Claude/Gemini SSE与JSON各增加文本→function→文本→custom
+的实际续接与完整回放，捕获上游并逐块断言顺序/别名。共享IR保留有序part，两个
+块协议不再把全部文本挪到工具前。Chat原协议只有content+tool_calls，不能表达
+块级交错，仍合并同一assistant工具回合；不宣称跨协议块顺序完全等价。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`
