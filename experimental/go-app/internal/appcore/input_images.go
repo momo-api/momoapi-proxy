@@ -26,7 +26,7 @@ var errUnsupportedToolImage = errors.New("unsupported_tool_image_output")
 // redirect or image-content validation. Inline data is header-checked, not decoded
 // to a full pixel buffer. The global request/history budget remains authoritative.
 type routeImage struct{ url, mime, data, detail string }
-type imageBudget struct{ count, bytes int }
+type imageBudget struct{ count, files, bytes int }
 
 func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*routeImage, error) {
 	if budget == nil || budget.count >= 32 || budget.bytes > MaxRequest {
@@ -96,20 +96,7 @@ func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*rout
 		result.mime, result.data = inlineMIME, encoded
 		inlineBytes = len(data)
 	} else {
-		u, err := url.Parse(s)
-		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Port() != "" && u.Port() != "443" || len(s) > 8192 {
-			return nil, errUnsupportedImage
-		}
-		host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-		if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") || !strings.Contains(host, ".") && net.ParseIP(host) == nil {
-			return nil, errUnsupportedImage
-		}
-		if ip := net.ParseIP(host); ip != nil && !publicIP(ip) {
-			return nil, errUnsupportedImage
-		}
-		// Reject alternate numeric spellings (127.1, 2130706433) rather than
-		// assuming every provider resolves them as ordinary DNS names.
-		if net.ParseIP(host) == nil && legacyNumericHost(host) {
+		if !validMediaURL(s) {
 			return nil, errUnsupportedImage
 		}
 		if resolveProtocol(model) == "gemini" && mime == "" {
@@ -122,6 +109,26 @@ func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*rout
 	budget.count++
 	budget.bytes += inlineBytes
 	return result, nil
+}
+
+func validMediaURL(s string) bool {
+	u, err := url.Parse(s)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.Opaque != "" || u.Port() != "" && u.Port() != "443" || len(s) > 8192 {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	// Scoped literals must not fall through to the DNS branch, including
+	// dotted IPv4-mapped IPv6. Bracketed authorities must be real IP literals.
+	if strings.Contains(host, "%") || strings.HasPrefix(u.Host, "[") && net.ParseIP(host) == nil {
+		return false
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") || !strings.Contains(host, ".") && net.ParseIP(host) == nil {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return publicIP(ip)
+	}
+	return !legacyNumericHost(host)
 }
 
 func legacyNumericHost(host string) bool {
@@ -275,6 +282,11 @@ func messageParts(v any, role, model string, budget *imageBudget) (string, []rou
 	}
 	values, ok := v.([]any)
 	if !ok || role != "user" && role != "tool" {
+		for _, value := range values {
+			if obj(value)["type"] == "input_file" {
+				return "", nil, errUnsupportedFile
+			}
+		}
 		return "", nil, errUnsupportedImage
 	}
 	parts := []routePart{}
@@ -290,6 +302,12 @@ func messageParts(v any, role, model string, budget *imageBudget) (string, []rou
 				return "", nil, err
 			}
 			parts = append(parts, routePart{image: img})
+		} else if m["type"] == "input_file" {
+			file, err := parseRouteFile(m, model, budget)
+			if err != nil {
+				return "", nil, err
+			}
+			parts = append(parts, routePart{file: file})
 		} else {
 			text, err := textParts([]any{value})
 			if err != nil {
@@ -311,6 +329,12 @@ func chatImageParts(parts []routePart) []any {
 				value["detail"] = img.detail
 			}
 			out = append(out, map[string]any{"type": "image_url", "image_url": value})
+		} else if f := part.file; f != nil {
+			value := map[string]any{"file_data": f.dataURL}
+			if f.name != "" {
+				value["filename"] = f.name
+			}
+			out = append(out, map[string]any{"type": "file", "file": value})
 		} else {
 			out = append(out, map[string]any{"type": "text", "text": part.text})
 		}

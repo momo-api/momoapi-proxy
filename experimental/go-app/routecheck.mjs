@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {request as httpRequest} from 'node:http';
 import {createMomoSwitch} from '../../src/server.mjs';
+import {fileCases,assertFileCase} from './routecheck_files.mjs';
 const binary=process.argv[2];assert.ok(binary);
 const tool={type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'custom',name:'write'}]};
 const payload={model:'gpt-5.5',stream:true,instructions:'Be concise.',input:[{role:'user',content:[{type:'input_text',text:'中文🙂'}]}],tools:[tool]};
@@ -130,6 +131,7 @@ cases.push(...toolImageFixtures.flatMap(f=>[true,false].flatMap(stream=>['functi
  name:f.label+' paired '+kind+' image result '+(stream?'SSE':'JSON'),path:f.path,stream:f.text,json:!stream,toolImages:true,kind,policy:f.policy,
  payload:{model:f.model,stream,...(f.policy?{momo_tool_images:f.policy}:{}),tools:[kind==='function'?{type:'function',name:'read',parameters:{type:'object',properties:{}}}:{type:'custom',name:'write'}],input:[{role:'user',content:'inspect'},kind==='function'?{type:'function_call',name:'read',call_id:'image_call',arguments:'{}'}:{type:'custom_tool_call',name:'write',call_id:'image_call',input:'raw'}, {type:kind==='function'?'function_call_output':'custom_tool_call_output',call_id:'image_call',output:imageInput.slice(0,3)},{role:'user',content:'CURRENT'}]}
 })))));
+cases.push(...fileCases(toolImageFixtures));
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  let stderr='';child.stderr.on('data',b=>{stderr+=b});
@@ -189,6 +191,7 @@ for(const fixture of cases){
    }
    console.log('DIFFERENCE Go Gemini uses parametersJsonSchema and preserves constraints; Node uses restricted parameters for JSON Schema');
   }
+  if(fixture.files){assertFileCase(fixture,captures[0],captures[1],nodeResults[0],goResults[0]);console.log('PASS uniform blackbox '+fixture.name);continue}
   if(fixture.search){
    const [n,g]=captures;
    const declarations=b=>!fixture.path?b.tools.map(t=>t.function):fixture.path==='/v1/messages'?b.tools:b.tools[0].functionDeclarations;

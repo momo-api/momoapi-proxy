@@ -10,13 +10,13 @@
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与 `/v1/responses/compact`；compact 显式 native 请求可尝试原生透传（非真实能力证明），另有本地 checkpoint；无无版本别名 |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
-| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/非用户图片的其他媒体/grammar 等拒绝，不宣称完整兼容 |
-| Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；有序用户图片输入；thinking/签名/输出媒体不支持 |
-| Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；有序用户图片输入；thinking/签名/输出媒体不支持 |
+| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；有序用户/配对工具图片与 PDF 子集；未知选项/其他媒体/grammar 等拒绝，不宣称完整兼容 |
+| Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
+| Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
-| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 新增有序 user 图片输入/同模型历史，三协议明确转换；已增配对工具结果图片（Claude/Gemini原生子集、Chat显式投影）；文件、上传/资产存储未迁移；不是完整附件管理 |
+| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 新增有序 user 图片输入/同模型历史，三协议明确转换；已增配对工具结果图片（Claude/Gemini原生子集、Chat显式投影）；已增有界 PDF 输入/配对结果；非 PDF 文件、上传/资产存储未迁移；不是完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 手动复制本地连接配置；新增明确点击的 Key 模型列表检查/本地筛选，不代表推理验证；无自动接入或更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
@@ -321,6 +321,35 @@ restricted Schema不含additionalProperties，FunctionDeclaration.parametersJson
 custom/search探针核对新字段；新增Gemini2/3 SSE/JSON TCP回归与加载search声明回归。
 原生Responses/default bytes不改；不证明真实模型执行或schema全部支持。CI未完成前
 不以81d9681的通过回执替代本修复。官方结构来源：
+https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
+
+### 有界 PDF 输入与配对结果增量（2026-10-05）
+
+三转换路径保留用户 input_file PDF 与 text/image 顺序。canonical Base64 PDF
+或 Claude/Gemini 显式 application/pdf HTTPS 引用；Chat 仅 inline。filename
+是 UTF-8 元数据非路径，file_id/非 PDF/未知字段拒绝。最多16 PDF、32图，全历史
+decoded inline 共享1MiB，完整请求/历史1MiB含Base64门禁仍生效。仅 PDF 版本头与
+EOF framing，不是结构/内容/完整性/安全/加密/页数验证；不读取/上传/抓取/提取。
+Claude 配对结果嵌套 document；Chat/所有 Gemini 需每请求显式
+momo_tool_files:user-projection，混合图片还需 momo_tool_images:user-projection。
+Gemini 原生 PDF functionResponse MIME 未验证，绝不偷偷尝试或丢弃文件。全部并行
+结果先配对再按原顺序投影，JSON quoted ID 不可信 marker，非原生信任等价/注入防护。
+policy 不继承/转发，history/compact 重声明；完整 PDF 回合含解读保留。资产存储、
+非 PDF 附件、生成和客户端实际验收未完成；Node/默认/原生 Responses 原字节不改。
+
+Prism 272.172s 静态审查（非执行/批准）指出两项，已独立红测试复现再修：Gemini
+tool projection 后插入 system/developer 导致真实 user 被合并；IPv4-mapped scoped
+IPv6 URL 被当 DNS 接受。指令先 hoist 再 flush，scoped/invalid bracket URL 明确
+拒绝，同步图片路径；词法检查仍不是 DNS/redirect/SSRF 安全证明。回归另覆 mixed
+image/PDF 双策略、reverse parallel 结果及 final flush、full/suffix history、compact
+policy不继承、SSE/JSON short/error/flush/deadline/cancel/Stop/incomplete 不提交状态。
+
+统一 TCP 同 mock/resource 新增16组，计划235；WebView新增16物理请求，计划92，
+3次local checkpoint仍零上游。UI/Skill/MCP同步边界，没有假附件上传按钮。
+本增量执行/三平台 CI 回执未完成前不称通过，不用38cb8ac的219/76回执替代。
+官方 wire 来源（非真实推理验收）：
+https://developers.openai.com/api/docs/guides/pdf-files
+https://platform.claude.com/docs/en/build-with-claude/pdf-support
 https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
 
 ## Magpie 借鉴边界

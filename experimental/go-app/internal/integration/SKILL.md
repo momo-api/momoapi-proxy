@@ -74,10 +74,29 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Disclosed untrusted-data marker with JSON-quoted call_id, NOT native trust/role
   equivalence or injection protection. Fixed unsupported_tool_image_output before
   send. Re-declare policy each turn/compact replay; never forwarded/inherited.
-  Policy forbidden on Claude. No files/file_id, uploads/assets or generation. Local compact
+  Policy forbidden on Claude. No file_id, uploads/assets or generation. Local compact
   retains whole image-bearing turns including assistant interpretation; no useful
   safe reduction rejects instead of dropping required images. Fixed
   unsupported_image_input error; native/default bytes unchanged.
+  User input_file accepts PDF only: exactly one canonical
+  file_data:"data:application/pdf;base64,..." or HTTPS file_url. URL requires
+  mime_type:"application/pdf" and Claude/Gemini; Chat inline only. Optional
+  filename is metadata, 1..255 UTF-8 bytes without slashes/control characters.
+  Max16 PDFs/32 images across replay; decoded inline bytes share <=1MiB budget,
+  full JSON/history <=1MiB including Base64. PDF header/EOF framing only, NOT
+  structural/content/safety/encryption validation; no reads/uploads/extraction/fetch.
+  Chat ordered file blocks, Claude document source/title, Gemini inlineData/fileData
+  mimeType/displayName. file_id/non-PDF/assistant or instruction file parts reject.
+  Paired PDF results nest in Claude tool_result. Chat/ALL Gemini need per-request
+  momo_tool_files:"user-projection"; Gemini native PDF tool MIME is unverified.
+  Mixed image/PDF projections also need momo_tool_images:"user-projection".
+  All parallel results precede attributed ordered projections, not native trust
+  equivalence/injection defense. Policy forbidden on Claude, never inherited or
+  forwarded; re-declare for history/compact replay. Fixed unsupported_file_input/
+  unsupported_tool_file_output; same-model replay preserves original input, local
+  compact retains whole PDF-bearing turns including assistant interpretation.
+  Scoped IP URL literals reject for images/files; lexical checks are NOT DNS/
+  redirect validation. Native/default provider file IDs remain exact passthrough.
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures and other media are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;
@@ -115,7 +134,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   headerless behavior remains unchanged (501 passthrough/local mode below).
 - Headerless POST /v1/responses/compact is a separate explicit routing-mode local checkpoint,
   not native provider compact or a semantic summary. Chat/Claude/unsigned Gemini
-  only; payload accepts model/input/tools and optional stream:false/momo_tool_images.
+  only; payload accepts model/input/tools and optional stream:false/momo_tool_images/momo_tool_files.
   Redeclare
   tools. Keep every instruction/user item, whole tool-bearing turns and latest
   assistant in order; only older ordinary assistant text is replaced by a smaller

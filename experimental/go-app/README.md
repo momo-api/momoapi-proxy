@@ -70,8 +70,9 @@ data URL. Chat preserves detail:auto/low/high; Claude/Gemini accept only omitted
 or auto, not quality equivalence. Explicit low/high reject before sending rather
 than silently removing the requested contract.
 
-User images and explicitly paired tool image results are converted: file_id,
-files/audio/video, assistant/system images, asset uploads/storage and image generation are not
+User images and explicitly paired tool image results are converted. Bounded PDF
+inputs/results are described below; file_id, non-PDF files/audio/video,
+assistant/system images, asset uploads/storage and image generation are not
 implemented. Invalid input returns fixed unsupported_image_input without echoing
 image bytes/URLs; no fallback or local fetching. Local compact retains every
 image-bearing user turn, including its assistant interpretation, without replacing
@@ -81,6 +82,46 @@ not delete required images to fit. Default/native Responses bytes are
 unchanged; passing a protocol mock does not prove any live model can see images.
 Reference wire contract: https://developers.openai.com/api/docs/guides/images-vision
 (provider published limits are not this preview's smaller local limits).
+
+### Ordered PDF inputs and paired tool results
+
+Converted user input_file accepts exactly one canonical
+file_data:"data:application/pdf;base64,..." or file_url HTTPS/443 reference.
+URL files require explicit mime_type:"application/pdf" and Claude/Gemini;
+Chat accepts inline only. Optional filename is UTF-8, 1..255 bytes, without
+slashes/control characters: metadata, never a local path. file_id, momo_asset,
+detail, non-PDF MIME and assistant/system/developer file parts reject.
+
+Canonical Base64, version header (%PDF-1.0..1.7 or 2.0 plus newline) and terminal
+%%EOF framing are checked. This is NOT PDF structure/content/integrity/safety,
+encryption or page validation. No reads, uploads, extraction, decompression,
+local URL fetch, DNS/redirect checking or live model acceptance is implied.
+Scoped IP literals reject for both images and files; URL checks remain lexical.
+At most16 PDFs and32 images across replayed input, sharing <=1MiB decoded-inline
+budget; the stricter full JSON/history <=1MiB gate still includes Base64.
+
+Chat emits ordered file.file_data/filename blocks; Claude emits document
+base64/url source plus optional title; Gemini emits inlineData/fileData with
+mimeType and optional displayName. Text/image/PDF order is preserved without
+invented instructions. Paired function/custom PDF results nest in Claude
+tool_result.content. Chat and ALL Gemini classes require explicit per-request
+momo_tool_files:"user-projection"; Gemini PDF-native function response MIME
+support is not established, so there is no silent native attempt/fallback.
+Mixed projected image/PDF results also require momo_tool_images:"user-projection".
+All parallel results precede original-order projections with JSON-quoted call ID
+and an untrusted-data marker, not native role/trust equivalence or injection defense.
+Following Gemini users remain separate even with hoisted instructions between.
+Projection policy is forbidden on Claude, never forwarded/inherited; re-declare
+for history/compact replay. Fixed unsupported_file_input/unsupported_tool_file_output
+errors do not echo content. Failed delivery does not commit history. Same-model
+suffix/full history retains original input; local checkpoint protects whole
+file-bearing turns including interpretation, not just PDF bytes. Native/default
+Responses remains byte-preserving, including provider file IDs; no assets or generation.
+
+Official wire references (not inference tests):
+- https://developers.openai.com/api/docs/guides/pdf-files
+- https://platform.claude.com/docs/en/build-with-claude/pdf-support
+- https://generativelanguage.googleapis.com/$discovery/rest?version=v1beta
 
 ### Paired function/custom tool image outputs
 
@@ -270,7 +311,7 @@ continuation, native/semantic compact and signed Gemini history remain unsupport
 Headerless POST /v1/responses/compact is a local-only operation, enabled only in momo-routing
 for the strict converted Chat/Claude/unsigned Gemini subset. Default mode returns
 501; native Responses/Muse reject422. It accepts only model/input/tools and optional
-stream:false, plus optional explicit momo_tool_images:"user-projection", with a
+stream:false, plus optional explicit momo_tool_images/momo_tool_files:"user-projection", with a
 trailing current user turn and fully paired declared tools.
 No previous_response_id, instructions option, opaque/unsupported media state or automatic trigger.
 Instructions must be explicit input items. Redeclare tools when replaying.

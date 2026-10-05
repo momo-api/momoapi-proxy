@@ -25,7 +25,7 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 		return nil, errCompactBudget
 	}
 	p, err := decodeObject(string(data))
-	if err != nil || !only(p, "model", "input", "tools", "stream", "momo_tool_images") {
+	if err != nil || !only(p, "model", "input", "tools", "stream", "momo_tool_images", "momo_tool_files") {
 		return nil, errRouted
 	}
 	if _, present := p["stream"]; present && p["stream"] != false {
@@ -75,7 +75,7 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 		for i := start; i < end; i++ {
 			if values, ok := objects[i]["content"].([]any); ok {
 				for _, value := range values {
-					if obj(value)["type"] == "input_image" {
+					if obj(value)["type"] == "input_image" || obj(value)["type"] == "input_file" {
 						protectedTurn = true
 					}
 				}

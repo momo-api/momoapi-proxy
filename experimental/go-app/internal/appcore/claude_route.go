@@ -26,11 +26,13 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 		if role == "tool" {
 			role = "user"
 			var result any = m.text
-			if hasImages(m.parts) {
+			if hasMedia(m.parts) {
 				blocks := []any{}
 				for _, part := range m.parts {
 					if part.image != nil {
 						blocks = append(blocks, claudeImage(part.image))
+					} else if part.file != nil {
+						blocks = append(blocks, claudeFile(part.file))
 					} else {
 						blocks = append(blocks, map[string]any{"type": "text", "text": part.text})
 					}
@@ -42,6 +44,10 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 			for _, part := range m.parts {
 				if part.image != nil {
 					content = append(content, claudeImage(part.image))
+					continue
+				}
+				if part.file != nil {
+					content = append(content, claudeFile(part.file))
 					continue
 				}
 				if part.call == nil {

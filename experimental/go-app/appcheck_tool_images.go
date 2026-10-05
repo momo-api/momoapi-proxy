@@ -115,5 +115,5 @@ func probeToolImageRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return nil
+	return probeFileRequests(core)
 }

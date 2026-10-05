@@ -36,6 +36,7 @@ type routePart struct {
 	text  string
 	call  *routeCall
 	image *routeImage
+	file  *routeFile
 }
 type routeMessage struct {
 	role, text, resultID string
@@ -57,6 +58,7 @@ type routeRequest struct {
 	tools                 []routeTool
 	loading               *toolLoading
 	toolImages            string
+	toolFiles             string
 }
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
@@ -127,7 +129,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	var p map[string]any
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.UseNumber()
-	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images") {
+	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images", "momo_tool_files") {
 		return nil, errRouted
 	}
 	if v, present := p["stream"]; present {
@@ -142,6 +144,12 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			return nil, errUnsupportedToolImage
 		}
 		ir.toolImages = "user-projection"
+	}
+	if policy, present := p["momo_tool_files"]; present {
+		if policy != "user-projection" || resolveProtocol(ir.model) == "claude" {
+			return nil, errUnsupportedToolFile
+		}
+		ir.toolFiles = "user-projection"
 	}
 	loading, err := newToolLoading(p)
 	if err != nil {
@@ -461,6 +469,9 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			if err != nil {
 				return nil, err
 			}
+			if hasFiles(parts) && resolveProtocol(ir.model) != "claude" && ir.toolFiles != "user-projection" {
+				return nil, errUnsupportedToolFile
+			}
 			if hasImages(parts) {
 				switch resolveProtocol(ir.model) {
 				case "chat":
@@ -468,6 +479,11 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 						return nil, errUnsupportedToolImage
 					}
 				case "gemini":
+					// A mixed file/image result must opt in to projecting both kinds;
+					// never silently project an image that requested native attribution.
+					if hasFiles(parts) && ir.toolImages != "user-projection" {
+						return nil, errUnsupportedToolImage
+					}
 					if ir.toolImages != "user-projection" {
 						if !strings.HasPrefix(ir.model, "gemini-3.") && !strings.HasPrefix(ir.model, "gemini-3-") {
 							return nil, errUnsupportedToolImage
@@ -504,7 +520,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			if err != nil {
 				return nil, err
 			}
-			if content == "" && role == "user" && !hasImages(parts) {
+			if content == "" && role == "user" && !hasMedia(parts) {
 				content = "Continue."
 				parts = []routePart{{text: content}}
 			}
@@ -707,10 +723,10 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 			continue
 		}
 		v := map[string]any{"role": m.role, "content": m.text}
-		if hasImages(m.parts) {
+		if hasMedia(m.parts) {
 			parts := chatImageParts(m.parts)
 			if m.role == "tool" {
-				marker := toolImageMarker(m.resultID)
+				marker := toolMediaMarker(m.resultID, m.parts)
 				v["content"] = marker
 				parts = append([]any{map[string]any{"type": "text", "text": marker}}, parts...)
 				projections = append(projections, map[string]any{"role": "user", "content": parts})

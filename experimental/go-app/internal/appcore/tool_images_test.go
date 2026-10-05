@@ -155,6 +155,15 @@ func TestToolImageProjectionPolicyNotInherited(t *testing.T) {
 }
 
 func TestToolImageHistoryOnlyAfterDeliveredTerminal(t *testing.T) {
+	testToolMediaHistoryOnlyAfterDeliveredTerminal(t, false)
+}
+
+func TestPDFHistoryOnlyAfterDeliveredTerminal(t *testing.T) {
+	testToolMediaHistoryOnlyAfterDeliveredTerminal(t, true)
+}
+
+func testToolMediaHistoryOnlyAfterDeliveredTerminal(t *testing.T, pdf bool) {
+	t.Helper()
 	inline := inlineFixture(t, "image/png")
 	for _, tc := range []struct{ model, policy string }{{"gpt-5.5", "user-projection"}, {"claude-sonnet-4-6", ""}, {"gemini-2.5-flash", "user-projection"}, {"gemini-3.1-flash", ""}} {
 		for _, stream := range []bool{true, false} {
@@ -171,6 +180,14 @@ func TestToolImageHistoryOnlyAfterDeliveredTerminal(t *testing.T) {
 						t.Fatal("configure writer core")
 					}
 					p := toolImagePayload(tc.model, tc.policy, []any{imagePart(inline)}, true)
+					mediaType := "input_image"
+					if pdf {
+						p = toolImagePayload(tc.model, "", []any{filePart(false)}, true)
+						mediaType = "input_file"
+						if resolveProtocol(tc.model) != "claude" {
+							p["momo_tool_files"] = "user-projection"
+						}
+					}
 					p["stream"] = stream
 					b, _ := json.Marshal(p)
 					prepared, seed, err := c.prepareRoutedHistory(b, tc.model)
@@ -209,7 +226,7 @@ func TestToolImageHistoryOnlyAfterDeliveredTerminal(t *testing.T) {
 					defer c.mu.Unlock()
 					if mode == "ok" {
 						entry := c.history.entries[e.id]
-						if err != nil || len(c.history.entries) != 1 || !strings.Contains(string(entry.input[3]), "input_image") || strings.Contains(string(entry.input[3]), "user-projection") {
+						if err != nil || len(c.history.entries) != 1 || !strings.Contains(string(entry.input[3]), mediaType) || strings.Contains(string(entry.input[3]), "user-projection") {
 							t.Fatal("successful original tool images not cached")
 						}
 					} else if len(c.history.entries) != 0 || c.history.bytes != 0 {

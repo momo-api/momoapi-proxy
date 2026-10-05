@@ -18,18 +18,20 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 	calls := map[string]string{}
 	projections := []any{}
 	for _, m := range ir.messages {
-		flushedProjection := false
-		if m.role != "tool" && len(projections) > 0 {
-			contents = append(contents, projections...)
-			projections = nil
-			flushedProjection = true
-		}
+		// Hoisted instructions are not content boundaries. Keep projections
+		// pending until actual content so the next user remains separate.
 		if m.role == "system" {
 			if m.text != "" && !seenSystem[m.text] {
 				systems = append(systems, map[string]string{"text": m.text})
 				seenSystem[m.text] = true
 			}
 			continue
+		}
+		flushedProjection := false
+		if m.role != "tool" && len(projections) > 0 {
+			contents = append(contents, projections...)
+			projections = nil
+			flushedProjection = true
 		}
 		role := m.role
 		parts := []any{}
@@ -43,14 +45,16 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 				return nil, errRouted
 			}
 			response := map[string]any{"id": m.resultID, "name": name, "response": map[string]string{"result": m.text}}
-			if hasImages(m.parts) {
-				if ir.toolImages == "user-projection" {
-					marker := toolImageMarker(m.resultID)
+			if hasMedia(m.parts) {
+				if ir.toolImages == "user-projection" || hasFiles(m.parts) {
+					marker := toolMediaMarker(m.resultID, m.parts)
 					response["response"] = map[string]string{"result": marker}
 					projected := []any{map[string]any{"text": marker}}
 					for _, part := range m.parts {
 						if part.image != nil {
 							projected = append(projected, geminiImage(part.image))
+						} else if part.file != nil {
+							projected = append(projected, geminiFile(part.file))
 						} else {
 							projected = append(projected, map[string]any{"text": part.text})
 						}
@@ -76,6 +80,10 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 			for _, part := range m.parts {
 				if part.image != nil {
 					parts = append(parts, geminiImage(part.image))
+					continue
+				}
+				if part.file != nil {
+					parts = append(parts, geminiFile(part.file))
 					continue
 				}
 				if part.call == nil {
