@@ -16,7 +16,14 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 	systems := []any{}
 	seenSystem := map[string]bool{}
 	calls := map[string]string{}
+	projections := []any{}
 	for _, m := range ir.messages {
+		flushedProjection := false
+		if m.role != "tool" && len(projections) > 0 {
+			contents = append(contents, projections...)
+			projections = nil
+			flushedProjection = true
+		}
 		if m.role == "system" {
 			if m.text != "" && !seenSystem[m.text] {
 				systems = append(systems, map[string]string{"text": m.text})
@@ -35,16 +42,40 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 			if !ok {
 				return nil, errRouted
 			}
-			parts = append(parts, map[string]any{"functionResponse": map[string]any{"id": m.resultID, "name": name, "response": map[string]string{"result": m.text}}})
+			response := map[string]any{"id": m.resultID, "name": name, "response": map[string]string{"result": m.text}}
+			if hasImages(m.parts) {
+				if ir.toolImages == "user-projection" {
+					marker := toolImageMarker(m.resultID)
+					response["response"] = map[string]string{"result": marker}
+					projected := []any{map[string]any{"text": marker}}
+					for _, part := range m.parts {
+						if part.image != nil {
+							projected = append(projected, geminiImage(part.image))
+						} else {
+							projected = append(projected, map[string]any{"text": part.text})
+						}
+					}
+					projections = append(projections, map[string]any{"role": "user", "parts": projected})
+				} else {
+					media := []any{}
+					ordered := []any{}
+					for _, part := range m.parts {
+						if img := part.image; img != nil {
+							ordered = append(ordered, map[string]any{"image_part": len(media)})
+							media = append(media, map[string]any{"inlineData": map[string]any{"mimeType": img.mime, "data": img.data}})
+						} else {
+							ordered = append(ordered, map[string]any{"text": part.text})
+						}
+					}
+					response["response"] = map[string]any{"result": ordered}
+					response["parts"] = media
+				}
+			}
+			parts = append(parts, map[string]any{"functionResponse": response})
 		} else {
 			for _, part := range m.parts {
 				if part.image != nil {
-					img := part.image
-					if img.data != "" {
-						parts = append(parts, map[string]any{"inline_data": map[string]string{"mime_type": img.mime, "data": img.data}})
-					} else {
-						parts = append(parts, map[string]any{"fileData": map[string]string{"mimeType": img.mime, "fileUri": img.url}})
-					}
+					parts = append(parts, geminiImage(part.image))
 					continue
 				}
 				if part.call == nil {
@@ -65,13 +96,14 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 		if len(parts) == 0 {
 			return nil, errRouted
 		}
-		if len(contents) > 0 && obj(contents[len(contents)-1])["role"] == role {
+		if !flushedProjection && len(contents) > 0 && obj(contents[len(contents)-1])["role"] == role {
 			last := obj(contents[len(contents)-1])
 			last["parts"] = append(last["parts"].([]any), parts...)
 		} else {
 			contents = append(contents, map[string]any{"role": role, "parts": parts})
 		}
 	}
+	contents = append(contents, projections...)
 	if len(contents) == 0 || obj(contents[0])["role"] != "user" {
 		return nil, errRouted
 	}

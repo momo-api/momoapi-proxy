@@ -70,8 +70,8 @@ data URL. Chat preserves detail:auto/low/high; Claude/Gemini accept only omitted
 or auto, not quality equivalence. Explicit low/high reject before sending rather
 than silently removing the requested contract.
 
-Only user images are converted: file_id, files/audio/video, assistant/system
-images, image tool results, asset uploads/storage and image generation are not
+User images and explicitly paired tool image results are converted: file_id,
+files/audio/video, assistant/system images, asset uploads/storage and image generation are not
 implemented. Invalid input returns fixed unsupported_image_input without echoing
 image bytes/URLs; no fallback or local fetching. Local compact retains every
 image-bearing user turn, including its assistant interpretation, without replacing
@@ -81,6 +81,45 @@ not delete required images to fit. Default/native Responses bytes are
 unchanged; passing a protocol mock does not prove any live model can see images.
 Reference wire contract: https://developers.openai.com/api/docs/guides/images-vision
 (provider published limits are not this preview's smaller local limits).
+
+### Paired function/custom tool image outputs
+
+function_call_output/custom_tool_call_output.output may contain ordered input_text
+and input_image parts, validated with the same aggregate image/history/body limits.
+Original call kind/ID/namespace pairing is mandatory. No orphan result recovery,
+provider fetching, proxy tool execution or automatic result generation.
+
+Claude maps ordered parts inside that call's tool_result.content (including HTTPS
+references). Gemini3-classified unsigned routes map inline images to that specific
+functionResponse.parts[].inlineData. The arbitrary response.result JSON retains an
+ordered array of text entries and zero-based image_part references into parts;
+this is a MOMO projection format, not provider-defined indexing or signed-history
+support. Native Gemini result URLs reject (FunctionResponsePart only has inlineData).
+Gemini2/unknown classes reject native multimodal result attempts, not proof of
+live capability of any Gemini3 model.
+
+Chat has no native image tool-result contract. Explicit per-request
+momo_tool_images:"user-projection" moves all mixed result content to an attributed
+user message; the tool result contains only the disclosed marker. Gemini may
+use the same explicit projection for legacy models/HTTPS references. All paired
+parallel result messages precede the projections, in original result order;
+image/text sequence is not regrouped. A following real Gemini user message stays
+separate from the explicitly projected tool message. Marker uses JSON-quoted call_id and says
+untrusted tool data, not a new user instruction. This is NOT native role/trust
+equivalence or a prompt-injection defense; use Claude/native Gemini when their
+contracts meet the need. Headerless Chat image outputs reject fixed
+unsupported_tool_image_output before send; no silent fallback.
+
+The policy is not forwarded, inherited by history, or supported on Claude.
+Re-declare it each turn and for local compact/replay when projection is needed.
+Native/default payload bytes stay exact. Full/suffix history retain the original
+tool parts, not projected wire messages. Local checkpoint protects complete
+tool-image turns and assistant interpretations. Images do not grant wallet,
+attachment asset storage, image generation or third-party MCP execution support.
+Official structures fetched (not live inference tests):
+https://developers.openai.com/api/reference/resources/responses/methods/create
+https://ai.google.dev/api/generate-content
+https://platform.claude.com/docs/en/agents-and-tools/tool-use/handling-tool-calls
 
 ### Explicit native compact attempt
 
@@ -225,7 +264,8 @@ continuation, native/semantic compact and signed Gemini history remain unsupport
 Headerless POST /v1/responses/compact is a local-only operation, enabled only in momo-routing
 for the strict converted Chat/Claude/unsigned Gemini subset. Default mode returns
 501; native Responses/Muse reject422. It accepts only model/input/tools and optional
-stream:false, with a trailing current user turn and fully paired declared tools.
+stream:false, plus optional explicit momo_tool_images:"user-projection", with a
+trailing current user turn and fully paired declared tools.
 No previous_response_id, instructions option, opaque/unsupported media state or automatic trigger.
 Instructions must be explicit input items. Redeclare tools when replaying.
 

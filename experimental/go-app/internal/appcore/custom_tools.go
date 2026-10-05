@@ -7,7 +7,7 @@ import (
 
 // Never echo the client's grammar or other request contents in errors.
 func routedPayloadError(w http.ResponseWriter, err error) {
-	for _, candidate := range []error{errUnsupportedToolLoading, errUnsupportedSearchSchema, errUnsupportedImage} {
+	for _, candidate := range []error{errUnsupportedToolLoading, errUnsupportedSearchSchema, errUnsupportedImage, errUnsupportedToolImage} {
 		if errors.Is(err, candidate) {
 			http.Error(w, candidate.Error(), http.StatusBadRequest)
 			return

@@ -16,7 +16,7 @@
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
-| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 新增有序 user 图片输入/同模型历史，三协议明确转换；文件、工具结果图片、上传/资产存储未迁移；不是完整附件管理 |
+| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 新增有序 user 图片输入/同模型历史，三协议明确转换；已增配对工具结果图片（Claude/Gemini原生子集、Chat显式投影）；文件、上传/资产存储未迁移；不是完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 手动复制本地连接配置；新增明确点击的 Key 模型列表检查/本地筛选，不代表推理验证；无自动接入或更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
@@ -287,6 +287,28 @@ Prism retry工具300s超时，但随后报告9720bytes落盘；只有静态建�
 所有校验成功后commit，计数/精确Base64 decoded-size提前门禁。补合法GCE/未知
 WebPchunk、失败预算不变与普通含0x DNS正例，保留已有单帧截断/动画/边界回归。
 报告依据两文件旧快照，已补的单帧截断测试不重复认定缺失。协议黑盒仍203/68。
+
+### 配对工具结果图片增量（2026-10-05）
+
+function/custom输出支持有序input_text/input_image，复用全历史32图/1MiB限制及严格
+callID/kind/namespace配对。Claude嵌套tool_result；unsigned Gemini3 inline嵌套
+functionResponse.parts，任意response.result JSON保存text/image_part索引顺序；
+这是MOMO投影格式非供应商定义索引，非签名续接或真实模型证明。native GeminiURL
+拒绝；Chat及legacy Gemini/URL需每请求显式momo_tool_images:user-projection，默认
+拒绝不偷偷fallback。parallel结果全部先配对再放user投影，按原结果顺序及图文顺序，
+JSONquoted callID明确不可信marker；非原生role/trust等价、非注入防护。history
+保存原input非投影wire，suffix/full一致；policy不继承/转发，compact需重声明，
+完整tool-image回合及解读保护。文件/资产存储/媒体生成未迁移，Node不改。
+新增16个统一TCP图像function/custom SSE/JSON，计划219组；WebView增加8请求，
+计划76上游；回归另覆parallel/历史/compact/非法状态事务。未完成CI回执前不称通过。
+
+Prism工具300s超时后7079-byte静态报告落盘，非执行/批准。独立回归先复现普通
+history可用wire别名冒用不同声明namespace/name，再修为无条件核对声明身份。
+报告parallel_tool_calls丢失项不成立：未带client-search一律由newToolLoading拒绝，
+补类型/布尔负例锁定。Gemini显式投影后真实用户消息保持独立，不并入不可信工具
+内容（仍不是注入防护）。compact测试直接逐项比对完整受保护工具图片回合与解读；
+新增并行多图/最终结果flush/共享用户工具32图预算/marker转义/策略不继承，以及
+四映射SSE/JSON短写、flush、deadline、取消、Stop、incomplete事务门禁。
 
 ## Magpie 借鉴边界
 

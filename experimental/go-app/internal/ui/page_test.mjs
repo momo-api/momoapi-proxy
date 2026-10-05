@@ -80,6 +80,8 @@ assert.ok(source.includes('不含 thinking/签名/输出媒体'));
 assert.ok(source.includes('保留文字/图片顺序及同模型历史'));
 assert.ok(source.includes('不验证 DNS/重定向'));
 assert.ok(source.includes('Gemini URL 必须显式 mime_type'));
+assert.ok(source.includes('momo_tool_images:user-projection'));
+assert.ok(source.includes('不是原生角色/信任等价或注入防护'));
 assert.ok(!source.includes('Gemini 尚未迁移'));
 assert.doesNotMatch(source,/Gemini \/ Claude \/ Muse 尚未迁移/);
 assert.equal((source.match(/>未迁移</g)||[]).length,2);

@@ -56,6 +56,7 @@ type routeRequest struct {
 	messages              []routeMessage
 	tools                 []routeTool
 	loading               *toolLoading
+	toolImages            string
 }
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
@@ -126,7 +127,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	var p map[string]any
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.UseNumber()
-	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls") {
+	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images") {
 		return nil, errRouted
 	}
 	if v, present := p["stream"]; present {
@@ -136,6 +137,12 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
 	ir := &routeRequest{model: plan.model, stream: p["stream"] == true}
+	if policy, present := p["momo_tool_images"]; present {
+		if policy != "user-projection" || resolveProtocol(ir.model) == "claude" {
+			return nil, errUnsupportedToolImage
+		}
+		ir.toolImages = "user-projection"
+	}
 	loading, err := newToolLoading(p)
 	if err != nil {
 		return nil, err
@@ -399,7 +406,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 				ns = ""
 			}
 			tool, exists := plan.tools[wire]
-			if loading != nil && (!loading.active[wire] || tool.name != name || tool.namespace != ns) {
+			if tool.name != name || tool.namespace != ns || loading != nil && !loading.active[wire] {
 				return nil, errRouted
 			}
 			id := str(m["call_id"])
@@ -450,12 +457,31 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			if !exists || ((str(m["type"]) == "custom_tool_call_output") != (kind == "custom")) {
 				return nil, errRouted
 			}
-			content, err := textParts(m["output"])
+			content, parts, err := messageParts(m["output"], "tool", ir.model, images)
 			if err != nil {
 				return nil, err
 			}
+			if hasImages(parts) {
+				switch resolveProtocol(ir.model) {
+				case "chat":
+					if ir.toolImages != "user-projection" {
+						return nil, errUnsupportedToolImage
+					}
+				case "gemini":
+					if ir.toolImages != "user-projection" {
+						if !strings.HasPrefix(ir.model, "gemini-3.") && !strings.HasPrefix(ir.model, "gemini-3-") {
+							return nil, errUnsupportedToolImage
+						}
+						for _, part := range parts {
+							if part.image != nil && part.image.data == "" {
+								return nil, errUnsupportedToolImage
+							}
+						}
+					}
+				}
+			}
 			delete(pending, id)
-			messages = append(messages, routeMessage{role: "tool", resultID: id, text: content})
+			messages = append(messages, routeMessage{role: "tool", resultID: id, text: content, parts: parts})
 		case "", "message":
 			if !only(m, "type", "role", "content") {
 				return nil, errRouted
@@ -668,7 +694,12 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 	messages := []any{}
 	systems := []string{}
 	qwen := strings.Contains(strings.ToLower(ir.model), "qwen")
+	projections := []any{}
 	for _, m := range ir.messages {
+		if m.role != "tool" && len(projections) > 0 {
+			messages = append(messages, projections...)
+			projections = nil
+		}
 		if qwen && m.role == "system" {
 			if s := strings.TrimSpace(m.text); s != "" {
 				systems = append(systems, s)
@@ -677,20 +708,15 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 		}
 		v := map[string]any{"role": m.role, "content": m.text}
 		if hasImages(m.parts) {
-			parts := []any{}
-			for _, part := range m.parts {
-				if part.image != nil {
-					img := part.image
-					value := map[string]any{"url": img.url}
-					if img.detail != "" {
-						value["detail"] = img.detail
-					}
-					parts = append(parts, map[string]any{"type": "image_url", "image_url": value})
-				} else {
-					parts = append(parts, map[string]string{"type": "text", "text": part.text})
-				}
+			parts := chatImageParts(m.parts)
+			if m.role == "tool" {
+				marker := toolImageMarker(m.resultID)
+				v["content"] = marker
+				parts = append([]any{map[string]any{"type": "text", "text": marker}}, parts...)
+				projections = append(projections, map[string]any{"role": "user", "content": parts})
+			} else {
+				v["content"] = parts
 			}
-			v["content"] = parts
 		}
 		if m.resultID != "" {
 			v["tool_call_id"] = m.resultID
@@ -704,6 +730,7 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 		}
 		messages = append(messages, v)
 	}
+	messages = append(messages, projections...)
 	if len(systems) > 0 {
 		messages = append([]any{map[string]any{"role": "system", "content": strings.Join(systems, "\n\n")}}, messages...)
 	}

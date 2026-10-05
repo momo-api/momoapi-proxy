@@ -64,7 +64,17 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   is not full pixel/content validation; no local fetch or DNS/redirect validation.
   Gemini URL requires explicit mime_type; Chat preserves detail:auto/low/high,
   Claude/Gemini reject low/high (omitted/auto only, not quality equivalence).
-  No files/file_id, tool-result images, uploads/assets or generation. Local compact
+  Paired function/custom outputs may contain ordered input_text/input_image parts.
+  Claude nests in tool_result; unsigned Gemini3 inline nests in functionResponse.parts,
+  with arbitrary response.result ordered text/image_part(index) mapping. This is a
+  MOMO projection, not provider-defined indexes or signed continuation. Native
+  Gemini tool-result URLs reject. Chat (or legacy Gemini/URLs) requires explicit
+  per-request momo_tool_images:"user-projection"; no automatic fallback. All paired
+  parallel results precede attributed mixed-image user messages, original order.
+  Disclosed untrusted-data marker with JSON-quoted call_id, NOT native trust/role
+  equivalence or injection protection. Fixed unsupported_tool_image_output before
+  send. Re-declare policy each turn/compact replay; never forwarded/inherited.
+  Policy forbidden on Claude. No files/file_id, uploads/assets or generation. Local compact
   retains whole image-bearing turns including assistant interpretation; no useful
   safe reduction rejects instead of dropping required images. Fixed
   unsupported_image_input error; native/default bytes unchanged.
@@ -105,7 +115,8 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   headerless behavior remains unchanged (501 passthrough/local mode below).
 - Headerless POST /v1/responses/compact is a separate explicit routing-mode local checkpoint,
   not native provider compact or a semantic summary. Chat/Claude/unsigned Gemini
-  only; payload accepts model/input/tools and optional stream:false. Redeclare
+  only; payload accepts model/input/tools and optional stream:false/momo_tool_images.
+  Redeclare
   tools. Keep every instruction/user item, whole tool-bearing turns and latest
   assistant in order; only older ordinary assistant text is replaced by a smaller
   disclosed assistant marker with normalized JSON byte count/SHA-256, not encryption.
