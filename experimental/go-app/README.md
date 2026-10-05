@@ -31,7 +31,7 @@ support; no signature bypass, replay cache or artificial signature is introduced
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
-It rejects unknown payload fields/options, media, foreign/expired history references, opaque/provider compaction on converted paths,
+It rejects unknown payload fields/options, unsupported media, foreign/expired history references, opaque/provider compaction on converted paths,
 hosted built-in tools, grammar on converted paths, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
@@ -44,6 +44,39 @@ Converted grammar/unknown formats return 400 unsupported_tool_format before any
 upstream send; native Responses/default passthrough preserve format bytes unchanged
 and delegate enforcement to the upstream. This is not grammar support or full
 Codex exec compatibility. Custom format is forbidden on function declarations.
+
+### Ordered user image inputs
+
+Converted Chat/Claude/Gemini requests accept user-message input_image parts,
+interleaved with text without regrouping or an invented image-only text marker.
+Inline canonical data:<MIME>;base64,<data> accepts PNG/JPEG/static GIF/WebP;
+strict Base64, declared MIME versus decoded header, dimensions <=16384 per side
+and <=32 million pixels are checked without allocating pixel buffers. GIF framing
+must contain one frame; WebP RIFF framing/animation flags are checked. This is
+header/framing validation, NOT full pixel decoding, content safety or integrity.
+The upstream may still reject the image. Max32 images across the entire replayed
+input; decoded inline total <=1MiB, and the existing 1MiB full JSON/history limits
+still apply (including Base64 expansion). Images remain only in bounded memory;
+same-model previous_response_id suffix/full replay retains the original parts.
+
+HTTPS/443 references (max8192 bytes) are delegated to the provider, not downloaded
+by this proxy. Credentials/fragments/private IP literals/local names/alternate
+decimal IP spellings reject. This is only a lexical gate: no DNS, redirects,
+remote MIME/content or animation verification; do not treat it as SSRF protection.
+Gemini URL images require explicit MOMO extension mime_type (image/png, image/jpeg,
+image/gif, image/webp); no suffix-based MIME guessing. Inline MIME comes from the
+data URL. Chat preserves detail:auto/low/high; Claude/Gemini accept only omitted
+or auto, not quality equivalence. Explicit low/high reject before sending rather
+than silently removing the requested contract.
+
+Only user images are converted: file_id, files/audio/video, assistant/system
+images, image tool results, asset uploads/storage and image generation are not
+implemented. Invalid input returns fixed unsupported_image_input without echoing
+image bytes/URLs; no fallback or local fetching. Local compact rejects image
+history until retention is implemented. Default/native Responses bytes are
+unchanged; passing a protocol mock does not prove any live model can see images.
+Reference wire contract: https://developers.openai.com/api/docs/guides/images-vision
+(provider published limits are not this preview's smaller local limits).
 
 ### Explicit native compact attempt
 

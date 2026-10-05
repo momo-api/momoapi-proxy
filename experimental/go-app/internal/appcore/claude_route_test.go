@@ -168,7 +168,7 @@ func TestClaudeRequestIRHistoryAndStrictness(t *testing.T) {
 	for name, bad := range map[string]string{
 		"trailingJSON": claudePayload + "{}", "thinkingModel": strings.Replace(claudePayload, "claude-sonnet-4-6", "claude-sonnet-4-6-thinking", 1),
 		"effort":        strings.Replace(claudePayload, `"stream":true`, `"stream":true,"reasoning":{"effort":"high"}`, 1),
-		"media":         strings.Replace(claudePayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","image_url":"https://example.invalid"`, 1),
+		"media":         strings.Replace(claudePayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","image_url":"http://example.invalid"`, 1),
 		"reference":     strings.Replace(claudePayload, `"instructions":"Be concise."`, `"previous_response_id":"resp_mock"`, 1),
 		"invalidstream": strings.Replace(claudePayload, `"stream":true`, `"stream":null`, 1),
 		"unknownOption": strings.Replace(claudePayload, `"stream":true`, `"stream":true,"unknown_limit":4`, 1),

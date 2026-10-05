@@ -28,7 +28,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   using the same typed encoder and a single upstream SSE request. Conversion
   failures before JSON writing return redacted 502; partial writes abort HTTP.
   This is not a verified live-upstream JSON guarantee.
-  Strictly rejects media/foreign or expired history references/unknown options;
+  Strictly rejects unsupported media/foreign or expired history references/unknown options;
   Chat requests stream_options.include_usage and maps validated input/output/total,
   cached/reasoning tokens (not money). Missing usage is not fabricated; invalid or
   decreasing counts abort without completed. Usage trailers still require [DONE].
@@ -58,10 +58,18 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Native/default exact bytes remain untouched. This is not native deferred
   prompt/cache layout, hosted search or actual Codex discovery acceptance.
   No search/MCP/skill execution; search lifecycle local compact unsupported.
+  User input_image supports ordered text/images on Chat/Claude/Gemini, canonical
+  inline PNG/JPEG/static GIF/WebP or delegated HTTPS/443 references. Max32 across
+  replayed history and existing 1MiB JSON/history budget. Header/framing checking
+  is not full pixel/content validation; no local fetch or DNS/redirect validation.
+  Gemini URL requires explicit mime_type; Chat preserves detail:auto/low/high,
+  Claude/Gemini reject low/high (omitted/auto only, not quality equivalence).
+  No files/file_id, tool-result images, uploads/assets, generation or image local
+  compact. Fixed unsupported_image_input error; native/default bytes unchanged.
   Claude Messages text/tools plus validated token usage are supported; thinking,
-  signatures and media are not. Gemini text/tools,
+  signatures and other media are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;
-  thinking/signatures/media and signed continuation remain unsupported. Gemini
+  thinking/signatures/output media and signed continuation remain unsupported. Gemini
   requires STOP/MAX_TOKENS plus clean framed HTTP EOF; early EOF/errors abort without completed.
   max_output_tokens is an integer 1..1048576: Chat max_completion_tokens, Claude
   max_tokens (12240 when omitted), Gemini generationConfig.maxOutputTokens. A

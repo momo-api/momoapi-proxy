@@ -89,7 +89,7 @@ func TestRoutedPayloadRejectsWithoutSending(t *testing.T) {
 	bad := []string{
 		strings.Replace(routedPayload, `"stream":true`, `"stream":"false"`, 1),
 		strings.Replace(routedPayload, `"instructions":"Be concise."`, `"previous_response_id":"resp_private"`, 1),
-		strings.Replace(routedPayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","image_url":"https://example.invalid/a"`, 1),
+		strings.Replace(routedPayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","file_id":"unsupported_file_id"`, 1),
 		strings.Replace(routedPayload, `"name":"write"`, `"name":"exec","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}`, 1),
 		strings.Replace(routedPayload, `"instructions":"Be concise."`, `"provider_unknown":true`, 1),
 		strings.Replace(routedPayload, `"name":"write"`, `"name":"read"`, 1),

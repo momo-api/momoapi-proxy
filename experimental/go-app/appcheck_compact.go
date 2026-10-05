@@ -47,7 +47,10 @@ func probeCompactRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return probeNativeCompactRequests(core)
+	if err := probeNativeCompactRequests(core); err != nil {
+		return err
+	}
+	return probeImageRequests(core)
 }
 
 const nativeCompactProbeJSON = ` {"id":"cmp_native_mock","object":"response.compaction","created_at":1,"output":[{"type":"compaction","id":"native_item","encrypted_content":"opaque-synthetic-not-a-real-envelope"}],"unknown":"中文🙂"} `

@@ -38,6 +38,15 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 			parts = append(parts, map[string]any{"functionResponse": map[string]any{"id": m.resultID, "name": name, "response": map[string]string{"result": m.text}}})
 		} else {
 			for _, part := range m.parts {
+				if part.image != nil {
+					img := part.image
+					if img.data != "" {
+						parts = append(parts, map[string]any{"inline_data": map[string]string{"mime_type": img.mime, "data": img.data}})
+					} else {
+						parts = append(parts, map[string]any{"fileData": map[string]string{"mimeType": img.mime, "fileUri": img.url}})
+					}
+					continue
+				}
 				if part.call == nil {
 					if part.text != "" {
 						parts = append(parts, map[string]string{"text": part.text})

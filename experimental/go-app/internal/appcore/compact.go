@@ -51,6 +51,12 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 	checked, _ := json.Marshal(p)
 	if ir, err := parseRoutedRequest(checked); err != nil || ir.loading != nil {
 		return nil, errRouted // deferred lifecycle checkpoint support must not be guessed
+	} else {
+		for _, message := range ir.messages {
+			if hasImages(message.parts) {
+				return nil, errRouted
+			}
+		} // image checkpoint retention not yet implemented
 	}
 	objects := make([]map[string]any, len(items))
 	lastUser, latestAssistant := -1, -1

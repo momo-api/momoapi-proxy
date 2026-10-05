@@ -25,6 +25,8 @@ const claudeText=cs+ct(0,'中文🙂')+ce('end_turn');
 const claudeCalls=cs+ctool(0,'call_read','pad__read','{"x":1}')+ctool(1,'call_write','pad__write',JSON.stringify({input:"text('hi')"}))+ce('tool_use');
 const cp={...payload,model:'claude-sonnet-4-6'};
 const gp={...payload,model:'gemini-2.5-flash'};
+const imageURL='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+const imageInput=[{type:'input_text',text:'before-image'},{type:'input_image',image_url:imageURL},{type:'input_text',text:'after-image'},{type:'input_image',image_url:'https://images.example.invalid/a',mime_type:'image/jpeg'}];
 const gpath='/v1beta/models/gemini-2.5-flash:streamGenerateContent';
 const gu={promptTokenCount:3,candidatesTokenCount:5,totalTokenCount:10,cachedContentTokenCount:2,thoughtsTokenCount:2};
 const gf=(parts,finishReason,usageMetadata)=>'data: '+JSON.stringify({...((parts||finishReason)?{candidates:[{index:0,...(parts?{content:{role:'model',parts}}:{}),...(finishReason?{finishReason}:{})}]}:{}),...(usageMetadata?{usageMetadata}:{})})+'\r\n\r\n';
@@ -122,6 +124,7 @@ const cases=[
   stream:!f.path?sse([chunk({tool_calls:[{index:0,id:'call_client',type:'function',function:{name:'pad__'+sample.name,arguments:JSON.stringify({input:sample.raw})}}]},'tool_calls')]):f.path==='/v1/messages'?cs+ctool(0,'call_client','pad__'+sample.name,JSON.stringify({input:sample.raw}))+ce('tool_use'):gf([{functionCall:{id:'call_client',name:'pad__'+sample.name,args:{input:sample.raw}}}])+gf(null,'STOP',gu),
  })))),
 ];
+cases.push(...[{label:'Chat',payload,path:undefined,text},{label:'Claude',payload:cp,path:'/v1/messages',text:claudeText},{label:'Gemini',payload:gp,path:gpath,text:gt}].flatMap(f=>[true,false].flatMap(stream=>[false,true].map(urlOnly=>({name:f.label+' ordered images '+(urlOnly?'URL':'inline and URL')+' '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,input:[{role:'user',content:urlOnly?[imageInput[3]]:imageInput}]},path:f.path,stream:f.text,json:!stream,images:true,urlOnly,continuation:true})))));
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  let stderr='';child.stderr.on('data',b=>{stderr+=b});
@@ -191,6 +194,18 @@ for(const fixture of cases){
   }
   for(let i=0;i<count;i++){
    const n=structuredClone(captures[i]),g=structuredClone(captures[count+i]);
+   if(fixture.images){
+    const np=!fixture.path?n.messages[1].content:fixture.path==='/v1/messages'?n.messages[0].content:n.contents[0].parts;
+    const gp=!fixture.path?g.messages[1].content:fixture.path==='/v1/messages'?g.messages[0].content:g.contents[0].parts;
+    const raw=imageURL.split(',')[1];
+    const inline=!fixture.path?{type:'image_url',image_url:{url:imageURL}}:fixture.path==='/v1/messages'?{type:'image',source:{type:'base64',media_type:'image/png',data:raw}}:{inline_data:{mime_type:'image/png',data:raw}};
+    const remote=!fixture.path?{type:'image_url',image_url:{url:'https://images.example.invalid/a'}}:fixture.path==='/v1/messages'?{type:'image',source:{type:'url',url:'https://images.example.invalid/a'}}:{fileData:{mimeType:'image/jpeg',fileUri:'https://images.example.invalid/a'}};
+    const txt=t=>fixture.path===gpath?{text:t}:{type:'text',text:t};
+    assert.deepEqual(gp,fixture.urlOnly?[remote]:[txt('before-image'),inline,txt('after-image'),remote]);
+    assert.deepEqual(np,!fixture.path?(fixture.urlOnly?[txt('[image output attached]'),remote]:[txt('before-image\nafter-image'),inline,remote]):(fixture.urlOnly?[remote]:[txt('before-image'),inline,txt('after-image'),remote]));
+    if(!fixture.path)g.messages[1].content=n.messages[1].content;else if(fixture.path==='/v1/messages')g.messages[0].content=n.messages[0].content;else g.contents[0].parts=n.contents[0].parts;
+    console.log(!fixture.path?'DIFFERENCE Go Chat retains interleaved image/text order and image-only input; Node Chat groups text before images and inserts an image-only marker. No live vision capability claim':'CHECK Claude/Gemini user image order and MIME match for this fixture; no live vision capability claim');
+   }
    if(fixture.limit){
     if(!fixture.path){assert.equal(g.max_completion_tokens,17);assert.equal(n.max_completion_tokens,undefined);delete g.max_completion_tokens}
     else if(fixture.path==='/v1/messages'){assert.equal(g.max_tokens,17);assert.equal(n.max_tokens,12240);g.max_tokens=n.max_tokens}

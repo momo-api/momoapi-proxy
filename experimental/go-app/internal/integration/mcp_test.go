@@ -54,6 +54,9 @@ func TestMCPAndSkillExports(t *testing.T) {
 	if !strings.Contains(Skill, "X-MOMO-Compact:native") || !strings.Contains(out.String(), "tool_loading") || !strings.Contains(Skill, "momo_tool_loading") {
 		t.Fatal("stale native compact/search capability exports")
 	}
+	if !strings.Contains(out.String(), "input_images") || !strings.Contains(Skill, "Gemini URL requires explicit mime_type") {
+		t.Fatal("stale image capability exports")
+	}
 	if !json.Valid([]byte(config)) || !strings.Contains(config, "mcpServers") || strings.Contains(config, "api_key") {
 		t.Fatal("config export")
 	}

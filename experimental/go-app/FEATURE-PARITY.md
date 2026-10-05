@@ -10,13 +10,13 @@
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与 `/v1/responses/compact`；compact 显式 native 请求可尝试原生透传（非真实能力证明），另有本地 checkpoint；无无版本别名 |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
-| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/媒体/grammar 等拒绝，不宣称完整兼容 |
-| Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
-| Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
+| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/非用户图片的其他媒体/grammar 等拒绝，不宣称完整兼容 |
+| Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；有序用户图片输入；thinking/签名/输出媒体不支持 |
+| Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；有序用户图片输入；thinking/签名/输出媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。无语义摘要/本地 opaque envelope/跨模型供应商状态转换 |
-| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
+| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 新增有序 user 图片输入/同模型历史，三协议明确转换；文件、工具结果图片、上传/资产存储未迁移；不是完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 手动复制本地连接配置；新增明确点击的 Key 模型列表检查/本地筛选，不代表推理验证；无自动接入或更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
@@ -247,6 +247,25 @@ response.compaction、非空typed output与compaction的非空encrypted_content�
 单测覆原字节/回放/no local state、显式门禁、未知header/stream、错误码/格式/大小
 与一次发送。内置Skill/MCP同步披露search/strict和native尝试边界；非真实钱包或
 第三方MCP执行支持。当前增量执行/CI回执未完成前不称通过。
+
+### 有序用户图片输入增量（2026-10-05）
+
+三转换路径保留 text/image 原顺序和图片独立用户消息，不填充假文字。Chat image_url
+保留 detail，Claude base64/url，Gemini inline_data/fileData；Gemini URL 要求明确
+mime_type 扩展而非猜后缀。Claude/Gemini low/high 拒绝，不假称 auto 质量等价。
+inline PNG/JPEG/GIF/WebP canonical Base64/MIME/header/dimensions 校验，不分配完整像素；
+GIF 单帧/完整 framing，WebP RIFF framing/动画标志拒绝。仅头部/framing，不证明
+完整像素、安全或可推理。整个历史最多32张，原1MiB请求/历史门禁仍含Base64。
+HTTPS/443 URL 只词法门禁、不本地抓取、不验证DNS/重定向/远程图像，不称SSRF防护。
+同模型 suffix/full history 保留图片；非法输入不发送、不触碰LRU/新状态，固定错误
+不回显私密图像/URL。local compact 仍拒绝图片；文件/工具图片结果/附件资产和媒体
+生成未迁移。默认/原生Responses不改，Node不改。
+
+统一真实TCP同mock/resource新增12图片SSE/JSON用例及续接，计划合计200；独立断言
+Node Chat聚合文字在图片之前且图片独立输入填marker，Go保序不填marker；Claude/Gemini
+该图片夹具的顺序/MIME一致，不叫全部等价。
+真实WebView新增6请求，计划68上游（含列表检查），localcompact仍3次零上游。
+当前增量本地/三平台回执未完成前不称通过。
 
 ## Magpie 借鉴边界
 

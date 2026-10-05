@@ -33,8 +33,9 @@ type routeCall struct{ id, wire, args string }
 // Block-capable providers retain text/tool interleaving within an assistant turn.
 // Chat has only content + tool_calls and cannot express that block order.
 type routePart struct {
-	text string
-	call *routeCall
+	text  string
+	call  *routeCall
+	image *routeImage
 }
 type routeMessage struct {
 	role, text, resultID string
@@ -338,6 +339,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		return nil, errRouted
 	}
 	pending := map[string]string{}
+	images := &imageBudget{}
 	seen := map[string]bool{}
 	if loading != nil {
 		loading.seen = seen
@@ -466,7 +468,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			default:
 				return nil, errRouted
 			}
-			content, err := textParts(m["content"])
+			content, parts, err := messageParts(m["content"], role, ir.model, images)
 			// Preserve upstream text interleaved within one tool-use turn;
 			// never accept user/system or partial-result interruptions.
 			hasPending := len(pending) != 0 || loading != nil && loading.pending != ""
@@ -476,8 +478,9 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			if err != nil {
 				return nil, err
 			}
-			if content == "" && role == "user" {
+			if content == "" && role == "user" && !hasImages(parts) {
 				content = "Continue."
+				parts = []routePart{{text: content}}
 			}
 			if hasPending && role == "assistant" && len(messages) > 0 && messages[len(messages)-1].role == "assistant" {
 				last := &messages[len(messages)-1]
@@ -488,7 +491,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 				last.parts = append(last.parts, routePart{text: content})
 				continue
 			}
-			messages = append(messages, routeMessage{role: role, text: content, parts: []routePart{{text: content}}})
+			messages = append(messages, routeMessage{role: role, text: content, parts: parts})
 		default:
 			return nil, errRouted
 		}
@@ -673,6 +676,22 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 			continue
 		}
 		v := map[string]any{"role": m.role, "content": m.text}
+		if hasImages(m.parts) {
+			parts := []any{}
+			for _, part := range m.parts {
+				if part.image != nil {
+					img := part.image
+					value := map[string]any{"url": img.url}
+					if img.detail != "" {
+						value["detail"] = img.detail
+					}
+					parts = append(parts, map[string]any{"type": "image_url", "image_url": value})
+				} else {
+					parts = append(parts, map[string]string{"type": "text", "text": part.text})
+				}
+			}
+			v["content"] = parts
+		}
 		if m.resultID != "" {
 			v["tool_call_id"] = m.resultID
 		}
