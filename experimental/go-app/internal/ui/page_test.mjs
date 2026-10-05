@@ -164,6 +164,11 @@ assert.match(nodes.get('quota-note').textContent,/未知额度/);
 handler=()=>response(200,state);
 await nodes.get('skill-copy').onclick();assert.match(nodes.get('notice').textContent,/SKILL.md/);
 await nodes.get('mcp-copy').onclick();assert.match(nodes.get('notice').textContent,/MCP 配置/);
+await nodes.get('codex-copy').onclick();assert.match(nodes.get('notice').textContent,/Codex Provider/);
+assert.equal(calls.filter(c=>c.url==='/app/codex-config').length,1);
+assert.equal(calls.find(c=>c.url==='/app/codex-config').options.body,undefined);
+assert.ok(source.includes('MOMO_LOCAL_API_KEY'));
+assert.ok(source.includes('不能直接覆盖原文件'));
 state={...initial};
 await run("action('state')");
 

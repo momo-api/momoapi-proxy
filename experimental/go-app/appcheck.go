@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/integration"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/ui"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -81,7 +82,7 @@ func check() error {
 		if runtime.GOOS == "windows" {
 			origin = "http://wails.localhost"
 		}
-		var upstreamRequests, savedProfiles, loadedProfiles, quotaQueries, skillCopies, mcpCopies atomic.Int32
+		var upstreamRequests, savedProfiles, loadedProfiles, quotaQueries, skillCopies, mcpCopies, codexCopies atomic.Int32
 		var stalled []net.Conn
 		var savedProfile appcore.Config
 		closeMock := appcore.InstallProbeMock(core, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +203,7 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 92 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 92 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
@@ -215,6 +216,14 @@ func check() error {
 			LoadProfile:       func() (appcore.Config, error) { loadedProfiles.Add(1); return savedProfile, nil },
 			CopySkill:         func() error { skillCopies.Add(1); return nil },
 			CopyMCPConfig:     func() error { mcpCopies.Add(1); return nil },
+			CopyCodexConfig: func() error {
+				text, err := integration.CodexProviderConfig(core.State().LocalEndpoint)
+				if err != nil || !strings.Contains(text, "env_key = \"MOMO_LOCAL_API_KEY\"") || strings.Contains(text, "synthetic-appcheck-only") {
+					return errors.New("client export probe failed")
+				}
+				codexCopies.Add(1)
+				return nil
+			},
 		})
 		close(appReady)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +251,7 @@ func check() error {
 				if r.URL.Path == "/check-page-failure" {
 					step := r.URL.Query().Get("step")
 					known := false
-					for _, candidate := range []string{"initial", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
+					for _, candidate := range []string{"initial", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "codex-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
 						if step == candidate {
 							known = true
 						}

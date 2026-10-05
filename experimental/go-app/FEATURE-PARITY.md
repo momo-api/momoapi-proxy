@@ -362,6 +362,22 @@ PR macOS 同项117.526s，也已失去合理余量。未重跑掩盖、未减小
 这是测试进程累计预算配置修正，不声称改善产品性能或证明原失败测试无业务问题。
 新提交仍需全部首轮 CI/产物验收，779da1b 仅作为历史证据。
 
+### Codex 手动接入导出增量（2026-10-05）
+
+实际抓取官方 Codex config-reference，provider base_url/env_key/wire_api/retry/
+WebSocket字段明确；user-level配置，不把项目级 provider keys 当有效。新增明确
+点击复制无 Key TOML provider 片段：仅当前 loopback port，env_key=MOMO_LOCAL_API_KEY，
+request/stream retries=0、WebSocket=false。没有选择模型、auth/审批/sandbox变更，
+不读取/写入 config.toml/auth.json、不安装/启动客户端。顶层selector放任何table
+前、先备份并人工合并，不能整文件覆盖；本地Key另行私下配置非上游Key，重启端口
+变化重新复制。native clipboard action不把token/config回传WebView，错误固定脱敏，
+不开放TCP配置导出接口。UI/Skill同步；export syntax不是实际Codex工具兼容验收。
+单测覆精确字段、端口/URL拒绝、Origin/body/clipboard错误/public TCP隔离；真实
+WebView脚本点击新按钮只验证native action契约，不是物理剪贴板或真实客户端。
+协议夹具仍235、WebView上游仍92，本导出零上游。当前增量CI未完成前不称通过。
+Prism下一项assets/ops咨询工具300s超时且报告未落盘，不声称获得设计/批准。
+官方参考：https://developers.openai.com/codex/config-reference
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"strings"
@@ -57,5 +58,38 @@ func TestNativeActionsAreOriginBoundAndReturnNoToken(t *testing.T) {
 		if w.Code != 503 || strings.Contains(w.Body.String(), "synthetic-clipboard-error-secret") {
 			t.Fatal("clipboard error reflected")
 		}
+	}
+}
+
+func TestCodexExportClipboardFailuresAreRedactedAndNotPublic(t *testing.T) {
+	c, err := appcore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	for _, actions := range []Actions{{}, {CopyCodexConfig: func() error { return errors.New("synthetic-private-clipboard-error") }}} {
+		r := httptest.NewRequest("POST", "/app/codex-config", nil)
+		r.Header.Set("Origin", "http://wails.localhost")
+		w := httptest.NewRecorder()
+		HandlerWithActions("http://wails.localhost", c, actions).ServeHTTP(w, r)
+		if w.Code != 503 || strings.Contains(w.Body.String(), "synthetic-private") || strings.Contains(w.Body.String(), "api_key") {
+			t.Fatal("client export error leaked or claimed success")
+		}
+	}
+	r := httptest.NewRequest("POST", "/app/codex-config", nil)
+	w := httptest.NewRecorder()
+	c.Handler().ServeHTTP(w, r)
+	if w.Code != 401 {
+		t.Fatal("client export exposed on unauthenticated TCP")
+	}
+	var connection map[string]string
+	if json.Unmarshal([]byte(c.ConnectionJSON()), &connection) != nil {
+		t.Fatal("test connection")
+	}
+	r.Header.Set("Authorization", "Bearer "+connection["api_key"])
+	w = httptest.NewRecorder()
+	c.Handler().ServeHTTP(w, r)
+	if w.Code != 404 {
+		t.Fatal("client export became public TCP route")
 	}
 }

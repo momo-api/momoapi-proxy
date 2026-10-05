@@ -10,11 +10,12 @@ import (
 func TestExplicitIntegrationAndQuotaBoundary(t *testing.T) {
 	c, _ := appcore.New()
 	defer c.Close()
-	skill, mcp := 0, 0
+	skill, mcp, codex := 0, 0, 0
 	h := HandlerWithActions("http://wails.localhost", c, Actions{
 		CopySkill: func() error { skill++; return nil }, CopyMCPConfig: func() error { mcp++; return nil },
+		CopyCodexConfig: func() error { codex++; return nil },
 	})
-	for _, path := range []string{"/app/skill", "/app/mcp-config", "/app/quota", "/app/models"} {
+	for _, path := range []string{"/app/skill", "/app/mcp-config", "/app/codex-config", "/app/quota", "/app/models"} {
 		for _, tc := range []struct {
 			origin, body string
 			want         int
@@ -28,10 +29,10 @@ func TestExplicitIntegrationAndQuotaBoundary(t *testing.T) {
 			}
 		}
 	}
-	if skill != 0 || mcp != 0 {
+	if skill != 0 || mcp != 0 || codex != 0 {
 		t.Fatal("unapproved export")
 	}
-	for _, path := range []string{"/app/skill", "/app/mcp-config"} {
+	for _, path := range []string{"/app/skill", "/app/mcp-config", "/app/codex-config"} {
 		req := httptest.NewRequest("POST", path, nil)
 		req.Header.Set("Origin", "http://wails.localhost")
 		w := httptest.NewRecorder()
@@ -40,7 +41,7 @@ func TestExplicitIntegrationAndQuotaBoundary(t *testing.T) {
 			t.Fatal("export")
 		}
 	}
-	if skill != 1 || mcp != 1 {
+	if skill != 1 || mcp != 1 || codex != 1 {
 		t.Fatal("missing explicit export")
 	}
 	for _, path := range []string{"/app/quota", "/app/models"} {

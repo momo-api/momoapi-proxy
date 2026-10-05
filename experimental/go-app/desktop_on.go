@@ -80,6 +80,13 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 			}
 			return nil
 		},
+		CopyCodexConfig: func() error {
+			text, err := integration.CodexProviderConfig(core.State().LocalEndpoint)
+			if err != nil || !app.Clipboard.SetText(text) {
+				return errors.New("client clipboard unavailable")
+			}
+			return nil
+		},
 	})
 	options := application.Options{Name: "MOMO API Preview", Description: "Go Responses and Chat passthrough preview", Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Assets: application.AssetOptions{Handler: assets, DisableLogging: true}, OnShutdown: shutdown, Linux: application.LinuxOptions{DisableQuitOnLastWindowClosed: true}}
 	if configure != nil {

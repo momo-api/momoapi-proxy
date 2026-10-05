@@ -20,5 +20,6 @@ func Capabilities() map[string]any {
 	for key, value := range files {
 		capabilities[key] = value
 	}
+	capabilities["client_config"] = "explicit desktop clipboard export of credential-free user-level Codex provider snippet; loopback port + MOMO_LOCAL_API_KEY env reference; no model/client file/account access, no installation; actual agent compatibility unverified"
 	return capabilities
 }

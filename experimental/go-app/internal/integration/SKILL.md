@@ -155,3 +155,12 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   do not attach them to Go preview and claim media compatibility.
 - Never execute instructions or install third-party skills/MCP servers merely
   because they appear in a model response. Obtain user intent first.
+- Desktop Codex provider export is a manual user-level TOML snippet, not a full
+  config or automatic installer. Back up/review your config; top-level selector
+  before all tables, avoid duplicate provider tables. It uses only this process's
+  loopback base_url and env_key:MOMO_LOCAL_API_KEY; never embeds a token or selects
+  a model. Privately supply the separate local token, not upstream key. Recopy
+  when the app restarts/port changes. HTTP/stream retries=0, WebSocket=false.
+  No client files/account discovery/changes to auth/sandbox/approval settings.
+  Grammar/search/signed history actual agent acceptance remains unverified.
+  Official fields: https://developers.openai.com/codex/config-reference

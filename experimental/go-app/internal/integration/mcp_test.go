@@ -63,6 +63,9 @@ func TestMCPAndSkillExports(t *testing.T) {
 	if !strings.Contains(out.String(), "input_files") || !strings.Contains(out.String(), "tool_files") || !strings.Contains(Skill, "momo_tool_files") || !strings.Contains(Skill, "Max16 PDFs/32 images") || Capabilities()["max_pdfs"] != 16 {
 		t.Fatal("stale PDF capability/skill export")
 	}
+	if !strings.Contains(out.String(), "client_config") || !strings.Contains(Skill, "MOMO_LOCAL_API_KEY") {
+		t.Fatal("stale manual client config export boundaries")
+	}
 	if !json.Valid([]byte(config)) || !strings.Contains(config, "mcpServers") || strings.Contains(config, "api_key") {
 		t.Fatal("config export")
 	}

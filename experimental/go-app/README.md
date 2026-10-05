@@ -433,6 +433,29 @@ Both modes share core/proxy/auth/admission implementation.
 
 ## Boundaries
 
+### Manual Codex provider export
+
+The Skill/MCP page can explicitly copy a credential-free Codex TOML provider
+snippet for this process's loopback port. It does not read/write config.toml,
+auth.json, client homes or account records, select a model, install a client or
+start Codex. Manually back up/review your user-level config; put the top-level
+model_provider selector before any table headers and avoid duplicate provider
+tables. Do NOT replace a whole config file with the snippet. Current official
+Codex docs say project-local provider keys are ignored; use user-level config.
+
+The snippet references env_key=MOMO_LOCAL_API_KEY, never embeds a local/upstream
+key. Privately set that environment variable from the separately copied local
+connection config; do not place the upstream key here or log it. Port changes
+after relaunch require recopying. No WebView token-return binding; clipboard
+history/other same-user apps can still access the separately copied local key.
+request_max_retries/stream_max_retries=0, requires_openai_auth=false,
+supports_websockets=false and wire_api=responses match this explicit preview
+workflow. No model/approval/sandbox/auth settings are changed. This is a syntax
+and export contract, NOT actual Codex agent/grammar/search/signed-history parity.
+Official fields fetched: https://developers.openai.com/codex/config-reference
+
+## Security boundaries
+
 Default settings/key are process-memory-only. Optional explicit Remember saves
 one Endpoint/APIKey JSON record in Windows Credential Manager, macOS Keychain
 or Linux Secret Service. No plaintext fallback/config file. Construction/startup

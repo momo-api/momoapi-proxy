@@ -17,13 +17,14 @@ import (
 
 // Native actions return no credentials to the WebView. Nil disables the action.
 type Actions struct {
-	SaveProfile    func(appcore.Config) error
-	LoadProfile    func() (appcore.Config, error)
-	ForgetProfile  func() error
-	CopyConnection func() error
-	Quit           func()
-	CopySkill      func() error
-	CopyMCPConfig  func() error
+	SaveProfile     func(appcore.Config) error
+	LoadProfile     func() (appcore.Config, error)
+	ForgetProfile   func() error
+	CopyConnection  func() error
+	Quit            func()
+	CopySkill       func() error
+	CopyMCPConfig   func() error
+	CopyCodexConfig func() error
 	// WebKit custom schemes can omit Origin or serialize it as null. Require a
 	// separate unguessable page capability; never accept either by itself.
 	AllowOpaqueOrigin bool
@@ -69,7 +70,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" {
+		if r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" {
 			http.NotFound(w, r)
 			return
 		}
@@ -162,6 +163,10 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			}
 			if r.URL.Path == "/app/mcp-config" && (actions.CopyMCPConfig == nil || actions.CopyMCPConfig() != nil) {
 				http.Error(w, "MCP config clipboard unavailable", 503)
+				return
+			}
+			if r.URL.Path == "/app/codex-config" && (actions.CopyCodexConfig == nil || actions.CopyCodexConfig() != nil) {
+				http.Error(w, "client config clipboard unavailable", 503)
 				return
 			}
 			if r.URL.Path == "/app/load" {
