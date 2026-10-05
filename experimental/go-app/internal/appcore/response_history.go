@@ -93,7 +93,7 @@ func normalizedHistory(items []json.RawMessage) ([]json.RawMessage, error) {
 				return nil, errRouted
 			}
 			typ := str(item["type"])
-			if typ != "message" && typ != "function_call" && typ != "custom_tool_call" {
+			if typ != "message" && typ != "function_call" && typ != "custom_tool_call" && typ != "tool_search_call" && typ != "tool_search_output" {
 				return nil, errRouted
 			}
 			if typ == "message" && item["role"] != "assistant" {
@@ -103,7 +103,7 @@ func normalizedHistory(items []json.RawMessage) ([]json.RawMessage, error) {
 		}
 		if v, present := item["status"]; present {
 			typ := str(item["type"])
-			if v != "completed" || (typ != "message" && typ != "function_call" && typ != "custom_tool_call") {
+			if v != "completed" || (typ != "message" && typ != "function_call" && typ != "custom_tool_call" && typ != "tool_search_call" && typ != "tool_search_output") {
 				return nil, errRouted
 			}
 			if typ == "message" && item["role"] != "assistant" {

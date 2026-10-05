@@ -14,6 +14,7 @@
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
+| 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；hosted/复杂 schema/工具搜索 compact 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换路径支持同模型有界内存 previous_response_id 回放；新增显式本地有损 checkpoint/普通 output 手动回放。无原生/语义摘要 compact、opaque envelope、跨模型/供应商状态 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 未迁移；原样请求不等于附件管理能力 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 未迁移 |
@@ -206,6 +207,31 @@ dba68fe的PR macOS WebView首轮在check-proxy前失败，同提交复跑通过�
 过期poll不能覆盖操作结果。两种响应完成顺序均测试；已有Stop/轮询回归保留。
 test-only WebView失败路径现在立即报固定阶段标签，不再吞断言等25s；不输出状态、
 Key、账户或异常内容。该复现并不证明它就是原macOS CI失败原因；长期稳定仍待验收。
+
+### 客户端工具搜索增量（2026-10-05）
+
+显式每请求 momo_tool_loading:"client-search" + parallel_tool_calls:false，
+三协议兼容层投影当前已加载声明，不声称原生延迟prompt/cache布局。搜索独立控制
+身份momo__client_tool_search，普通function tool_search不混淆；返回对象arguments、
+execution:client与非空<=64字节call_id，客户端配对tool_search_output才加载定义，
+允许返回defer_loading:true。空结果有效；原input顺序校验，未来定义不能授权旧call，
+重复/孤儿/打断/改定义/保留alias冲突/未加载选择/多工具同响应拒绝。不执行搜索/MCP。
+additional_tools仅developer非空显式加载定义（该位置defer:true拒绝）；已有namespace
+形状支持，namespace description仍拒绝。strict:true使用有界本地schema输出/历史校验，
+不是上游约束生成；关键字/深度/节点/数值限制详见README，未知schema发送前拒绝。
+不支持hosted/server、union/$ref/grammar或该历史的local compact，实际Codex仍非全兼容。
+
+统一真实TCP同mock/resource扩为186组（原162保留，新24搜索对象/无效schema/加载/空结果
+三协议SSE/JSON）；独立断言Node转换漏search声明、提前暴露deferred、输出普通function
+call差异，不叫等价。核心回归另覆三轮search→load→call→result、suffix/full历史、
+整数精度、身份/选择/顺序/限制/空结果/错误与短写/flush/incomplete不提交历史、默认/
+原生原字节。真实WebView探针加入12请求，总61上游，localcompact仍3次零上游。
+官方结构参考：https://developers.openai.com/api/docs/guides/tools-tool-search
+Prism此前230.375s静态建议不是测试/批准，未采纳与官方返回defer:true示例冲突的建议。
+新增253.688s静态复核指出search前后文本回放问题；确定性回归先失败后修复，搜索
+接入同一assistant块序列，允许同回合后续assistant文本但拒绝user/system打断。
+同时补调用ID/总历史call数量的输出回放闭环门禁，不称顾问执行或批准。
+本增量本地/三平台执行结果以PR回执为准，不把新增测试源码当作已通过。
 
 ## Magpie 借鉴边界
 

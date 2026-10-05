@@ -130,6 +130,9 @@ func (e *responseWriter) toolCall(call streamToolCall, tool chatTool) error {
 	if parseErr != nil {
 		return errRouted
 	}
+	if tool.kind == "tool_search" {
+		return e.searchCall(call, args)
+	}
 	field, typ, prefix, event := "arguments", "function_call", "fc_", "response.function_call_arguments"
 	valueBytes, err := json.Marshal(args)
 	if err != nil {
@@ -185,6 +188,30 @@ func (e *responseWriter) toolCall(call streamToolCall, tool chatTool) error {
 
 // streamEvent is protocol neutral. Only validated tool calls reach the encoder.
 type streamToolCall struct{ id, name, args string }
+
+// Tool search arguments are an object, never a function argument string or an
+// invented builtin SSE arguments stream. Lifecycle uses ordinary item events.
+func (e *responseWriter) searchCall(call streamToolCall, args map[string]any) error {
+	if err := e.flushText(); err != nil {
+		return err
+	}
+	id, err := newID("tsc_")
+	if err != nil {
+		return err
+	}
+	item := map[string]any{"id": id, "type": "tool_search_call", "execution": "client", "call_id": call.id, "arguments": args, "status": "completed"}
+	added := map[string]any{"id": id, "type": "tool_search_call", "execution": "client", "call_id": call.id, "arguments": map[string]any{}, "status": "in_progress"}
+	if err := e.event("response.output_item.added", map[string]any{"response_id": e.id, "output_index": e.index, "item": added}); err != nil {
+		return err
+	}
+	if err := e.event("response.output_item.done", map[string]any{"response_id": e.id, "output_index": e.index, "item": item}); err != nil {
+		return err
+	}
+	e.output = append(e.output, item)
+	e.index++
+	return nil
+}
+
 type streamEvent struct {
 	kind  string
 	text  string
@@ -212,9 +239,24 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 	case "text":
 		return e.textDelta(ev.text)
 	case "tool":
-		tool, ok := plan.restoreTool(ev.call.name)
-		if !ok || plan.choice == "none" || plan.selected != "" && tool.wire != plan.selected || plan.allowed != nil && !plan.allowed[tool.wire] {
+		if plan.loading != nil && (ev.call.id == "" || len(ev.call.id) > 128) {
 			return errRouted
+		}
+		tool, ok := plan.restoreTool(ev.call.name)
+		if !ok || plan.choice == "none" || plan.selected != "" && tool.wire != plan.selected || plan.allowed != nil && !plan.allowed[tool.wire] || plan.loading != nil && (!plan.loading.active[tool.wire] || e.toolCount > 0 || len(plan.loading.seen) >= 128 || plan.loading.seen[ev.call.id]) {
+			return errRouted
+		}
+		if tool.kind == "tool_search" {
+			args, err := decodeObject(ev.call.args)
+			if plan.loading == nil || ev.call.id == "" || len(ev.call.id) > 64 || err != nil || validateSearchValue(plan.loading.search, args) != nil {
+				return errRouted
+			}
+		}
+		if plan.loading != nil && plan.loading.constraints[tool.wire] != nil {
+			args, err := decodeObject(ev.call.args)
+			if err != nil || validateSearchValue(plan.loading.constraints[tool.wire], args) != nil {
+				return errRouted
+			}
 		}
 		e.toolCount++
 		return e.toolCall(ev.call, tool)

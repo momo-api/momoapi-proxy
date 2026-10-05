@@ -7,6 +7,12 @@ import (
 
 // Never echo the client's grammar or other request contents in errors.
 func routedPayloadError(w http.ResponseWriter, err error) {
+	for _, candidate := range []error{errUnsupportedToolLoading, errUnsupportedSearchSchema} {
+		if errors.Is(err, candidate) {
+			http.Error(w, candidate.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	if errors.Is(err, errUnsupportedToolFormat) {
 		http.Error(w, "unsupported_tool_format", http.StatusBadRequest)
 		return

@@ -54,6 +54,7 @@ type routeRequest struct {
 	allowed               map[string]bool
 	messages              []routeMessage
 	tools                 []routeTool
+	loading               *toolLoading
 }
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
@@ -64,6 +65,7 @@ type chatPlan struct {
 	body              []byte
 	model             string
 	tools             map[string]chatTool
+	loading           *toolLoading
 }
 
 func str(v any) string         { s, _ := v.(string); return s }
@@ -123,7 +125,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	var p map[string]any
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.UseNumber()
-	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens") {
+	if decoder.Decode(&p) != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls") {
 		return nil, errRouted
 	}
 	if v, present := p["stream"]; present {
@@ -133,6 +135,11 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
 	ir := &routeRequest{model: plan.model, stream: p["stream"] == true}
+	loading, err := newToolLoading(p)
+	if err != nil {
+		return nil, err
+	}
+	ir.loading, plan.loading = loading, loading
 	if v, present := p["max_output_tokens"]; present {
 		n, ok := tokenCount(v)
 		if !ok || n == 0 || n > 1048576 {
@@ -151,6 +158,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		}
 	}
 	tools := []routeTool{}
+	loadingSource := "top"
 	var addTool func(map[string]any, string) error
 	addTool = func(t map[string]any, ns string) error {
 		if t == nil {
@@ -176,11 +184,55 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			return nil
 		}
 		kind := str(t["type"])
+		if kind == "tool_search" {
+			if loading == nil {
+				return errUnsupportedToolLoading
+			}
+			if ns != "" || loadingSource != "top" || !only(t, "type", "execution", "description", "parameters") || t["execution"] != "client" || loading.search != nil {
+				return errRouted
+			}
+			schema := obj(t["parameters"])
+			if schema == nil || schema["type"] != "object" || validateSearchSchema(schema) != nil {
+				return errUnsupportedSearchSchema
+			}
+			description := "Search for additional client tools. The client performs the lookup."
+			if d, present := t["description"]; present {
+				s, ok := d.(string)
+				if !ok {
+					return errRouted
+				}
+				description = s
+			}
+			if len(plan.tools) >= 128 {
+				return errRouted
+			}
+			identity := chatTool{wire: clientSearchWire, kind: "tool_search"}
+			plan.tools[clientSearchWire] = identity
+			tools = append(tools, routeTool{identity, description, schema})
+			loading.search = schema
+			loading.active[clientSearchWire] = true
+			return nil
+		}
 		if kind != "function" && kind != "custom" {
 			return errRouted
 		}
-		if !only(t, "type", "name", "description", "parameters", "format") {
+		if !only(t, "type", "name", "description", "parameters", "format", "defer_loading", "strict") {
 			return errRouted
+		}
+		if strict, present := t["strict"]; present {
+			if kind != "function" || loading == nil {
+				return errUnsupportedToolLoading
+			}
+			b, ok := strict.(bool)
+			if !ok {
+				return errRouted
+			}
+			if b {
+				schema := obj(t["parameters"])
+				if schema == nil || schema["type"] != "object" || validateSearchSchema(schema) != nil || validateStrictSchema(schema) != nil {
+					return errUnsupportedSearchSchema
+				}
+			}
 		}
 		if format, present := t["format"]; present {
 			if kind != "custom" {
@@ -203,7 +255,24 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		} else {
 			ns = ""
 		}
-		if !wireName(wire) || len(plan.tools) >= 128 {
+		if !wireName(wire) {
+			return errRouted
+		}
+		if wire == clientSearchWire {
+			return errRouted
+		}
+		if loading != nil {
+			duplicate, err := loading.declare(t, ns, wire, loadingSource)
+			if err != nil {
+				return err
+			}
+			if duplicate {
+				return nil
+			}
+		} else if _, present := t["defer_loading"]; present {
+			return errUnsupportedToolLoading
+		}
+		if len(plan.tools) >= 128 {
 			return errRouted
 		}
 		if _, exists := plan.tools[wire]; exists {
@@ -237,6 +306,9 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			parameters = map[string]any{"type": "object", "properties": map[string]any{"input": map[string]any{"type": "string", "description": "Raw freeform input for this tool."}}, "required": []string{"input"}, "additionalProperties": false}
 		}
 		plan.tools[wire] = chatTool{wire, name, ns, kind}
+		if loading != nil && t["strict"] == true {
+			loading.constraints[wire] = obj(parameters)
+		}
 		tools = append(tools, routeTool{plan.tools[wire], description, parameters})
 		return nil
 	}
@@ -267,6 +339,9 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	}
 	pending := map[string]string{}
 	seen := map[string]bool{}
+	if loading != nil {
+		loading.seen = seen
+	}
 	for _, entry := range input {
 		m := obj(entry)
 		if m == nil {
@@ -278,7 +353,29 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			}
 		}
 		switch str(m["type"]) {
+		case "additional_tools", "tool_search_call", "tool_search_output":
+			if loading == nil {
+				return nil, errUnsupportedToolLoading
+			}
+			if len(pending) != 0 {
+				return nil, errRouted
+			}
+			if err := loading.input(m, &messages, seen, func(defs []any) error {
+				loadingSource = "loaded"
+				defer func() { loadingSource = "top" }()
+				for _, def := range defs {
+					if err := addTool(obj(def), ""); err != nil {
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				return nil, err
+			}
 		case "function_call", "custom_tool_call":
+			if loading != nil && (loading.pending != "" || len(pending) != 0) {
+				return nil, errRouted
+			}
 			// A tool-use turn must finish declaring calls before returning results.
 			if len(seen) >= 128 || len(pending) > 0 && len(messages) > 0 && messages[len(messages)-1].role == "tool" {
 				return nil, errRouted
@@ -296,8 +393,13 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			wire := name
 			if ns != "" && ns != "functions" {
 				wire = ns + "__" + name
+			} else {
+				ns = ""
 			}
 			tool, exists := plan.tools[wire]
+			if loading != nil && (!loading.active[wire] || tool.name != name || tool.namespace != ns) {
+				return nil, errRouted
+			}
 			id := str(m["call_id"])
 			if !exists || len(id) == 0 || len(id) > 128 || seen[id] || ((str(m["type"]) == "custom_tool_call") != (tool.kind == "custom")) {
 				return nil, errRouted
@@ -321,7 +423,11 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 				args = string(b)
 				ok = true
 			}
-			if _, err := decodeObject(args); !ok || err != nil {
+			parsed, err := decodeObject(args)
+			if !ok || err != nil {
+				return nil, errRouted
+			}
+			if loading != nil && loading.constraints[wire] != nil && validateSearchValue(loading.constraints[wire], parsed) != nil {
 				return nil, errRouted
 			}
 			seen[id] = true
@@ -363,7 +469,8 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			content, err := textParts(m["content"])
 			// Preserve upstream text interleaved within one tool-use turn;
 			// never accept user/system or partial-result interruptions.
-			if len(pending) != 0 && (role != "assistant" || len(messages) > 0 && messages[len(messages)-1].role == "tool") {
+			hasPending := len(pending) != 0 || loading != nil && loading.pending != ""
+			if hasPending && (role != "assistant" || len(messages) > 0 && messages[len(messages)-1].role == "tool") {
 				return nil, errRouted
 			}
 			if err != nil {
@@ -372,7 +479,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			if content == "" && role == "user" {
 				content = "Continue."
 			}
-			if len(pending) > 0 && role == "assistant" && len(messages) > 0 && messages[len(messages)-1].role == "assistant" {
+			if hasPending && role == "assistant" && len(messages) > 0 && messages[len(messages)-1].role == "assistant" {
 				last := &messages[len(messages)-1]
 				if last.text != "" && content != "" {
 					last.text += "\n"
@@ -386,7 +493,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			return nil, errRouted
 		}
 	}
-	if len(pending) != 0 {
+	if len(pending) != 0 || loading != nil && loading.pending != "" {
 		return nil, errRouted
 	}
 	ir.messages, ir.tools = messages, tools
@@ -411,7 +518,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 					ir.allowed = map[string]bool{}
 					for _, entry := range selectors {
 						tool, err := resolveSelector(obj(entry), plan.tools)
-						if err != nil || ir.allowed[tool.wire] {
+						if err != nil || ir.allowed[tool.wire] || loading != nil && !loading.active[tool.wire] {
 							return nil, errRouted
 						}
 						ir.allowed[tool.wire] = true
@@ -419,14 +526,17 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 					ir.choice = str(selector["mode"])
 				} else {
 					tool, err := resolveSelector(selector, plan.tools)
-					if err != nil {
-						return nil, err
+					if err != nil || loading != nil && !loading.active[tool.wire] {
+						return nil, errRouted
 					}
 					ir.choice, ir.selected = "specific", tool.wire
 				}
 			}
 		}
 	} else if _, present := p["tool_choice"]; present {
+		return nil, errRouted
+	}
+	if loading != nil && len(ir.callableTools()) == 0 && ir.choice == "required" {
 		return nil, errRouted
 	}
 	effort := str(p["reasoning_effort"])
@@ -449,6 +559,13 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 // Named and allowed-set selectors share declared identity resolution. Subset
 // filtering must never turn an otherwise ambiguous bare name into a guessed ID.
 func resolveSelector(selector map[string]any, tools map[string]chatTool) (chatTool, error) {
+	if selector != nil && selector["type"] == "tool_search" && only(selector, "type") {
+		tool, ok := tools[clientSearchWire]
+		if ok && tool.kind == "tool_search" {
+			return tool, nil
+		}
+		return chatTool{}, errRouted
+	}
 	if selector == nil || !only(selector, "type", "name", "namespace") {
 		return chatTool{}, errRouted
 	}
@@ -491,12 +608,12 @@ func resolveSelector(selector map[string]any, tools map[string]chatTool) (chatTo
 // declarations upstream, but keep the full identities for history and decoding.
 // This does not promise native Responses prompt-cache preservation.
 func (ir *routeRequest) callableTools() []routeTool {
-	if ir.allowed == nil {
+	if ir.allowed == nil && ir.loading == nil {
 		return ir.tools
 	}
 	tools := make([]routeTool, 0, len(ir.allowed))
 	for _, tool := range ir.tools {
-		if ir.allowed[tool.wire] {
+		if (ir.allowed == nil || ir.allowed[tool.wire]) && (ir.loading == nil || ir.loading.active[tool.wire]) {
 			tools = append(tools, tool)
 		}
 	}
@@ -505,6 +622,10 @@ func (ir *routeRequest) callableTools() []routeTool {
 
 // Bare names are restored only if unambiguous; never guess between namespaces.
 func (p *chatPlan) restoreTool(name string) (chatTool, bool) {
+	if name == clientSearchWire {
+		tool, ok := p.tools[name]
+		return tool, ok && tool.kind == "tool_search"
+	}
 	// An exact namespace alias carries identity. A bare top-level name does not
 	// disambiguate an upstream that stripped a same-named tool's namespace.
 	if tool, ok := p.tools[name]; ok && tool.name != name {
@@ -568,6 +689,9 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 		messages = append([]any{map[string]any{"role": "system", "content": strings.Join(systems, "\n\n")}}, messages...)
 	}
 	body := map[string]any{"model": ir.model, "stream": true, "stream_options": map[string]bool{"include_usage": true}, "messages": messages}
+	if ir.loading != nil {
+		body["parallel_tool_calls"] = false
+	}
 	if ir.maxOutputTokens != 0 {
 		body["max_completion_tokens"] = ir.maxOutputTokens
 	}
@@ -591,7 +715,7 @@ func serializePlan(ir *routeRequest, body map[string]any) (*chatPlan, error) {
 	if err != nil || len(b) > MaxRequest {
 		return nil, errRouted
 	}
-	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, choice: ir.choice, selected: ir.selected, allowed: ir.allowed, tools: map[string]chatTool{}}
+	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, choice: ir.choice, selected: ir.selected, allowed: ir.allowed, tools: map[string]chatTool{}, loading: ir.loading}
 	for _, t := range ir.tools {
 		p.tools[t.wire] = t.chatTool
 	}

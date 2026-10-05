@@ -49,8 +49,8 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 	// The same strict IR rejects media, unknown fields, malformed/duplicate/orphan
 	// calls, interrupted parallel results and undeclared namespace identities.
 	checked, _ := json.Marshal(p)
-	if _, err := parseRoutedRequest(checked); err != nil {
-		return nil, err
+	if ir, err := parseRoutedRequest(checked); err != nil || ir.loading != nil {
+		return nil, errRouted // deferred lifecycle checkpoint support must not be guessed
 	}
 	objects := make([]map[string]any, len(items))
 	lastUser, latestAssistant := -1, -1

@@ -26,6 +26,7 @@ func main() {
 		Status int
 		Mode   string
 		Path   string
+		Search bool
 	}
 	if json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&fixture) != nil {
 		os.Exit(1)
@@ -66,7 +67,11 @@ func main() {
 			io.WriteString(w, "redacted synthetic failure")
 			return
 		}
-		for _, b := range []byte(fixture.Stream) {
+		response := fixture.Stream
+		if fixture.Search && strings.Contains(string(data), "momo__client_tool_search") {
+			response = strings.ReplaceAll(response, `"name":"tool_search"`, `"name":"momo__client_tool_search"`)
+		}
+		for _, b := range []byte(response) {
 			w.Write([]byte{b})
 			w.(http.Flusher).Flush()
 		}

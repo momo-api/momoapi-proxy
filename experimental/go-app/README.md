@@ -32,7 +32,7 @@ The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
 It rejects unknown payload fields/options, media, foreign/expired history references, opaque/provider compaction,
-built-in tools, grammar on converted paths, malformed/unmatched
+hosted built-in tools, grammar on converted paths, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
 Custom text tools include exec/apply_patch with omitted format or exactly
@@ -44,6 +44,44 @@ Converted grammar/unknown formats return 400 unsupported_tool_format before any
 upstream send; native Responses/default passthrough preserve format bytes unchanged
 and delegate enforcement to the upstream. This is not grammar support or full
 Codex exec compatibility. Custom format is forbidden on function declarations.
+
+### Explicit client-search compatibility (not native deferred loading)
+
+Converted Chat/Claude/unsigned Gemini requests can opt in per request with
+momo_tool_loading:"client-search" and parallel_tool_calls:false. Without this
+policy, search/defer_loading/additional_tools reject with 400
+unsupported_tool_loading; default/native Responses still preserve exact bytes.
+Declare one top-level tool_search with execution:"client" and an object parameters
+schema. A private reserved function alias momo__client_tool_search avoids confusing
+it with an ordinary function named tool_search. The proxy returns tool_search_call
+with object arguments, execution:"client" and the upstream call_id (1–64 bytes).
+The client does discovery; this app never executes a search, skill, shell or MCP.
+
+Reply with paired tool_search_output (execution:"client", same call_id,
+status:"completed" optional, tools array). Empty results are valid. Returned
+function/custom text definitions, including defer_loading:true, become callable
+only after that result. Original input order is validated: no future definition
+can authorize an earlier call, no orphan/duplicate/interrupted search, no changed
+definition for an existing identity, and no second tool call per response. Repeat
+top-level declarations/policy each request; definitions are not hidden global state.
+additional_tools accepts role:"developer" and nonempty explicitly loaded definitions;
+defer_loading:true there rejects instead of guessing its availability. Namespaces
+use existing type/name/tools shape; namespace descriptions remain unsupported.
+Named/allowed_tools selectors can use {type:"tool_search"}; inactive tools reject.
+
+Only current loaded definitions are projected eagerly into the provider tool list;
+search results stay client tool-result data, not developer prose. This DOES NOT
+preserve native prompt/cache layout or implement hosted/server search. Converted
+strict:true functions use local validation before emitting/accepting calls, NOT
+provider constrained generation. All objects require additionalProperties:false
+and every property required. Supported schema keywords: type (single object/array/
+string/integer/number/boolean/null), description, properties, required,
+additionalProperties (boolean), items, scalar enum, minimum/maximum,
+min/maxLength and min/maxItems. Depth16/nodes2048/enum128 and numeric budgets apply;
+$ref/union/pattern/other vocabulary returns unsupported_search_schema before send.
+Local compact does not accept this lifecycle. Actual Codex discovery/live upstream
+acceptance and complete native deferred/strict schema support are still unverified.
+
 An upstream bare output name is rejected when top-level and namespaced declarations
 share that name, even if a top-level wire match exists. Exact namespace aliases remain
 resolvable; never guess which tool a namespace-stripping upstream intended.
@@ -387,7 +425,7 @@ WebView state/configure+remember/change-config/load/start; native client uses au
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
 requests, plus named function SSE/JSON requests against the same core/mock
-(49 physical upstream requests in total, including an explicit model-catalog check, six allowed-tools and twelve raw exec/apply_patch SSE/JSON requests and three-protocol history continuation
+(61 physical upstream requests in total, including twelve client-search/load continuation requests, an explicit model-catalog check, six allowed-tools and twelve raw exec/apply_patch SSE/JSON requests and three-protocol history continuation
 and output-limit SSE/JSON incomplete terminals),
 then three local checkpoint JSON requests (zero additional upstream calls),
 checking exact namespace/unknown-field/Unicode bytes; native client

@@ -96,5 +96,8 @@ func probeNamedRequests(core *appcore.Core) error {
 	if err := probeCustomRequests(core); err != nil {
 		return err
 	}
+	if err := probeSearchRequests(core); err != nil {
+		return err
+	}
 	return probeHistoryRequests(core)
 }

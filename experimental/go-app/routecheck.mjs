@@ -44,7 +44,17 @@ const clientToolSamples=[
  {name:'exec',raw:'git status',node:'await tools.exec_command({ cmd: "git status" });'},
  {name:'apply_patch',raw:'*** Begin Patch\r\n*** Add File: example.txt\r\n+中文🙂\r\n*** End Patch\r\n',node:'*** Begin Patch\r\n*** Add File: example.txt\r\n+中文🙂\r\n*** End Patch'},
 ];
+const searchTool={type:'tool_search',execution:'client',description:'client discovery',parameters:{type:'object',properties:{goal:{type:'string'}},required:['goal'],additionalProperties:false}};
+const deferredTool={type:'namespace',name:'pad',tools:[{type:'function',name:'read',defer_loading:true,parameters:{type:'object',properties:{}}}]};
+const searchHistory=[{type:'tool_search_call',execution:'client',call_id:'search_history',arguments:{goal:'read'}},{type:'tool_search_output',execution:'client',call_id:'search_history',status:'completed',tools:[deferredTool]}];
+const searchCalls={Chat:args=>sse([chunk({tool_calls:[{index:0,id:'search_call',type:'function',function:{name:'tool_search',arguments:JSON.stringify(args)}}]},'tool_calls')]),Claude:args=>cs+ctool(0,'search_call','tool_search',JSON.stringify(args))+ce('tool_use'),Gemini:args=>gf([{functionCall:{id:'search_call',name:'tool_search',args}}],'STOP',gu)};
 const cases=[
+ ...[{label:'Chat',payload,path:undefined,single:chatSingle},{label:'Claude',payload:cp,path:'/v1/messages',single:claudeSingle},{label:'Gemini',payload:gp,path:gpath,single:geminiSingle}].flatMap(f=>[true,false].flatMap(stream=>[
+  {name:f.label+' client search object '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tools:[searchTool,deferredTool],momo_tool_loading:'client-search',parallel_tool_calls:false},path:f.path,stream:searchCalls[f.label]({goal:'read 中文🙂'}),search:true,json:!stream},
+  {name:f.label+' client search schema rejection '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tools:[searchTool,deferredTool],momo_tool_loading:'client-search',parallel_tool_calls:false},path:f.path,stream:searchCalls[f.label]({goal:17}),search:true,json:!stream,searchReject:true},
+  {name:f.label+' client search loaded deferred '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tools:[searchTool,deferredTool],momo_tool_loading:'client-search',parallel_tool_calls:false,input:[...f.payload.input,...searchHistory]},path:f.path,stream:f.single('read'),search:true,loaded:true,json:!stream},
+  {name:f.label+' client search empty result '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tools:[searchTool,deferredTool],momo_tool_loading:'client-search',parallel_tool_calls:false,input:[...f.payload.input,...searchHistory.map(v=>v.type==='tool_search_output'?{...v,tools:[]}:v)]},path:f.path,stream:searchCalls[f.label]({goal:'again'}),search:true,emptySearch:true,json:!stream},
+ ])),
  {name:'text Unicode fragmented',stream:text,payload},
  {name:'function custom namespace fragmented',stream:calls,payload},
  {name:'history function/output',stream:text,payload:{...payload,tools:tool.tools,input:[...payload.input,{type:'function_call',call_id:'history_read',name:'read',arguments:'{}'},{type:'function_call_output',call_id:'history_read',output:'done'},{role:'user',content:'continue'}]}},
@@ -119,7 +129,7 @@ async function launch(fixture){
   let line='';const timer=setTimeout(()=>reject(Error('routecheck startup timeout')),10000);
   child.once('error',reject);child.once('exit',()=>{clearTimeout(timer);reject(Error('routecheck exited before handoff'))});
   child.stdout.on('data',b=>{line+=b;if(line.includes('\n')){clearTimeout(timer);resolve(JSON.parse(line.split('\n')[0]))}});
-  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200,Path:fixture.path}));
+  child.stdin.end(JSON.stringify({Stream:fixture.stream,Status:fixture.status||200,Path:fixture.path,Search:fixture.search}));
  });
  return {child,handoff};
 }
@@ -157,6 +167,28 @@ for(const fixture of cases){
   const goResults=await Promise.all(Array.from({length:count},()=>invoke(goURL,handoff.api_key,fixture.payload)));
   const captures=await(await fetch(handoff.mock_url+'/capture')).json();
   assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
+  if(fixture.search){
+   const [n,g]=captures;
+   const declarations=b=>!fixture.path?b.tools.map(t=>t.function):fixture.path==='/v1/messages'?b.tools:b.tools[0].functionDeclarations;
+   const nt=declarations(n),gt=declarations(g);
+   assert.deepEqual(nt.map(t=>t.name),['pad__read']);
+   assert.deepEqual(gt.map(t=>t.name),fixture.loaded?['momo__client_tool_search','pad__read']:['momo__client_tool_search']);
+   const schema=fixture.path==='/v1/messages'?'input_schema':'parameters';
+   assert.deepEqual(gt[0][schema],searchTool.parameters);assert.deepEqual(nt[0][schema],deferredTool.tools[0].parameters);
+   if(fixture.loaded){assert.deepEqual(gt[1][schema],nt[0][schema]);assert.equal(goResults[0].output[0].namespace,'pad');assert.equal(goResults[0].output[0].name,'read');assert.equal(goResults[0].output[0].type,'function_call')}
+   if(!fixture.path)assert.equal(g.parallel_tool_calls,false);
+   if(fixture.path==='/v1/messages')assert.equal(g.tool_choice.disable_parallel_tool_use,true);
+   if(fixture.loaded||fixture.emptySearch){assert.ok(JSON.stringify(g).includes('search_history'));assert.ok(JSON.stringify(g).includes('momo__client_tool_search'))}
+   assert.ok(nodeResults[0].completed);
+   if(fixture.searchReject){assert.equal(goResults[0].completed,undefined);assert.equal(goResults[0].json,undefined);if(fixture.json)assert.equal(goResults[0].status,502);else assert.equal(goResults[0].truncated,true)}
+   else{
+    assert.ok(goResults[0].completed);assert.equal(goResults[0].json,fixture.json?true:undefined);
+    if(!fixture.loaded){const result=goResults[0];assert.equal(result.output.length,1);assert.equal(result.output[0].type,'tool_search_call');assert.equal(result.output[0].execution,'client');assert.equal(result.output[0].call_id,'search_call');assert.deepEqual(result.output[0].arguments,{goal:fixture.emptySearch?'again':'read 中文🙂'});assert.equal(nodeResults[0].output[0].type,'function_call');assert.equal(nodeResults[0].output[0].name,'tool_search')}
+   }
+   console.log('DIFFERENCE Go explicit ordered client-search hides unloaded schemas and validates arguments; Node converted routes omit search declaration, expose deferred definition, and emit ordinary function call. No native prompt layout or tool execution claim');
+   console.log('PASS uniform blackbox '+fixture.name);
+   continue;
+  }
   for(let i=0;i<count;i++){
    const n=structuredClone(captures[i]),g=structuredClone(captures[count+i]);
    if(fixture.limit){

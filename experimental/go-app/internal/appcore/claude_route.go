@@ -79,6 +79,14 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 		if ir.selected != "" {
 			body["tool_choice"] = map[string]string{"type": "tool", "name": ir.selected}
 		}
+		if ir.loading != nil && choice != "none" {
+			selection := map[string]any{"type": choice, "disable_parallel_tool_use": true}
+			if ir.selected != "" {
+				selection["type"] = "tool"
+				selection["name"] = ir.selected
+			}
+			body["tool_choice"] = selection
+		}
 	}
 	return serializePlan(ir, body)
 }
