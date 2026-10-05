@@ -302,7 +302,7 @@ func check() error {
 				if r.URL.Path == "/check-page-failure" {
 					step := r.URL.Query().Get("step")
 					known := false
-					for _, candidate := range []string{"initial", "nav-videos", "video-catalog", "video-generate", "video-task", "nav-images", "image-catalog", "image-generate", "image-task", "nav-routing", "nav-settings", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "image-mcp-copy", "video-mcp-copy", "codex-copy", "codex-catalog-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
+					for _, candidate := range []string{"initial", "nav-videos", "video-catalog", "video-generate", "video-task", "nav-images", "image-catalog", "image-generate", "image-task", "nav-routing", "nav-settings", "diagnostics-refresh", "diagnostics-clear", "nav-overview", "nav-integrations", "skill-copy", "mcp-copy", "image-mcp-copy", "video-mcp-copy", "codex-copy", "codex-catalog-copy", "configure", "load", "quota-refresh", "models-refresh", "start", "check-proxy", "check-native-stop", "check-routing", "check-stall", "stop", "check-done"} {
 						if step == candidate {
 							known = true
 						}

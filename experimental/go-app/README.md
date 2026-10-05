@@ -7,6 +7,25 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
 
+### Local diagnostics (explicit, no network)
+
+Settings: View redacted diagnostics reads only this Core under its lock. It reports
+runtime OS/arch/Go/version, configured/running/active/mode/listener-allocated flags,
+fixed resource limits and aggregate retained/live history/attachment/task counts.
+Expired retained entries are counted separately without cleanup, LRU touch or TTL
+renewal. No endpoint/port/Key, model/item/task IDs, body, filename or account paths.
+No provider query, DNS, inference, vault/client-config access, automatic upload,
+copy or file save. Clear report removes the page snapshot; state may have changed
+since capture. Stop/configuration changes clear it and fence late page responses.
+The native action requires exact origin plus page capability and empty POST; it is
+not available on the authenticated local API or MCP and never runs at startup.
+
+CLI `diagnostics` emits a secret-free **offline-process** JSON report, without
+stdin/env/config reads, Core/listener/GUI creation or running desktop discovery.
+It does not inspect another running instance or prove provider health, account
+wallet, model inference or client compatibility. Short output writes fail without
+retry. Review even this aggregate runtime information before sharing it.
+
 ### Explicit converted-model history replay
 
 In momo-routing, X-MOMO-History:replay-v1 on POST /v1/responses explicitly permits

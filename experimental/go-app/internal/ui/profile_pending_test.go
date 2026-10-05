@@ -21,9 +21,14 @@ func TestStorePromptDoesNotBlockStatusStopOrQuit(t *testing.T) {
 		SaveProfile: func(appcore.Config) error { close(entered); <-release; return nil },
 		Quit:        func() { quit.Add(1) },
 	})
+	page := httptest.NewRecorder()
+	h.ServeHTTP(page, httptest.NewRequest("GET", "/", nil))
+	_, rest, _ := strings.Cut(page.Body.String(), "const bridgeNonce='")
+	nonce, _, _ := strings.Cut(rest, "';")
 	call := func(path, body string) int {
 		r := httptest.NewRequest("POST", path, strings.NewReader(body))
 		r.Header.Set("Origin", "http://wails.localhost")
+		r.Header.Set("X-MOMO-Bridge", nonce)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w.Code
@@ -39,7 +44,7 @@ func TestStorePromptDoesNotBlockStatusStopOrQuit(t *testing.T) {
 	}
 	result := make(chan bool, 1)
 	go func() {
-		result <- call("/app/state", "") == 200 && call("/app/stop", "") == 200 && call("/app/start", "") == 409 && call("/app/quit", "{}") == 400 && call("/app/quit", "") == 200 && quit.Load() == 1
+		result <- call("/app/state", "") == 200 && call("/app/diagnostics", "") == 409 && call("/app/stop", "") == 200 && call("/app/start", "") == 409 && call("/app/quit", "{}") == 400 && call("/app/quit", "") == 200 && quit.Load() == 1
 	}()
 	select {
 	case ok := <-result:

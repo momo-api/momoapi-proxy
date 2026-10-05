@@ -394,6 +394,9 @@ def check_boundaries(session):
         session.request("GET", "/v1/models", 403, headers=headers)
     session.request("OPTIONS", "/v1/responses", 403, headers={"Origin": "https://foreign.invalid"})
     session.request("GET", "/app/state", 404)
+    session.request("POST", "/app/diagnostics", 401, authenticated=False)
+    session.request("POST", "/app/diagnostics", 404)
+    session.request("POST", "/app/diagnostics", 403, headers={"Origin":"http://wails.localhost"})
     session.request("POST", "/internal/attachments", 401, body=b"{}", authenticated=False)
     session.request("POST", "/internal/attachments", 403, body=b"{}", headers={"Origin": "https://foreign.invalid"})
     session.request("POST", "/internal/attachments", 400, body=b"{}")  # default passthrough mode
@@ -456,8 +459,44 @@ def check_codex_catalog(binary):
         require(result.returncode == 1 and result.stdout == b'', 'invalid catalog mode')
 
 
+def check_diagnostics(binary):
+    # Offline CLI must exit even while private stdin remains open/unwritten.
+    process = subprocess.Popen([str(binary), 'diagnostics'], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        require(process.wait(timeout=8) == 0, 'diagnostic CLI read blocked stdin')
+        require(json.loads(process.stdout.read())['scope'] == 'offline-process'
+                and process.stderr.read() == b'', 'diagnostic CLI open-stdin contract')
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=8)
+        process.stdin.close()
+        process.stdout.close()
+        process.stderr.close()
+    result = subprocess.run([str(binary), 'diagnostics'], input=SYNTHETIC_KEY.encode(),
+                            env={**os.environ, 'MOMO_LOCAL_API_KEY': SYNTHETIC_KEY,
+                                 'MOMO_API_KEY': SYNTHETIC_KEY}, capture_output=True, timeout=8)
+    require(result.returncode == 0 and result.stderr == b'', 'offline diagnostics')
+    require(SYNTHETIC_KEY.encode() not in result.stdout, 'diagnostics reflected stdin/env')
+    report = json.loads(result.stdout)
+    require(report['schema'] == 'momo-local-diagnostics-v1' and report['scope'] == 'offline-process',
+            'diagnostic schema/scope')
+    require(report['gateway'] == {'configured': False, 'running': False, 'active': 0,
+                                 'mode': 'passthrough', 'listener_allocated': False},
+            'diagnostic CLI claimed running desktop state')
+    require(report['verified_upstream'] is False and report['account_wallet'] is False
+            and report['cross_device'] is False, 'diagnostic capability claims')
+    require(report['limits']['request_bytes'] == 1048576 and report['limits']['response_bytes'] == 16777216
+            and report['limits']['history_ttl_seconds'] == 1800, 'diagnostic limits')
+    for args in (['diagnostics', 'extra'], ['diagnostics', '--endpoint', 'https://localhost']):
+        result = subprocess.run([str(binary), *args], input=b'', capture_output=True, timeout=8)
+        require(result.returncode == 1 and result.stdout == b'', 'diagnostic arbitrary arguments')
+
+
 def check_runtime(binary):
     binary = Path(binary).resolve(strict=True)
+    check_diagnostics(binary)
     check_codex_catalog(binary)
     check_invalid_inputs(binary)
     check_readonly_mcp(binary)

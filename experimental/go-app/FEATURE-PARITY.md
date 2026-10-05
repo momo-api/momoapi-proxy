@@ -18,7 +18,7 @@
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或签名供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询，编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
-| Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；真实 Codex 全功能未验收，无自动接入/更新 |
+| Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；新增显式本地脱敏aggregate快照/离线CLI，不查询客户端账号或上游、不代表完整doctor；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
 | Skill / MCP | Node `plugins/`、`src/mcp-image.mjs`、`src/mcp-video.mjs` | 可复制 Skill、默认只读 stdio；独立 mcp-images 私有首行，另有可复制无Key配置的 mcp-images-connect（客户端显式local session env）接入当前gateway；独立显式视频 MCP 私有配置/连接现有 gateway 子集；非现有插件直接兼容，完整媒体/通用第三方管理未迁移 |
 | 额度展示 | 兼容 NewAPI `GET /api/usage/token/`（非账户钱包） | 明确点击查询 Key 额度、已用/授予/到期/查询时间；不猜汇率，不获取账户登录态 |
@@ -36,7 +36,25 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### 显式跨转换模型历史回放（2026-10-06；本地通过，当前提交三平台待验收）
+### 显式本地脱敏诊断（2026-10-06；本地通过，新HEAD三平台待验收）
+
+设置页明确读取本Core runtime/运行状态/资源limits/aggregate retained与live计数。
+白名单typed快照，不序列化State/config，不含上游/端口/Key/模型/条目任务ID/
+正文/文件名/账号路径。读取同锁、不清理过期、不touchLRU或续TTL，不查询网络/
+DNS/模型/账号/vault/client config。没有自动上传/复制/保存/启动读取；page只
+手动查看和清空，Stop/config变化清空并epoch拒绝晚到快照。native空POST需要
+Origin+page capability；不是publicAPI/MCP。CLI diagnostics仅新offline-process
+静态契约/runtime，无stdin/env/Core/listener/GUI读取创建或桌面发现，短写abort
+不重发。不代表upstream health/fullDoctor/wallet/inference/client兼容。统一317
+与native125调用数量保持，新HEAD仍须完整三平台及产物验收。
+本地全量单测5遍、nogui/production vet、page/packaging通过；317同mock/resource
+统一TCP、125物理TLSmock原生探针（真实DOM读取/清空/运行快照/Stop清除）、
+普通Windowsproduction完整黑盒+官方SDK图片视频连接通过。CLI open/unwritten
+stdin仍退出、env/stdin不反射、参数门禁、public API无诊断route；并发Stop/config
+与同锁非mutating回归通过。设置页light/dark/620px实际合成快照截图 inspected、
+无横溢出；WSL普通nogui黑盒通过，不是本机安装GUI/真实provider健康证明。
+
+### 显式跨转换模型历史回放（2026-10-06；808e96f已完整验收）
 
 逐请求X-MOMO-History:replay-v1仅momo-routing Responses的Chat/Claude/unsigned
 Gemini。默认同模型；明确接受后跨转换模型previous_response_id回放整个canonical
@@ -55,7 +73,12 @@ tag的vet、页面/打包测试、普通production binary完整黑盒及官方MC
 图片/视频连接通过。首次新增媒体回归用escaped JSON字符串比较marker而误失败，
 改为解析字段精确比较后5遍通过；Gemini mock误要求body.model也已修正为URL模型。
 不削弱断言/增加重试；此前失败保留。Prism审查任务启动失败，无专家批准证据。
-当前提交三平台CI/产物需独立验收，不以旧HEAD的305/119替代。
+808e96f三平台18项首轮CI通过，6nativejobs各317统一TCP/125物理TLSmock/
+installed-or-mounted普通binary通过，Unix各5完整racepass。新3OS产物外内SHA/
+manifest/version/modes/formats及下载Windows普通payload黑盒/SDK通过；未执行
+本机installer。WSL普通nogui及真实官方Codex0.156五种freshprofile/read-only/
+zero-retry/mock流程各exit0/exact2requests通过，非真实跨模型Codex/付费上游证明。
+验收：https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6000551775
 
 ### DSML 工具文本转换（2026-10-06；核心62312f2已验收，界面增量待新HEAD验收）
 

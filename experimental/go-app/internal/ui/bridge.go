@@ -76,11 +76,11 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		}
 		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/task"
 		videoAction := r.URL.Path == "/app/videos/catalog" || r.URL.Path == "/app/videos/generate" || r.URL.Path == "/app/videos/task"
-		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config" || r.URL.Path == "/app/video-mcp-config" || r.URL.Path == "/app/codex-catalog") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
+		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config" || r.URL.Path == "/app/video-mcp-config" || r.URL.Path == "/app/codex-catalog" || r.URL.Path == "/app/diagnostics") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
 			return
 		}
-		if !videoAction && !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" && r.URL.Path != "/app/codex-catalog" && r.URL.Path != "/app/image-mcp-config" && r.URL.Path != "/app/video-mcp-config" {
+		if !videoAction && !imageAction && r.URL.Path != "/app/state" && r.URL.Path != "/app/configure" && r.URL.Path != "/app/start" && r.URL.Path != "/app/stop" && r.URL.Path != "/app/copy" && r.URL.Path != "/app/quit" && r.URL.Path != "/app/load" && r.URL.Path != "/app/forget" && r.URL.Path != "/app/quota" && r.URL.Path != "/app/models" && r.URL.Path != "/app/skill" && r.URL.Path != "/app/mcp-config" && r.URL.Path != "/app/codex-config" && r.URL.Path != "/app/codex-catalog" && r.URL.Path != "/app/image-mcp-config" && r.URL.Path != "/app/video-mcp-config" && r.URL.Path != "/app/diagnostics" {
 			http.NotFound(w, r)
 			return
 		}
@@ -180,6 +180,18 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		} else {
 			if len(data) != 0 {
 				http.Error(w, "body denied", 400)
+				return
+			}
+			if r.URL.Path == "/app/diagnostics" {
+				data, err := json.Marshal(core.Diagnostics())
+				if err != nil {
+					http.Error(w, "local diagnostics unavailable", 503)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if n, err := w.Write(data); err != nil || n != len(data) {
+					panic(http.ErrAbortHandler)
+				}
 				return
 			}
 			if r.URL.Path == "/app/models" {

@@ -5,6 +5,17 @@ description: Understand the MOMO Go local gateway preview and its protocol/secur
 
 # MOMO local gateway preview
 
+## Local redacted diagnostics
+
+Desktop Settings offers explicit local aggregate diagnostics: runtime, limits,
+configured/running/active flags and retained/live memory counts. No endpoints,
+ports, keys, item/model/task IDs, content, filenames or account paths; no network,
+vault or client-config lookup, no automatic upload/copy/save. Reading does not
+expire/touch/renew entries. This is not upstream health or inference proof.
+CLI diagnostics describes only its new offline-process, not another running app.
+No private input/config/env reads or GUI/listener creation; not an MCP tool/API.
+Review aggregate runtime information before sharing it.
+
 This is an instruction document, not an executable plugin. The client decides
 when to load it. No API keys are embedded. Never search for other apps' accounts.
 
