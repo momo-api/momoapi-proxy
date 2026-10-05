@@ -45,7 +45,16 @@ input (including cache read/creation) + output + total tokens; no currency mappi
 or full usage detail. Gemini requires STOP plus clean framed HTTP EOF, consumes
 usage-only trailers and rejects late errors/partial frames/physical disconnects.
 It projects prompt/candidate/total tokens plus cached/reasoning counts, without
-claiming reasoning content support. Chat has no usage mapping; no adapter synthesizes DSML tools;
+claiming reasoning content support. Chat requests stream_options.include_usage=true
+and maps validated prompt/completion/total and cached/reasoning token counts;
+details are subsets, never added again to totals. Absent usage is not fabricated.
+Counts must be safe nonnegative integers; Chat total equals input+output, cached/
+reasoning cannot exceed their parent counts, and reported counts cannot regress.
+Known audio/prediction details are validated but not projected; unknown usage fields
+are rejected rather than silently accepted. Usage-only trailers require a prior
+finish_reason and are not terminals: [DONE] is still mandatory. Upstreams rejecting
+include_usage are not retried/fallen back; native/default requests remain unchanged.
+No adapter synthesizes DSML tools;
 only successful full output is completed, with no local history cache.
 
 For these opt-in converted subsets, stream:true returns Responses SSE; false or
@@ -62,8 +71,9 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-Forty-five cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
-and false/omitted-stream JSON. Legacy Node emits SSE for these converted JSON requests. Known
+Fifty-three cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
+Legacy Node emits SSE for these converted JSON requests and does not request/map Chat usage. Known
 namespace, history schema, system/tool_choice, usage and premature-EOF differences
 are separately asserted/documented in
 [FEATURE-PARITY.md](FEATURE-PARITY.md). Normal build excludes this injection.

@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 仅精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses`；无无版本别名，无 compact |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
-| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/部分 custom 子集、namespace 恢复；支持 SSE 和最终 JSON；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
+| Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/部分 custom 子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；未知选项/媒体/exec/apply_patch 等拒绝，不宣称完整兼容 |
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；thinking/签名/媒体不支持 |
 | Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；thinking/签名/媒体不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
@@ -60,7 +60,7 @@ Claude 轮统一黑盒扩为20组：增加 Claude Unicode、function/custom、�
 用裸名和 raw；Go 保留 developer/system 指令与 tool_choice，Node 合并为用户文本
 且忽略 choice；Go 输出经校验的 token usage，Node 未输出。两种转换的 Go 都不把
 提前 EOF 当完成。每项差异有独立精确断言，不称全部等价。
-该轮之后的 JSON 增量见下；Chat usage、DSML、复杂工具/history/媒体仍是未完成门槛。
+该轮之后的 JSON / Chat usage 增量见下；DSML、复杂工具/history/媒体仍是未完成门槛。
 
 Gemini 轮统一黑盒扩为30组：增加原生路径与 alt=sse 查询、Unicode、function/custom、
 无签名配对历史、四并发、401/429/500、缺 STOP 的 EOF、system/tool_choice 与 usage
@@ -82,6 +82,16 @@ JSON 轮统一黑盒扩为45组：三种转换各增加 false-stream 文本、na
 保留/事件/工具预算约束，不消耗虚构的内部 SSE 字节预算。回归另测无提前写入、
 Stop取消、短写和默认/原生透传不变。真实 WebView 探针验证三协议 SSE / false /
 省略 stream（合计12次物理上游请求）。这些都不等于真实 MOMO 上游非流式已验证。
+
+Chat usage 轮扩为53组：SSE / JSON 各增加有效 usage、非法总数、计数回退、
+有 usage 但缺 [DONE]。Go 请求 stream_options.include_usage=true，Node 不请求；
+差异在实际上游捕获中独立精确断言。Go 投影 prompt/completion/total 与 cached/
+reasoning 子集，Node 不输出这些 Chat usage。单位是 token，不是价格/钱包；缓存/
+推理不能再次加入 total。整数安全范围、总数一致、子集上限、计数不回退均校验；
+已知 audio/prediction 明细校验但不投影，未知 usage 字段拒绝，未返回 usage 不编造。
+usage 尾帧不是成功终端，仍须 finish_reason+[DONE]。include_usage 被上游拒绝时
+不自动回退重发。单测另覆零值/安全整数边界/重复和递增 usage/缺字段/无提前写入；
+真实 WebView 三种 Chat 返回均检查完整 token usage。默认原字节透传仍不改。
 
 ## Magpie 借鉴边界
 

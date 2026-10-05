@@ -28,6 +28,7 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 	order := []int{}
 	retained := 0
 	finished := false
+	var usage map[string]any
 	dsmlTail := ""
 	return readRoutedSSE(ctx, body, func(_ string, raw string) (bool, error) {
 		if raw == "[DONE]" {
@@ -49,7 +50,7 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 			if err = e.flushText(); err != nil {
 				return false, err
 			}
-			return true, e.accept(streamEvent{kind: "complete"}, plan)
+			return true, e.accept(streamEvent{kind: "complete", usage: usage}, plan)
 		}
 		var chunk map[string]json.RawMessage
 		if json.Unmarshal([]byte(raw), &chunk) != nil || chunk == nil {
@@ -58,17 +59,43 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 		if _, exists := chunk["error"]; exists {
 			return false, errRouted
 		}
+		if raw, present := chunk["usage"]; present && string(raw) != "null" {
+			u, err := decodeObject(string(raw))
+			if err != nil {
+				return false, err
+			}
+			next, err := chatTokenUsage(u)
+			if err != nil {
+				return false, err
+			}
+			if usage != nil {
+				for _, k := range []string{"input_tokens", "output_tokens", "total_tokens"} {
+					if next[k].(int64) < usage[k].(int64) {
+						return false, errRouted
+					}
+				}
+				for _, pair := range [][2]string{{"input_tokens_details", "cached_tokens"}, {"output_tokens_details", "reasoning_tokens"}} {
+					if obj(next[pair[0]])[pair[1]].(int64) < obj(usage[pair[0]])[pair[1]].(int64) {
+						return false, errRouted
+					}
+				}
+			}
+			usage = next
+		}
 		var choices []struct {
 			Index        int
 			Delta        map[string]json.RawMessage
 			FinishReason *string `json:"finish_reason"`
 		}
-		if v, ok := chunk["choices"]; !ok || json.Unmarshal(v, &choices) != nil {
+		if v, ok := chunk["choices"]; !ok || json.Unmarshal(v, &choices) != nil || choices == nil {
 			return false, errRouted
 		}
 		if len(choices) == 0 {
+			if !finished || chunk["usage"] == nil || string(chunk["usage"]) == "null" {
+				return false, errRouted
+			}
 			return false, nil
-		} // usage-only: intentionally no usage claim
+		} // usage-only trailers are not a terminal; still require [DONE].
 		if len(choices) != 1 || choices[0].Index != 0 {
 			return false, errRouted
 		}
@@ -153,4 +180,51 @@ func convertChatStream(ctx context.Context, w http.ResponseWriter, body io.Reade
 		}
 		return false, nil
 	})
+}
+
+// Counts are provider-reported tokens, never currency or an account balance.
+// Cache/reasoning are subsets, not extra tokens added to the provider total.
+func chatTokenUsage(u map[string]any) (map[string]any, error) {
+	if u == nil || !only(u, "prompt_tokens", "completion_tokens", "total_tokens", "prompt_tokens_details", "completion_tokens_details") {
+		return nil, errRouted
+	}
+	in, ok := tokenCount(u["prompt_tokens"])
+	if !ok {
+		return nil, errRouted
+	}
+	out, ok := tokenCount(u["completion_tokens"])
+	if !ok {
+		return nil, errRouted
+	}
+	total, ok := tokenCount(u["total_tokens"])
+	if !ok || in+out > 1<<53-1 || total != in+out {
+		return nil, errRouted
+	}
+	var cached, reasoning int64
+	for _, spec := range []struct {
+		key, mapped string
+		allowed     []string
+		count       int64
+		dest        *int64
+	}{
+		{"prompt_tokens_details", "cached_tokens", []string{"cached_tokens", "audio_tokens"}, in, &cached},
+		{"completion_tokens_details", "reasoning_tokens", []string{"reasoning_tokens", "audio_tokens", "accepted_prediction_tokens", "rejected_prediction_tokens"}, out, &reasoning},
+	} {
+		if v, present := u[spec.key]; present && v != nil {
+			details := obj(v)
+			if details == nil || !only(details, spec.allowed...) {
+				return nil, errRouted
+			}
+			for key, value := range details {
+				n, ok := tokenCount(value)
+				if !ok || (key == spec.mapped || key == "audio_tokens") && n > spec.count {
+					return nil, errRouted
+				}
+				if key == spec.mapped {
+					*spec.dest = n
+				}
+			}
+		}
+	}
+	return map[string]any{"input_tokens": in, "output_tokens": out, "total_tokens": total, "input_tokens_details": map[string]any{"cached_tokens": cached}, "output_tokens_details": map[string]any{"reasoning_tokens": reasoning}}, nil
 }

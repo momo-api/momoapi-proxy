@@ -122,3 +122,14 @@ JSON 转换错误在任何响应写入前返回脱敏502；最终写短写/失�
 mock黑盒明确记录 Node 对这些 false/省略请求仍输出 SSE 的差异；单测另验证
 Stop取消、无提前头/正文、写失败边界与默认透传。仍未三方统一测/真实上游验收，
 仍缺 Chat usage、签名续接、compact 与完整客户端兼容；Muse 不在目标内。
+
+## Chat usage 增量（2026-10-05）
+
+Chat 请求编码明确添加 stream_options.include_usage=true，默认透传不改，不新增
+失败后第二次发送。decoder 将 usage 投影到已有 complete 事件，SSE / 最终 JSON
+共享输出，无客户端 wire 再解析。整数安全/总数一致/子集范围/计数单调均在终端前
+校验；只投影输入、输出、总数、缓存与推理 token，已知 audio/prediction 数值校验
+但不输出；未知 usage 字段拒绝，缺失 usage 不编造。[DONE] 和已支持 finish_reason
+仍为成功条件；usage 不提升未完成响应。53组统一 mock 黑盒精确断言 Node 不请求/
+不输出 usage 的差异，真实 WebView 验证三种返回路径。尚未真实上游验收，不把
+token 当钱包或费用。DSML、签名续接、compact 与全客户端兼容仍待实现。

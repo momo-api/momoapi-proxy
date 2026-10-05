@@ -432,7 +432,7 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 	if len(systems) > 0 {
 		messages = append([]any{map[string]any{"role": "system", "content": strings.Join(systems, "\n\n")}}, messages...)
 	}
-	body := map[string]any{"model": ir.model, "stream": true, "messages": messages}
+	body := map[string]any{"model": ir.model, "stream": true, "stream_options": map[string]bool{"include_usage": true}, "messages": messages}
 	tools := []any{}
 	for _, t := range ir.tools {
 		tools = append(tools, map[string]any{"type": "function", "function": map[string]any{"name": t.wire, "description": t.description, "parameters": t.schema}})

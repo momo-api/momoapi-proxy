@@ -23,6 +23,10 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   failures before JSON writing return redacted 502; partial writes abort HTTP.
   This is not a verified live-upstream JSON guarantee.
   Strictly rejects media/history references/unknown options;
+  Chat requests stream_options.include_usage and maps validated input/output/total,
+  cached/reasoning tokens (not money). Missing usage is not fabricated; invalid or
+  decreasing counts abort without completed. Usage trailers still require [DONE].
+  Upstreams rejecting include_usage are not retried or silently downgraded.
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures, media and explicit token-limit options are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;

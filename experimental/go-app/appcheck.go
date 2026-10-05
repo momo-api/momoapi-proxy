@@ -28,7 +28,7 @@ const responsesStream = "event: response.output_item.added\ndata: {\"item\":{\"n
 const chatStream = "data: {\"choices\":[{\"delta\":{\"content\":\"中文🙂\"}}],\"provider_extra\":true}\r\n\r\ndata: [DONE]\n\n"
 const modelsResponse = `{"data":[{"id":"mock"}]}`
 const routedProbeRequest = `{"model":"gpt-5.5","stream":true,"input":[{"role":"user","content":"hi"}]}`
-const routedProbeBody = `{"messages":[{"content":"hi","role":"user"}],"model":"gpt-5.5","stream":true}`
+const routedProbeBody = `{"messages":[{"content":"hi","role":"user"}],"model":"gpt-5.5","stream":true,"stream_options":{"include_usage":true}}`
 const claudeProbeRequest = `{"model":"claude-sonnet-4-6","stream":true,"input":[{"role":"user","content":"hi"}]}`
 const claudeProbeBody = `{"max_tokens":12240,"messages":[{"content":[{"text":"hi","type":"text"}],"role":"user"}],"model":"claude-sonnet-4-6","stream":true}`
 const geminiProbeRequest = `{"model":"gemini-2.5-flash","stream":true,"input":[{"role":"user","content":"hi"}]}`
@@ -119,7 +119,7 @@ func check() error {
 				if string(data) == routedProbeBody && r.Method == "POST" {
 					upstreamRequests.Add(1)
 					w.Header().Set("Content-Type", "text/event-stream")
-					io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"routed-ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+					io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"routed-ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":5,\"total_tokens\":8,\"prompt_tokens_details\":{\"cached_tokens\":2},\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\ndata: [DONE]\n\n")
 					return
 				}
 				if r.Method != "POST" || string(data) != chatRequest {
@@ -347,6 +347,9 @@ func probeRoutedRequest(core *appcore.Core) error {
 			_ = response.Body.Close()
 			if err != nil || response.StatusCode != 200 || !strings.Contains(string(data), tc.text) {
 				return errors.New("routed result")
+			}
+			if tc.payload == routedProbeRequest && (!strings.Contains(string(data), `"input_tokens":3`) || !strings.Contains(string(data), `"output_tokens":5`) || !strings.Contains(string(data), `"total_tokens":8`) || !strings.Contains(string(data), `"cached_tokens":2`) || !strings.Contains(string(data), `"reasoning_tokens":1`)) {
+				return errors.New("routed Chat usage")
 			}
 			if payload == tc.payload {
 				if !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") || !strings.Contains(string(data), "response.completed") {
