@@ -25,7 +25,10 @@ var errUnsupportedToolImage = errors.New("unsupported_tool_image_output")
 // URLs are references delegated to the upstream; lexical checks are not DNS/
 // redirect or image-content validation. Inline data is header-checked, not decoded
 // to a full pixel buffer. The global request/history budget remains authoritative.
-type routeImage struct{ url, mime, data, detail string }
+type routeImage struct {
+	url, mime, data, detail string
+	width, height           int
+}
 type imageBudget struct{ count, files, bytes int }
 
 func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*routeImage, error) {
@@ -94,6 +97,7 @@ func parseRouteImage(m map[string]any, model string, budget *imageBudget) (*rout
 			return nil, errUnsupportedImage
 		}
 		result.mime, result.data = inlineMIME, encoded
+		result.width, result.height = cfg.Width, cfg.Height
 		inlineBytes = len(data)
 	} else {
 		if !validMediaURL(s) {

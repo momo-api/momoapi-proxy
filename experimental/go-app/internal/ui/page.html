@@ -70,14 +70,21 @@
 <section class="card"><div class="card-head"><h2>内置 MCP</h2><span class="badge" data-tone="good">只读 stdio</span></div><div class="card-body settings-copy"><p>独立启动本程序的 <code>mcp</code> 子命令，提供 <code>gateway_capabilities</code> 工具与 Skill 资源。不需要 Key，不查询账单，不调用模型。</p><div class="row-buttons"><button id="mcp-copy">复制 MCP 配置</button></div><p class="hint" style="margin-top:15px">配置包含本程序路径，请在可信客户端手动导入。路径移动或升级后重新复制；不自动启动或安装第三方服务。</p></div></section></div>
 <div class="integration-grid section-gap"><section class="card"><div class="card-head"><h2>图片 MCP · 连接本地网关</h2><span class="badge">显式启用 · 可能计费</span></div><div class="card-body settings-copy"><p>先启动网关，再复制无密钥配置；客户端启动本程序的 <code>mcp-images-connect</code>，通过当前 127.0.0.1 端口复用目录、生成和任务。</p><div class="row-buttons"><button id="image-mcp-copy" disabled>复制图片 MCP 配置</button></div><p class="hint" style="margin-top:15px">客户端必须私下继承 <code>MOMO_LOCAL_API_KEY</code>（来自另行复制的本地连接，不是上游 Key）；勿写入共享配置。应用重启后端口/Key 变化，需重新接入。确认字段只是客户端声明，需先征得用户生成意图；无自动查询、重试、轮询、下载或安装。</p></div></section>
 <section class="card"><div class="card-head"><h2>视频 MCP · 连接本地网关</h2><span class="badge">显式启用 · 可能计费</span></div><div class="card-body settings-copy"><p>先启动网关，再复制无密钥配置；客户端启动本程序的 <code>mcp-videos-connect</code>，通过当前 127.0.0.1 端口复用目录、生成和任务。</p><div class="row-buttons"><button id="video-mcp-copy" disabled>复制视频 MCP 配置</button></div><p class="hint" style="margin-top:15px">客户端必须私下继承 <code>MOMO_LOCAL_API_KEY</code>（来自另行复制的本地连接，不是上游 Key）；勿写入共享配置。应用重启后端口/Key 变化，需重新接入。确认字段只是客户端声明，需先征得用户生成意图；无自动查询、重试、轮询、下载或安装。本地 Token 是完整 API 凭据，并非视频专用权限；只交给可信客户端。</p></div></section></div>
-<details id="integration-boundaries" class="contract-details"><summary>完整支持边界 · 工具不等于路由</summary><div class="card-body"><div class="integration-note"><strong>客户端自己的 Skill / MCP 工具</strong><p>由 Codex 等客户端管理和执行。本代理透传 Responses namespace/custom tools 与 Chat 工具字段，不替客户端运行插件。能透传不代表所有模型都能执行所有工具。</p></div><div class="integration-note"><strong>现有 MOMO Image / Video</strong><p>已有 Node 版插件和 Skill；Go 新增目录优先的图片生成与本进程任务查询 API 子集；必须先查询能力、明确选模型，可能计费。图片工作台支持明确生成 / 手动任务 / 内联预览，另有独立显式图片 MCP（可复制配置连接当前本地网关，客户端显式设置本地 Key）；视频另有明确查询目录 / 生成 / 手动任务的两种 APIMart API 子集（视频工作台 + API + 独立 MCP 子集）；无编辑或磁盘保存，不把现有插件直接挂到 Go 宣称完整兼容；不自动读取 Node Key。</p></div><div class="integration-note"><strong>第三方管理与自动安装</strong><p>尚未实现通用 Skill 商店、MCP 进程管理或客户端自动配置。外部技能和服务可能执行代码或访问数据，必须明确授权。</p></div></div></details></section>
+<details id="integration-boundaries" class="contract-details"><summary>完整支持边界 · 工具不等于路由</summary><div class="card-body"><div class="integration-note"><strong>客户端自己的 Skill / MCP 工具</strong><p>由 Codex 等客户端管理和执行。本代理透传 Responses namespace/custom tools 与 Chat 工具字段，不替客户端运行插件。能透传不代表所有模型都能执行所有工具。</p></div><div class="integration-note"><strong>现有 MOMO Image / Video</strong><p>已有 Node 版插件和 Skill；Go 新增目录优先的图片生成与本进程任务查询 API 子集；必须先查询能力、明确选模型，可能计费。图片工作台支持明确生成 / 手动任务 / 内联预览，另有独立显式图片 MCP（可复制配置连接当前本地网关，客户端显式设置本地 Key）；视频另有明确查询目录 / 生成 / 手动任务的两种 APIMart API 子集（视频工作台 + API + 独立 MCP 子集）；已新增目录授权参考图编辑、本地文件选择与显式预览；无磁盘保存，不把现有插件直接挂到 Go 宣称完整兼容；不自动读取 Node Key。</p></div><div class="integration-note"><strong>第三方管理与自动安装</strong><p>尚未实现通用 Skill 商店、MCP 进程管理或客户端自动配置。外部技能和服务可能执行代码或访问数据，必须明确授权。</p></div></div></details></section>
 <section id="view-images" role="tabpanel" aria-labelledby="nav-images" hidden>
-<div class="grid"><section class="card"><div class="card-head"><h2>新建图片</h2><span class="badge">生成子集 · 手动操作</span></div><div class="card-body">
+<div class="grid"><section class="card"><div class="card-head"><h2>新建图片</h2><span class="badge">生成 / 编辑 · 手动操作</span></div><div class="card-body">
 <div class="image-status"><span id="image-catalog-state" class="badge">尚未查询</span><button id="image-catalog">查询图片能力</button></div>
 <p id="image-catalog-note" class="hint" role="status" aria-live="polite">启动代理后明确查询；不自动选择模型，不调用生成。</p>
 <div class="image-form" style="margin-top:20px"><label class="field"><span>选择模型</span><select id="image-model" disabled><option value="">先查询，再手动选择</option></select></label>
 <label class="field"><span>操作</span><select id="image-operation"><option value="generate">生成图片</option><option value="edit">编辑参考图（需目录授权）</option></select></label>
-<label id="image-reference-field" class="field" hidden><span>参考图（每行一个 data:image/…;base64,…）</span><textarea id="image-references" maxlength="150000" placeholder="粘贴内联图片；APIMart 也接受公共 HTTPS 地址。"></textarea><small id="image-reference-note" class="hint">不读取文件、不抓取 URL；参考图连同提示词会发送到已配置上游。桌面请求总大小最多 160 KiB。</small></label>
+<section id="image-reference-field" hidden>
+<label class="field"><span>选择本地参考图</span><input id="image-reference-files" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple><small>只读取本次明确选择的图片，保持原始字节，不裁切或转码。总文件最多 700 KiB；校验后可本地预览，不会自动提交上游。</small></label>
+<div class="row-buttons"><button id="image-reference-clear" type="button">清空本地参考图</button></div>
+<p id="image-reference-status" class="hint" role="status" aria-live="polite">尚未选择图片。</p>
+<div id="image-reference-list" class="image-results"></div><img id="image-reference-preview" class="image-preview" alt="明确选择的本地参考图预览" hidden>
+<details><summary>粘贴参考地址 / data URL（可选）</summary><label class="field"><span>每行一个参考；按本地文件在前、粘贴项在后的顺序提交</span><textarea id="image-references" maxlength="1000000" placeholder="APIMart 可接受公共 HTTPS 地址；其余使用 data:image/…;base64,…"></textarea></label></details>
+<p id="image-reference-note" class="hint">参考图连同提示词只在逐次确认后发送上游；桌面编辑请求总大小最多 1 MiB。</p>
+</section>
 <label class="field"><span>提示词</span><textarea id="image-prompt" maxlength="32000" placeholder="描述主题、构图、颜色与细节；不发送账号凭据。"></textarea></label>
 <label class="field"><span>图片数量</span><select id="image-n" disabled><option value="">先选择模型</option></select></label>
 <details><summary>高级参数（JSON 对象）</summary><label class="field"><span>仅填目录支持的参数；不覆盖 model / prompt / n</span><textarea id="image-options" maxlength="8192" placeholder='例如：{"aspect_ratio":"16:9","quality":"high"}'>{}</textarea></label><pre id="image-controls">尚未选择模型</pre></details>
@@ -219,25 +226,86 @@ byId('video-catalog').onclick=()=>{if(mutationPending||!lastState?.Running)retur
 byId('video-model').onchange=selectVideoModel;byId('video-generate').onclick=generateVideo;
 byId('video-task').onclick=()=>byId('video-task').disabled?false:videoAction('task',{task_id:videoTaskID});
 for(const id of ['video-prompt','video-options','video-duration','video-resolution','video-ratio','video-consent'])byId(id).oninput=updateVideoControls;
-function resetImageCatalog(note){imageCatalog=null;byId('image-model').replaceChildren(new Option('先查询，再手动选择',''));byId('image-n').replaceChildren(new Option('先选择模型',''));byId('image-catalog-state').textContent='尚未查询';byId('image-catalog-note').textContent=note;byId('image-controls').textContent='尚未选择模型';byId('image-consent').checked=false}
-function resetImages(note='配置变化后请重新查询；没有撤销已提交的远端任务。'){imageEpoch++;resetImageCatalog(note);imageTaskID='';imageTaskExpiry=0;byId('image-results').replaceChildren();byId('image-preview').hidden=true;byId('image-preview').removeAttribute('src');byId('image-result-state').textContent='尚未生成';byId('image-result-note').textContent=note;byId('image-prompt').value='';byId('image-options').value='{}';byId('image-references').value='';byId('image-operation').value='generate'}
+function resetImageCatalog(note){clearLocalImageReferences();imageCatalog=null;byId('image-model').replaceChildren(new Option('先查询，再手动选择',''));byId('image-n').replaceChildren(new Option('先选择模型',''));byId('image-catalog-state').textContent='尚未查询';byId('image-catalog-note').textContent=note;byId('image-controls').textContent='尚未选择模型';byId('image-consent').checked=false}
+function resetImages(note='配置变化后请重新查询；没有撤销已提交的远端任务。'){imageEpoch++;clearLocalImageReferences();resetImageCatalog(note);imageTaskID='';imageTaskExpiry=0;byId('image-results').replaceChildren();byId('image-preview').hidden=true;byId('image-preview').removeAttribute('src');byId('image-result-state').textContent='尚未生成';byId('image-result-note').textContent=note;byId('image-prompt').value='';byId('image-options').value='{}';byId('image-references').value='';byId('image-operation').value='generate'}
 function selectedImageProfile(){return imageCatalog?.models.find(p=>p.id===byId('image-model').value&&p.available)}
 function imageCatalogFresh(){return imageCatalog!==null&&Date.now()<Date.parse(imageCatalog.expires_at)}
-function imageReferences(){return byId('image-references').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)}
-byId('image-operation').onchange=()=>{byId('image-consent').checked=false;updateImageControls()};
+let localImageReferences=[],imageReferenceEpoch=0,imageReferencePending=false,imageReferenceReaders=new Set(),imageReferenceController=null;
+function clearLocalImageReferences(note='尚未选择图片。'){
+ imageReferenceEpoch++;imageReferencePending=false;
+ for(const reader of imageReferenceReaders)reader.abort();imageReferenceReaders.clear();imageReferenceController?.abort();imageReferenceController=null;
+ localImageReferences=[];byId('image-reference-files').value='';byId('image-reference-list').replaceChildren();byId('image-reference-preview').hidden=true;byId('image-reference-preview').removeAttribute('src');byId('image-reference-status').textContent=note;byId('image-consent').checked=false;
+}
+function imageReferences(){return [...localImageReferences.map(r=>r.url),...byId('image-references').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)]}
+function renderLocalImageReferences(){
+ byId('image-reference-list').replaceChildren();byId('image-reference-preview').hidden=true;byId('image-reference-preview').removeAttribute('src');
+ for(const [i,ref] of localImageReferences.entries()){
+  const card=document.createElement('div');card.className='image-result';const label=document.createElement('p');label.textContent=(i+1)+'. '+ref.name+' · '+ref.width+'×'+ref.height+' · '+ref.bytes+' 字节';card.append(label);
+  const preview=document.createElement('button');preview.textContent='本地预览 '+(i+1);preview.onclick=()=>{if(localImageReferences[i]!==ref)return;byId('image-reference-preview').src=ref.url;byId('image-reference-preview').hidden=false};card.append(preview);
+  const remove=document.createElement('button');remove.textContent='移除 '+(i+1);remove.onclick=()=>{if(mutationPending||imageReferencePending||localImageReferences[i]!==ref)return;localImageReferences.splice(i,1);byId('image-consent').checked=false;renderLocalImageReferences();updateControls()};card.append(remove);byId('image-reference-list').append(card);
+ }
+ byId('image-reference-status').textContent=localImageReferences.length?'已在本地校验 '+localImageReferences.length+' 张；未自动提交。预览不是内容安全证明。':'尚未选择图片。';
+}
+function readLocalImageFile(file,epoch){
+ return new Promise((resolve,reject)=>{
+  const reader=new FileReader();imageReferenceReaders.add(reader);
+  const finish=(error,value)=>{imageReferenceReaders.delete(reader);reader.onload=reader.onerror=reader.onabort=null;error?reject(Error('local read rejected')):resolve(value)};
+  reader.onerror=()=>finish(true);reader.onabort=()=>finish(true);
+  reader.onload=()=>{
+   if(epoch!==imageReferenceEpoch||!(reader.result instanceof ArrayBuffer)||reader.result.byteLength!==file.size){finish(true);return}
+   const bytes=new Uint8Array(reader.result);let mime='';
+   if(bytes.length>=8&&[137,80,78,71,13,10,26,10].every((b,i)=>bytes[i]===b))mime='image/png';
+   else if(bytes.length>=3&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255)mime='image/jpeg';
+   else if(bytes.length>=6&&String.fromCharCode(...bytes.slice(0,6)).match(/^GIF8[79]a$/))mime='image/gif';
+   else if(bytes.length>=12&&String.fromCharCode(...bytes.slice(0,4))==='RIFF'&&String.fromCharCode(...bytes.slice(8,12))==='WEBP')mime='image/webp';
+   if(!mime||file.type&&file.type!==mime){finish(true);return}
+   try{let binary='';for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+    finish(false,{url:'data:'+mime+';base64,'+btoa(binary),mime,bytes:bytes.length,name:typeof file.name==='string'?file.name.slice(0,160):'参考图'});
+   }catch{finish(true)}
+  };
+  try{reader.readAsArrayBuffer(file)}catch{finish(true)}
+ });
+}
+async function importLocalImageReferences(){
+ if(imageReferencePending||mutationPending||!lastState?.Running||byId('image-operation').value!=='edit')return false;
+ const files=Array.from(byId('image-reference-files').files||[]),profile=selectedImageProfile();
+ if(files.length===0)return false; // cancelled picker: no read or change
+ clearLocalImageReferences('正在本地校验；未提交上游。');
+ if(!profile||!imageCatalogFresh()||!profile.operations.includes('edit')||files.length+byId('image-references').value.split(/\r?\n/).filter(s=>s.trim()).length>profile.max_reference_images||files.some(f=>!Number.isSafeInteger(f.size)||f.size<1||f.size>700*1024)||files.reduce((n,f)=>n+f.size,0)>700*1024){byId('image-reference-status').textContent='图片数量超出目录限制，或总文件超过 700 KiB；整批未读取、未提交。';updateImageControls();return false}
+ const epoch=imageReferenceEpoch;imageReferencePending=true;updateControls();
+ const controller=new AbortController();imageReferenceController=controller;
+ const timer=setTimeout(()=>{if(epoch===imageReferenceEpoch){for(const reader of imageReferenceReaders)reader.abort();controller.abort()}},10000);
+ try{
+  const selected=[];for(const file of files)selected.push(await readLocalImageFile(file,epoch));
+  if(epoch!==imageReferenceEpoch||controller.signal.aborted)throw Error('stale read');
+  const body=JSON.stringify({reference_images:selected.map(r=>r.url)});
+  if(new TextEncoder().encode(body).length>1024*1024)throw Error('oversized');
+  const r=await fetch('/app/images/validate-references',{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,'content-type':'application/json'},body,signal:controller.signal});
+  if(epoch!==imageReferenceEpoch||controller.signal.aborted||!r.ok)throw Error('validation');
+  const metadata=(await r.json()).references;
+  if(controller.signal.aborted)throw Error('validation timed out');
+  if(epoch!==imageReferenceEpoch||!lastState?.Running||!imageCatalogFresh()||selectedImageProfile()?.id!==profile.id||byId('image-operation').value!=='edit'||!Array.isArray(metadata)||metadata.length!==selected.length||metadata.some((m,i)=>m.mime_type!==selected[i].mime||m.bytes!==selected[i].bytes||!Number.isInteger(m.width)||!Number.isInteger(m.height)||m.width<1||m.height<1||m.width>16384||m.height>16384||m.width*m.height>32000000))throw Error('invalid metadata');
+  localImageReferences=selected.map((ref,i)=>({...ref,width:metadata[i].width,height:metadata[i].height}));byId('image-reference-files').value='';renderLocalImageReferences();return true;
+ }catch{if(epoch===imageReferenceEpoch)clearLocalImageReferences('读取或格式校验失败 / 超时，整批已清空；未提交上游，不自动重试。');return false}
+ finally{clearTimeout(timer);if(epoch===imageReferenceEpoch){imageReferencePending=false;imageReferenceController=null}updateControls()}
+}
+byId('image-reference-files').onchange=importLocalImageReferences;
+byId('image-reference-clear').onclick=()=>{clearLocalImageReferences();updateControls()};
+byId('image-operation').onchange=()=>{clearLocalImageReferences();updateImageControls()};
 function updateImageControls(){
- const busy=mutationPending||!lastState?.Running,p=selectedImageProfile(),fresh=imageCatalogFresh(),operation=byId('image-operation').value,edit=operation==='edit',refs=imageReferences();
+ const busy=mutationPending||imageReferencePending||!lastState?.Running,p=selectedImageProfile(),fresh=imageCatalogFresh(),operation=byId('image-operation').value,edit=operation==='edit',refs=imageReferences();
  byId('image-catalog').disabled=busy;byId('image-model').disabled=busy||!fresh;
  for(const id of ['image-prompt','image-options','image-consent','image-operation','image-references'])byId(id).disabled=busy;
+ byId('image-reference-files').disabled=busy||!fresh||!p?.operations.includes('edit');byId('image-reference-clear').disabled=mutationPending||localImageReferences.length===0&&!imageReferencePending;
  byId('image-reference-field').hidden=!edit;
- byId('image-reference-note').textContent='参考图随提示词发送上游；'+(p?.edit_transport==='images-generations-image-urls'?'支持内联图片与公共 HTTPS（不验证 DNS / 内容）。':'仅内联 data URL，不读取文件或抓取 URL。')+'目录数量上限 '+(p?.max_reference_images||0)+'；桌面请求总大小最多 160 KiB。';
+ byId('image-reference-note').textContent='参考图仅在确认后发送上游；'+(p?.edit_transport==='images-generations-image-urls'?'支持选定图片与公共 HTTPS（不验证 DNS / 内容）。':'选定图片或内联 data URL；不抓取 URL。')+'目录数量上限 '+(p?.max_reference_images||0)+'；本地文件总大小 700 KiB，桌面编辑请求总大小最多 1 MiB。';
  byId('image-generate').textContent=edit?'确认后编辑图片':'确认后生成图片';
  byId('image-n').disabled=busy||!fresh||!p;
  byId('image-generate').disabled=busy||!fresh||!p||!p.operations.includes(operation)||!p.allowed_n.includes(Number(byId('image-n').value))||!byId('image-prompt').value.trim()||!byId('image-consent').checked||edit&&(refs.length<1||refs.length>p.max_reference_images);
  byId('image-task').disabled=busy||!imageTaskID||Date.now()>=imageTaskExpiry;
  if(imageCatalog&&!fresh){byId('image-catalog-state').textContent='目录已过期';byId('image-consent').checked=false}
 }
-function selectImageModel(){const p=selectedImageProfile();byId('image-consent').checked=false;byId('image-n').replaceChildren(new Option('请选择数量',''));if(p){for(const n of p.allowed_n)byId('image-n').append(new Option(String(n),String(n)));if(p.allowed_n.includes(1))byId('image-n').value='1';byId('image-controls').textContent=JSON.stringify(p,null,2)}else byId('image-controls').textContent='尚未选择模型';updateImageControls()}
+function selectImageModel(){clearLocalImageReferences();const p=selectedImageProfile();byId('image-consent').checked=false;byId('image-n').replaceChildren(new Option('请选择数量',''));if(p){for(const n of p.allowed_n)byId('image-n').append(new Option(String(n),String(n)));if(p.allowed_n.includes(1))byId('image-n').value='1';byId('image-controls').textContent=JSON.stringify(p,null,2)}else byId('image-controls').textContent='尚未选择模型';updateImageControls()}
 function imageErrorNote(status){return status===401||status===403?'授权拒绝。':status===409?'目录已变化或过期，或另一操作未结束；请重新检查。':status===404?'本进程没有此任务，或上游未提供接口。':status===400?'参数不支持或缺少确认；未自动修改请求。':status===507?'本进程任务槽已满；未发送新的生成请求。':'请求失败、取消或超时。'}
 async function imageAction(kind,body){if(mutationPending||!lastState?.Running)return false;const epoch=imageEpoch;mutationPending=true;if(kind!=='catalog'){byId('image-result-state').textContent=(kind==='generate'||kind==='edit')?'正在提交':'正在查询';byId('image-result-note').textContent='只发送一次请求；可停止或退出，但不会撤销远端任务或计费。'}updateControls();const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),(kind==='generate'||kind==='edit')?305000:kind==='task'?125000:20000);try{const r=await fetch('/app/images/'+kind,{method:'POST',headers:{'X-MOMO-Bridge':bridgeNonce,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:controller.signal});if(epoch!==imageEpoch)return false;if(!r.ok){if(kind==='catalog')resetImageCatalog(imageErrorNote(r.status)+' 不自动重试。');else byId('image-result-note').textContent=imageErrorNote(r.status)+' 可能已经提交或计费，不自动重试；已有任务可手动查询。';return false}const result=await r.json();if(epoch!==imageEpoch||!lastState?.Running)return false;if(kind==='catalog'){if(!Array.isArray(result.models)||result.models.length>10||!Number.isFinite(Date.parse(result.expires_at))||!result.models.every(p=>typeof p.id==='string'&&p.id.length<=160&&typeof p.available==='boolean'&&Array.isArray(p.operations)&&p.operations.every(op=>['generate','edit'].includes(op))&&Number.isInteger(p.max_reference_images)&&p.max_reference_images>=0&&p.max_reference_images<=16&&Array.isArray(p.parameters)&&p.parameters.every(k=>typeof k==='string')&&Array.isArray(p.allowed_n)&&p.allowed_n.length<=4&&p.allowed_n.every(n=>Number.isInteger(n)&&n>=1&&n<=4)))throw Error('invalid catalog');imageCatalog=result;byId('image-model').replaceChildren(new Option('请选择模型（不会自动选择）',''));for(const p of result.models){const option=new Option(p.id+(p.available?'':' · 不可用'),p.id);option.disabled=!p.available;byId('image-model').append(option)}byId('image-catalog-state').textContent='目录已查询';byId('image-catalog-note').textContent='有效至 '+new Date(result.expires_at).toLocaleTimeString('zh-CN')+'；仅目录权限，不证明真实生成可用。';return true}renderImageResult(result,kind);return true}catch{if(epoch===imageEpoch){if(kind==='catalog')resetImageCatalog('目录查询失败或超时，不自动重试。');else byId('image-result-note').textContent='请求失败或超时，可能已经提交或计费；不自动重试，请检查已有任务。'}return false}finally{clearTimeout(timer);mutationPending=false;updateControls()}}
 function renderImageResult(result,kind){if(!Array.isArray(result.images)||result.images.length>4||typeof result.terminal!=='boolean'||result.task_id!==undefined&&!/^[A-Za-z0-9._:-]{1,256}$/.test(result.task_id))throw Error('invalid image result');if((kind==='generate'||kind==='edit')){imageTaskID=result.task_id||'';imageTaskExpiry=imageTaskID?Date.now()+30*60*1000:0}else if(result.task_id!==imageTaskID)throw Error('foreign task');if(result.terminal)imageTaskID='';byId('image-results').replaceChildren();byId('image-preview').hidden=true;byId('image-preview').removeAttribute('src');byId('image-result-state').textContent=result.error?'任务失败':result.terminal?'已返回结果':'任务待完成';byId('image-result-note').textContent='任务：'+(result.task_id||'无异步任务')+' · 状态：'+(result.raw_status||'返回图片')+'。'+(result.error?'上游任务结束且没有图片。':'无自动轮询、下载或保存。');for(const [index,img] of result.images.entries()){const card=document.createElement('div');card.className='image-result';const label=document.createElement('p');label.textContent='图片 '+(index+1);card.append(label);if(img.url){const url=document.createElement('code');url.textContent=img.url;card.append(url)}if(img.b64_json){if(!['image/png','image/jpeg','image/gif','image/webp'].includes(img.mime_type)||img.b64_json.length>16*1024*1024||!/^[A-Za-z0-9+/]+=*$/.test(img.b64_json))throw Error('invalid preview');const button=document.createElement('button');button.textContent='预览内联图片 '+(index+1);button.onclick=()=>{byId('image-preview').src='data:'+img.mime_type+';base64,'+img.b64_json;byId('image-preview').hidden=false};card.append(button)}byId('image-results').append(card)}}
@@ -248,11 +316,12 @@ async function generateImage(){
  const request={...options,model:byId('image-model').value,prompt:byId('image-prompt').value,n:Number(byId('image-n').value)};
  if(operation==='edit')request.reference_images=imageReferences();
  const body={confirmed:true,request};
- if(new TextEncoder().encode(JSON.stringify(body)).length>160*1024){byId('image-result-note').textContent='请求超过桌面 160 KiB 限制；未提交，请减小参考图或请求。';return false}
+ const limit=operation==='edit'?1024*1024:160*1024;
+ if(new TextEncoder().encode(JSON.stringify(body)).length>limit){byId('image-result-note').textContent='请求超过桌面 '+(operation==='edit'?'1 MiB':'160 KiB')+' 限制；未提交，请减小参考图或请求。';return false}
  if(!confirm('向已配置上游'+(operation==='edit'?'发送参考图并编辑':'生成图片')+'，可能计费；失败或停止不撤销远端任务。确认仅提交一次？'))return false;
  byId('image-consent').checked=false;return imageAction(operation,body);
 }
-byId('image-catalog').onclick=()=>{if(mutationPending||!lastState?.Running)return false;resetImageCatalog('正在查询，未调用生成。');return imageAction('catalog')};byId('image-model').onchange=selectImageModel;byId('image-generate').onclick=generateImage;byId('image-task').onclick=()=>byId('image-task').disabled?false:imageAction('task',{task_id:imageTaskID});for(const id of ['image-prompt','image-options','image-n','image-consent','image-references'])byId(id).oninput=updateImageControls;
+byId('image-catalog').onclick=()=>{if(mutationPending||!lastState?.Running)return false;resetImageCatalog('正在查询，未调用生成。');return imageAction('catalog')};byId('image-model').onchange=selectImageModel;byId('image-generate').onclick=generateImage;byId('image-task').onclick=()=>byId('image-task').disabled?false:imageAction('task',{task_id:imageTaskID});for(const id of ['image-prompt','image-options','image-n','image-consent'])byId(id).oninput=updateImageControls;byId('image-references').oninput=()=>{byId('image-consent').checked=false;updateImageControls()};
 function renderState(s){byId('integration-gateway').textContent=s.Running?'本地网关运行中':s.Active?'本地网关正在停止':s.Configured?'已配置 · 尚未启动':'尚未配置网关';byId('integration-gateway').dataset.tone=s.Running?'good':'neutral';const fingerprint=JSON.stringify([s.Running,s.Endpoint,s.Mode]);if(diagnosticsFingerprint!==null&&fingerprint!==diagnosticsFingerprint)clearDiagnostics();diagnosticsFingerprint=fingerprint;if(!s.Running&&(imageCatalog!==null||imageRunning)||lastState&&s.Endpoint!==imageEndpoint){resetImages('代理停止或配置变化；本地目录与结果已清空，远端任务不会撤销。');resetVideos('代理停止或配置变化；远端任务不会撤销。')}imageEndpoint=s.Endpoint;imageRunning=s.Running;byId('state').textContent=JSON.stringify(s,null,2);byId('service-state').textContent=s.Running?'运行中':s.Active?'正在停止':'已停止';byId('config-state').textContent=s.Configured?'上游配置已应用':'尚未配置上游';byId('active-count').textContent=String(s.Active);byId('status-label').textContent=s.Running?'运行中':s.Active?'正在停止':'已停止';byId('status-badge').dataset.tone=s.Running?'good':'neutral';byId('local-url').textContent=s.LocalEndpoint?s.LocalEndpoint+'/v1':'本地地址不可用';byId('build-version').textContent=s.Version||'预览版本';byId('routing-state').textContent=s.Mode==='momo-routing'?'部分 MOMO 路由已启用':'默认原协议透传';byId('compact-state').textContent=s.Mode==='momo-routing'?'部分支持 · 手动回放':'默认关闭 · 501';byId('footer-state').textContent=s.Running?(s.Mode==='momo-routing'?'部分模型路由 · 不代表上游已验证':'原协议透传 · 不代表上游已验证'):'代理已停止 · 仅本进程';byId('responses-target').textContent=s.Mode==='momo-routing'?'按模型 → Responses / Chat / Claude / Gemini 子集':'Responses → Responses'}
 function updateControls(){const stopped=lastState&&!lastState.Running&&lastState.Active===0;for(const id of ['configure','load','endpoint','key','remember','routing-mode'])byId(id).disabled=mutationPending||!stopped;byId('start').disabled=mutationPending||!stopped||!lastState.Configured;byId('forget').disabled=mutationPending;byId('copy').disabled=mutationPending||!lastState||!lastState.Configured;for(const id of ['quota-refresh','models-refresh'])byId(id).disabled=mutationPending||!lastState||!lastState.Configured;for(const id of ['skill-copy','mcp-copy','codex-copy','codex-catalog-copy'])byId(id).disabled=mutationPending;for(const id of ['image-mcp-copy','video-mcp-copy'])byId(id).disabled=mutationPending||!lastState||!lastState.Running;byId('stop').disabled=!lastState||(!lastState.Running&&lastState.Active===0);byId('refresh').disabled=statePending;byId('quit').disabled=false;updateImageControls();updateVideoControls()}
 let modelIDs=null;

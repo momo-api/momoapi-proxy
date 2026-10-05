@@ -74,7 +74,7 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			http.Error(w, "method denied", 405)
 			return
 		}
-		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/task"
+		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/task" || r.URL.Path == "/app/images/validate-references"
 		videoAction := r.URL.Path == "/app/videos/catalog" || r.URL.Path == "/app/videos/generate" || r.URL.Path == "/app/videos/task"
 		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config" || r.URL.Path == "/app/video-mcp-config" || r.URL.Path == "/app/codex-catalog" || r.URL.Path == "/app/diagnostics") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
@@ -87,6 +87,9 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		limit := 8192
 		if imageAction || videoAction {
 			limit = 160 << 10
+		}
+		if r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/validate-references" {
+			limit = appcore.MaxRequest
 		}
 		data, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
 		if err != nil || len(data) > limit || !utf8.Valid(data) {
@@ -107,6 +110,27 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 			return
 		}
 		if imageAction {
+			if r.URL.Path == "/app/images/validate-references" {
+				if r.Context().Err() != nil {
+					http.Error(w, "validation cancelled", 400)
+					return
+				}
+				metadata, err := appcore.ValidateLocalImageReferences(data)
+				if err != nil {
+					http.Error(w, "local image references rejected", 400)
+					return
+				}
+				payload, err := json.Marshal(map[string]any{"references": metadata})
+				if err != nil || r.Context().Err() != nil {
+					http.Error(w, "validation unavailable", 400)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if n, err := w.Write(payload); err != nil || n != len(payload) {
+					panic(http.ErrAbortHandler)
+				}
+				return
+			}
 			path := "/internal/images/capabilities"
 			var body []byte
 			if r.URL.Path == "/app/images/catalog" {

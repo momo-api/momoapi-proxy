@@ -36,7 +36,25 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### 图片参考编辑工作流（2026-10-06；本地已验证，新HEAD三平台待验收）
+### 本地参考图选择器（2026-10-06；本地验证，当前增量 CI 待验收）
+
+桌面编辑新增明确选择 File → 原始 FileReader 字节 → native 纯本地格式/元数据
+校验 → 有序列表/移除/明确预览 → 逐次确认编辑 → 手动任务查询。校验不访问
+Core/会话/上游/磁盘/凭据，不返回图像/名称/路径；名称仅本地 textContent。
+PNG/JPEG/静态 GIF/WebP 共享编辑门禁（头部/framing，不是完整内容安全证明），
+总文件 700 KiB、目录数量与 1 MiB JSON 上限并用，MCP 仍 160 KiB。
+读取/校验整批 10s deadline，失败全部清空；取消空选择保留原批；清空/模型/
+操作/目录刷新/配置/Stop 中止读取并以 epoch 拒绝迟到，不自动上传/重试。
+本地双 tag 全量各5遍、两 vet/page/packaging、WSL full race 与 Windows真实
+WebView181物理TLSmock通过；native测试选择 synthetic File，经实际FileReader、
+native校验、显式预览到编辑/任务，校验没有额外上游；不是 OS 对话框点击证明。
+统一431组同mock/resources黑盒通过；light/dark/620px 已检查无横向溢出。
+新增回归包含大小/数量读取前拒绝、MIME/magic/metadata、原字节与不带名称、
+整批失败、清空/迟到/读取与JSON解码超时、Stop重置和大编辑envelope确认门禁。
+Prism启动工具错误，无审查/批准回执。普通产物与新HEAD三平台/fresh artifact
+结果需独立记录，不能以7d16e52绿灯替代本增量；未执行本机installer/真实推理。
+
+### 图片参考编辑工作流（2026-10-06；7d16e52已三平台验收）
 
 新增同Core的POST /internal/images/edit、桌面操作/参考图/逐次确认与image_edit
 MCP；显式目录operations edit，不能从token模型列表推断。Web两alias固定JSON
@@ -55,7 +73,11 @@ edit+manualtask），普通Winbinary/官方SDK1.32.1模式与目录失败门禁�
 Stop夹具初次未consume POST body导致server不能观测断开且test超时；修正
 消费body和有界清理，保留取消3s/单send/零task门禁，不放宽production。
 Prism启动toolerror，无专家批准。无真实账号/付费推理/本机installer。
-本增量仍须exact新HEAD三平台CI和fresh产物验收，不引用旧7197199为通过。
+7d16e52首轮18checks/6nativejobs成功：每native431TCP+181TLS、普通载荷与
+隔离installer；Unix各5独立full race；三OS fresh artifact hash/version/mode/
+format及下载Windows载荷blackbox/官方SDK图片视频+实际编辑生命周期通过。
+本机未执行installer；PR仍draft未合并，不是签名发行/真实推理/全部功能对齐。
+https://github.com/momo-api/momoapi-proxy/pull/182#issuecomment-6005075291
 
 ### 接入页收尾（2026-10-06；本地验证，新HEAD待验收）
 

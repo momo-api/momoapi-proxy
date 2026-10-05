@@ -299,6 +299,11 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   cross-device sharing are not migrated. This is not full Node compatibility.
 - The default `mcp` stdio mode only reports capabilities and exposes this document.
   It has no key, billing access, model invocation or arbitrary process runner.
+- Desktop also supports explicit local File selection, <=700KiB total and catalog
+  counts, pure metadata validation before explicit data-only preview, then fresh
+  generation consent. Desktop edit envelope1MiB/Core wire1MiB; MCP stays160KiB
+  with no file reads. No filename/path forwarded, resize/transcode/automatic
+  upload or persistence. Stop/config/model/operation cancels and clears selection.
 - Image editing uses explicit image_edit {confirmed:true,request:{model,prompt,
   reference_images:["data:image/png;base64,..."],...controls}}. Query catalog first:
   operations must contain edit; model-list fallback never permits editing.

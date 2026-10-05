@@ -26,7 +26,10 @@ const context = vm.createContext({
   document:{hidden:false,getElementById:id=>nodes.get(id),createElement:()=>element()},
   Option:function(text,value){Object.assign(this,element(),{textContent:text,value})},
   window:{addEventListener:(name,fn)=>listeners.set(name,fn)},
-  bridgeNonce:'synthetic-page-capability',AbortController,TextEncoder,confirm:()=>allowConfirm,
+  bridgeNonce:'synthetic-page-capability',AbortController,TextEncoder,ArrayBuffer,Uint8Array,btoa,FileReader:class {
+   readAsArrayBuffer(file){file.reads=(file.reads||0)+1;this.file=file;if(file.pending){file.reader=this;return}queueMicrotask(()=>{if(file.error){this.onerror?.();return}this.result=file.bytes;this.onload?.()})}
+   abort(){this.onabort?.()}
+  },confirm:()=>allowConfirm,
   setTimeout:fn=>{timers.push(fn);return timers.length},clearTimeout:()=>{},
   setInterval:fn=>{intervals.push(fn)},
   fetch:async(url,options)=>{calls.push({url,options});return handler?handler(url,options):response(200)}
@@ -133,7 +136,7 @@ assert.ok(source.includes('目录优先的图片生成'));
 assert.ok(source.includes('可能计费'));
 assert.ok(source.includes('图片工作台支持明确生成'));
 assert.ok(source.includes('独立显式图片 MCP（可复制配置连接当前本地网关，客户端显式设置本地 Key）'));
-assert.ok(source.includes('无编辑或磁盘保存'));
+assert.ok(source.includes('本地文件选择与显式预览；无磁盘保存'));
 assert.ok(source.includes('两种 APIMart API 子集（视频工作台 + API + 独立 MCP 子集）'));
 assert.ok(source.includes('已有独立显式视频 MCP 子集'));
 assert.ok(!source.includes('视频 MCP 和旧 Adobe 路线仍未迁移'));
@@ -278,9 +281,50 @@ assert.equal(await nodes.get('image-generate').onclick(),true);assert.equal(node
 const editRequest=JSON.parse(calls.find(c=>c.url==='/app/images/edit').options.body);assert.deepEqual(editRequest.request.reference_images,['data:image/png;base64,'+png]);assert.equal(editRequest.confirmed,true);assert.equal(nodes.get('image-task').disabled,false);
 handler=url=>url==='/app/images/task'?response(200,{images:[{url:'https://images.example/edited.png'}],task_id:'edit_gui',terminal:true}):response(200);
 await nodes.get('image-task').onclick();assert.equal(nodes.get('image-results').children[0].children[1].textContent,'https://images.example/edited.png');assert.equal(nodes.get('image-task').disabled,true);
-nodes.get('image-references').value='x'.repeat(150000);nodes.get('image-prompt').value='中'.repeat(10000);nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();
-assert.equal(await nodes.get('image-generate').onclick(),false);assert.equal(calls.filter(c=>c.url==='/app/images/edit').length,1);assert.match(nodes.get('image-result-note').textContent,/160 KiB/);
+nodes.get('image-references').value='x'.repeat(1024*1024);nodes.get('image-prompt').value='中'.repeat(10000);nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();
+assert.equal(await nodes.get('image-generate').onclick(),false);assert.equal(calls.filter(c=>c.url==='/app/images/edit').length,1);assert.match(nodes.get('image-result-note').textContent,/1 MiB/);
 nodes.get('image-prompt').value='hi';nodes.get('image-operation').value='generate';nodes.get('image-operation').onchange();
+// Only explicitly selected file objects are read. Validation is local and pure;
+// file names never enter the backend payload or a billed operation.
+nodes.get('image-operation').value='edit';nodes.get('image-operation').onchange();nodes.get('image-references').value='';
+const pngBytes=Uint8Array.from(Buffer.from(png,'base64')).buffer;
+const file=(extra={})=>({name:'<img src=evil> private-name.png',type:'image/png',size:pngBytes.byteLength,bytes:pngBytes,...extra});
+const selected=file();nodes.get('image-reference-files').files=[selected];
+const beforeSelection=calls.length;
+handler=url=>url==='/app/images/validate-references'?response(200,{references:[{mime_type:'image/png',bytes:pngBytes.byteLength,width:1,height:1}]}):response(200);
+assert.equal(await nodes.get('image-reference-files').onchange(),true);assert.equal(selected.reads,1);assert.equal(calls.length,beforeSelection+1);
+const validation=calls.at(-1);assert.equal(validation.url,'/app/images/validate-references');assert.equal(validation.options.headers['X-MOMO-Bridge'],'synthetic-page-capability');assert.deepEqual(JSON.parse(validation.options.body),{reference_images:['data:image/png;base64,'+png]});assert.ok(!validation.options.body.includes('private-name'));
+assert.equal(nodes.get('image-reference-preview').src,undefined);assert.equal(nodes.get('image-consent').checked,false);assert.equal(nodes.get('image-reference-list').children.length,1);
+nodes.get('image-reference-list').children[0].children[1].onclick();assert.equal(nodes.get('image-reference-preview').src,'data:image/png;base64,'+png);
+nodes.get('image-reference-files').files=[];assert.equal(await nodes.get('image-reference-files').onchange(),false);assert.equal(nodes.get('image-reference-list').children.length,1,'picker cancellation lost selection');
+nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();handler=url=>url==='/app/images/edit'?response(200,{images:[],task_id:'edit_local',terminal:false}):response(200);
+assert.equal(await nodes.get('image-generate').onclick(),true);assert.deepEqual(JSON.parse(calls.at(-1).options.body).request.reference_images,['data:image/png;base64,'+png]);assert.ok(!calls.at(-1).options.body.includes('private-name'));
+nodes.get('image-reference-clear').onclick();assert.equal(nodes.get('image-reference-list').children.length,0);assert.equal(nodes.get('image-reference-preview').src,undefined);
+handler=()=>response(200,{references:[{mime_type:'image/png',bytes:pngBytes.byteLength,width:1,height:1},{mime_type:'image/png',bytes:pngBytes.byteLength,width:1,height:1}]});nodes.get('image-reference-files').files=[file({name:'first.png'}),file({name:'second.png'})];assert.equal(await nodes.get('image-reference-files').onchange(),true);
+assert.equal(nodes.get('image-reference-list').children.length,2);nodes.get('image-consent').checked=true;nodes.get('image-reference-list').children[0].children[2].onclick();assert.equal(nodes.get('image-reference-list').children.length,1);assert.equal(run('localImageReferences[0].name'),'second.png');assert.equal(nodes.get('image-consent').checked,false);nodes.get('image-reference-clear').onclick();
+for(const bad of [file({size:700*1024+1}),file({size:0}),file({type:'image/jpeg'}),file({bytes:new Uint8Array([1,2,3]).buffer,size:3}),file({error:true})]){
+ nodes.get('image-reference-files').files=[bad];const n=calls.length;assert.equal(await nodes.get('image-reference-files').onchange(),false);assert.equal(calls.length,n);assert.equal(nodes.get('image-reference-list').children.length,0);
+ if(bad.size===0||bad.size>700*1024)assert.equal(bad.reads,undefined,'oversized file was read');
+}
+nodes.get('image-reference-files').files=[file(),file(),file()];const noRead=calls.length;assert.equal(await nodes.get('image-reference-files').onchange(),false);assert.equal(calls.length,noRead);
+for(const invalid of [{references:[]},{references:[{mime_type:'image/png',bytes:1,width:1,height:1}]},{references:[{mime_type:'image/png',bytes:pngBytes.byteLength,width:20000,height:1}]}]){
+ handler=()=>response(200,invalid);nodes.get('image-reference-files').files=[file()];assert.equal(await nodes.get('image-reference-files').onchange(),false);assert.equal(nodes.get('image-reference-list').children.length,0);
+}
+const slow=file({pending:true});nodes.get('image-reference-files').files=[slow];let pendingImport=nodes.get('image-reference-files').onchange();await flush();assert.equal(nodes.get('image-generate').disabled,true);assert.equal(nodes.get('stop').disabled,false);nodes.get('image-reference-clear').onclick();assert.equal(await pendingImport,false);assert.equal(nodes.get('image-reference-list').children.length,0);
+const late=pending();handler=()=>late.promise;nodes.get('image-reference-files').files=[file()];pendingImport=nodes.get('image-reference-files').onchange();await flush();
+assert.equal(calls.at(-1).url,'/app/images/validate-references');const lateOptions=calls.at(-1).options;nodes.get('image-model').onchange();assert.equal(lateOptions.signal.aborted,true);
+late.resolve(response(200,{references:[{mime_type:'image/png',bytes:pngBytes.byteLength,width:1,height:1}]}));assert.equal(await pendingImport,false);assert.equal(nodes.get('image-reference-list').children.length,0);
+const timed=file({pending:true});nodes.get('image-reference-files').files=[timed];pendingImport=nodes.get('image-reference-files').onchange();await flush();timers.at(-1)();assert.equal(await pendingImport,false);assert.equal(run('imageReferencePending'),false);
+// The operation-wide deadline covers JSON decoding as well as the fetch.
+const delayedMetadata=pending();handler=()=>({ok:true,json:()=>delayedMetadata.promise});nodes.get('image-reference-files').files=[file({type:''})];pendingImport=nodes.get('image-reference-files').onchange();await flush();
+assert.equal(calls.at(-1).url,'/app/images/validate-references');const delayedOptions=calls.at(-1).options;timers.at(-1)();assert.equal(delayedOptions.signal.aborted,true);
+delayedMetadata.resolve({references:[{mime_type:'image/png',bytes:pngBytes.byteLength,width:1,height:1}]});assert.equal(await pendingImport,false);assert.equal(run('imageReferencePending'),false);assert.equal(nodes.get('image-reference-list').children.length,0);
+handler=()=>response(200,{references:[{mime_type:'image/png',bytes:pngBytes.byteLength,width:1,height:1}]});nodes.get('image-reference-files').files=[file({type:''})];assert.equal(await nodes.get('image-reference-files').onchange(),true);assert.equal(run('localImageReferences[0].mime'),'image/png');nodes.get('image-reference-clear').onclick();
+const stoppedFile=file({pending:true});nodes.get('image-reference-files').files=[stoppedFile];pendingImport=nodes.get('image-reference-files').onchange();await flush();run('resetImages()');assert.equal(await pendingImport,false);assert.equal(run('localImageReferences.length'),0);assert.equal(nodes.get('image-reference-files').value,'');
+// Stop/reset deliberately revoked the catalog and prompt: set up a new
+// generation explicitly instead of accidentally testing a disabled button.
+handler=url=>url==='/app/images/catalog'?response(200,catalog):response(200);await nodes.get('image-catalog').onclick();nodes.get('image-model').value='image-test';nodes.get('image-model').onchange();nodes.get('image-prompt').value='synthetic after reset';
+nodes.get('image-operation').value='generate';nodes.get('image-operation').onchange();
 nodes.get('image-consent').checked=true;nodes.get('image-consent').oninput();const blockedImage=pending();handler=url=>url==='/app/images/generate'?blockedImage.promise:response(200);const generating=nodes.get('image-generate').onclick();await flush();assert.equal(nodes.get('configure').disabled,true);assert.equal(nodes.get('stop').disabled,false);assert.equal(nodes.get('quit').disabled,false);assert.equal(await nodes.get('image-generate').onclick(),false);
 const genOptions=calls.at(-1).options;timers.at(-1)();assert.equal(genOptions.signal.aborted,true);
 state={...state,Running:false};await nodes.get('stop').onclick();blockedImage.resolve(response(200,{images:[{url:'https://images.example/stale'}],terminal:true}));await generating;assert.equal(nodes.get('image-results').children.length,0);assert.equal(nodes.get('image-preview').src,undefined);assert.equal(run('imageCatalog'),null);
@@ -454,4 +498,4 @@ assert.equal(await nodes.get('diagnostics-refresh').onclick(),false);
 run('mutationPending=true');const diagnosticCalls=calls.length;
 assert.equal(await nodes.get('diagnostics-refresh').onclick(),false);assert.equal(calls.length,diagnosticCalls);
 run('mutationPending=false');
-console.log('PASS shipped page: navigation/keyboard/status/capability gaps/Load/pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout + image catalog/selection/confirmation/manual task/data-only opt-in preview/Stop epoch + video explicit controls/confirmation/manual task/URL text/shared busy/Stop epoch');
+console.log('PASS shipped page: navigation/keyboard/status/capability gaps/Load/pending controls/Stop/Quit/key clear/persistent warnings/stale-response ordering/polling/focus/timeout + image catalog/file selection+reader/magic+metadata/atomic bounds+timeouts+cancel+remove/local preview/confirmation/manual task/Stop epoch + video explicit controls/confirmation/manual task/URL text/shared busy/Stop epoch');

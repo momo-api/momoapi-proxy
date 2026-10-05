@@ -553,16 +553,30 @@ An explicit conflicting catalog edit transport denies editing. Unknown/duplicate
 fields, masks, file/asset references and Chat-media edits reject before send.
 Same single send, 300s context, admission, task reservation/TTL, manual task lookup
 and Stop/configure behavior; no fallback/retry/remote rollback. Desktop operation
-selector and reference textarea reuse consent and task UI, with a 160KiB total
+selector, explicit local file picker and reference textarea reuse consent/task UI, with a1MiB edit
 envelope. Opt-in image_edit MCP has confirmed:true and the same160KiB line limit;
-client affirmation is NOT verified human consent. No filepicker or auto upload.
+client affirmation is NOT verified human consent. No automatic upload or file reads by MCP.
+
+Desktop local reference selection reads ONLY explicitly selected File objects
+using bounded FileReader (10s); count must fit the fresh edit catalog and total
+raw files <=700KiB. MIME signature/type and native pure input validator must
+accept the entire batch before local preview. Bytes are not resized/transcoded.
+POST /app/images/validate-references is native Origin+page-capability protected,
+shares the mutation lock, returns MIME/bytes/dimensions only and never uses a
+Core session/network/DNS/vault/disk store. No filename/path enters this request
+or upstream payload. Header/framing/dimension validation is NOT content safety.
+No automatic preview/upload/generation; explicit click previews data-only images.
+Local files precede pasted references in the submitted order; remove/clear resets
+consent. Stop/config/load/model/operation/catalog refresh cancel pending local
+reads/validation and epoch-fence late results. Browser memory is not secure erase.
+MCP keeps160KiB and no file capability; public edit API still1MiB and no local path.
 
 Manually GET /internal/images/tasks/<id> for IDs returned by this Core only;
 one GET /v1/tasks/<id>, no auto-poll or alternate endpoint fallback. 64 slots
 reserved before generation (pending included), absolute30minTTL, no refresh.
 Stop/configure clears local catalog/tasks, not remote jobs or billed effects;
 delivery failure can leave submitted/tracked task, no rollback or auto-retry.
-Catalog-authorized JSON reference edits are described below; no masks/Chat-media edit/video/cloud assets/filepicker/disk assets in this subset.
+Catalog-authorized JSON reference edits are described below; no masks/Chat-media edit/video/cloud assets/disk assets in this subset.
 Readonly MCP exposes this contract as image_generation; media:false still means
 the full Node media suite is not implemented. Node remains primary.
 
@@ -574,7 +588,7 @@ and per-page capability even on Windows; shared mutation lock keeps Stop/Quit/st
 available. Backend confirmation:true required for generation; upstream/local tokens
 never reach the page. Reuses Core admission/300s/Stop/session/response contracts via
 bounded in-memory native dispatch, not browser HTTP calls with privileged headers.
-Bridge request160KiB, page generation305s/catalog20s/task125s timeout. Failed delivery
+Bridge generate/video160KiB; edit/local validation1MiB (Core wire still1MiB); page generation305s/catalog20s/task125s timeout. Failed delivery
 may already have submitted/billed: no automatic rollback/retry. Results localmemory
 only; URL text never auto-loaded or linked. Explicit inline preview sets data: only
 (CSP img-src data:), not a file-save/image-content safety promise. Stop/Apply/Load
