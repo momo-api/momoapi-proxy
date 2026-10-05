@@ -40,15 +40,17 @@ type routeTool struct {
 type routeRequest struct {
 	stream                bool
 	model, choice, effort string
+	selected              string
 	messages              []routeMessage
 	tools                 []routeTool
 }
 type chatTool struct{ wire, name, namespace, kind string }
 type chatPlan struct {
-	stream bool
-	body   []byte
-	model  string
-	tools  map[string]chatTool
+	stream           bool
+	choice, selected string
+	body             []byte
+	model            string
+	tools            map[string]chatTool
 }
 
 func str(v any) string         { s, _ := v.(string); return s }
@@ -345,9 +347,50 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	if len(tools) > 0 {
 		ir.choice = "auto"
 		if v, present := p["tool_choice"]; present {
-			ir.choice = str(v)
-			if ir.choice != "auto" && ir.choice != "none" && ir.choice != "required" {
-				return nil, errRouted
+			if s, ok := v.(string); ok {
+				ir.choice = s
+				if s != "auto" && s != "none" && s != "required" {
+					return nil, errRouted
+				}
+			} else {
+				selector := obj(v)
+				if selector == nil || !only(selector, "type", "name", "namespace") {
+					return nil, errRouted
+				}
+				kind, name := str(selector["type"]), str(selector["name"])
+				if (kind != "function" && kind != "custom") || !wireName(name) {
+					return nil, errRouted
+				}
+				var tool chatTool
+				var found bool
+				if ns, present := selector["namespace"]; present {
+					s, ok := ns.(string)
+					if !ok || s != "" && !wireName(s) {
+						return nil, errRouted
+					}
+					wire := name
+					if s != "" && s != "functions" {
+						wire = s + "__" + name
+					} else {
+						s = ""
+					}
+					tool, found = plan.tools[wire]
+					found = found && tool.name == name && tool.namespace == s
+				} else {
+					// A bare selector must be unique even if a top-level tool shares its name.
+					for _, candidate := range plan.tools {
+						if candidate.name == name {
+							if found {
+								return nil, errRouted
+							}
+							tool, found = candidate, true
+						}
+					}
+				}
+				if !found || tool.kind != kind {
+					return nil, errRouted
+				}
+				ir.choice, ir.selected = "specific", tool.wire
 			}
 		}
 	} else if _, present := p["tool_choice"]; present {
@@ -439,6 +482,9 @@ func encodeChatRequest(ir *routeRequest) (*chatPlan, error) {
 	}
 	if len(tools) > 0 {
 		body["tools"], body["tool_choice"] = tools, ir.choice
+		if ir.selected != "" {
+			body["tool_choice"] = map[string]any{"type": "function", "function": map[string]string{"name": ir.selected}}
+		}
 	}
 	if ir.effort != "" {
 		body["reasoning_effort"] = ir.effort
@@ -450,7 +496,7 @@ func serializePlan(ir *routeRequest, body map[string]any) (*chatPlan, error) {
 	if err != nil || len(b) > MaxRequest {
 		return nil, errRouted
 	}
-	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, tools: map[string]chatTool{}}
+	p := &chatPlan{body: b, model: ir.model, stream: ir.stream, choice: ir.choice, selected: ir.selected, tools: map[string]chatTool{}}
 	for _, t := range ir.tools {
 		p.tools[t.wire] = t.chatTool
 	}

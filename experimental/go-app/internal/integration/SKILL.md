@@ -27,6 +27,10 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   cached/reasoning tokens (not money). Missing usage is not fabricated; invalid or
   decreasing counts abort without completed. Usage trailers still require [DONE].
   Upstreams rejecting include_usage are not retried or silently downgraded.
+  Named function/custom tool_choice requires a declared matching identity; bare
+  selectors must be unique, explicit namespaces resolve exactly. Calls under none,
+  wrong named calls, and text-only completion under required/named choice are rejected.
+  allowed_tools sets remain unsupported. Returned tools run in the client, not MOMO.
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures, media and explicit token-limit options are not. Gemini text/tools,
   paired unsigned history, tool choice and validated token usage are supported;

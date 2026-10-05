@@ -47,6 +47,7 @@ assert.match(source,/可启用部分路由/);
 assert.match(source,/Muse 转换不在计划内/);
 assert.ok(source.includes('Chat / Claude / Gemini 子集 · 实验'));
 assert.ok(source.includes('支持 SSE / 最终 JSON'));
+assert.ok(source.includes('namespace 恢复、指定工具与 token usage'));
 assert.ok(source.includes('false 或省略 stream 等完整成功才返回最终 JSON'));
 assert.ok(source.includes('不代表真实上游非流式已验证'));
 assert.ok(!source.includes('压缩、非流式'));

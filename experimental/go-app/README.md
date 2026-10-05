@@ -29,12 +29,19 @@ partialArgs are rejected, not erased. This is NOT Gemini 3 signed continuation
 support; no signature bypass, replay cache or artificial signature is introduced.
 
 The adapter accepts text/instructions, ordinary function tools and custom input
-wrappers with namespaces, paired text-only tool history, string tool_choice and
+wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
 It rejects unknown payload fields/options, media, history references, compaction,
 built-in tools, exec/apply_patch normalization, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally
 not a drop-in Codex/Node replacement. No fallback/retry or double billing.
+
+Named function/custom selectors resolve only declared, kind-matching tool identities;
+explicit namespace uses its exact alias, bare selectors must be unique. Chat emits
+the upstream function selector shape, Claude type:tool, Gemini ANY with one
+allowedFunctionNames entry. allowed_tools lists are not supported. The shared encoder
+rejects calls under none, wrong calls under a named selector, and a completed
+text-only result under required/named choice. It does not execute returned tools.
 
 Incremental text SSE, bounded events/arguments/text (1 MiB retained, 16 MiB wire,
 128 tool indices, 65536 events), 15s write deadline and existing Stop cancellation.
@@ -71,9 +78,11 @@ MOMO stream:false guarantee or a native-provider JSON decoder.
 Unified Node/Go semantic blackbox: `go build -tags nogui,routecheck -o <outside> .`,
 then `node routecheck.mjs <outside>`. Shared real TCP upstream mock and matched
 configurable budget/workload on one runner, not CPU/RSS isolated benchmarking.
-Fifty-three cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
+Seventy-seven cases include Chat/Claude/Gemini tools/history/Qwen/four concurrency/errors/truncation
 and false/omitted-stream JSON plus valid/invalid/decreasing/missing-terminal Chat usage.
-Legacy Node emits SSE for these converted JSON requests and does not request/map Chat usage. Known
+and named function/custom selectors with forbidden/wrong-call rejection. Legacy Node
+emits SSE for converted JSON requests, does not request/map Chat usage, retains a flat
+Chat named selector and does not enforce converted-output choice. Known
 namespace, history schema, system/tool_choice, usage and premature-EOF differences
 are separately asserted/documented in
 [FEATURE-PARITY.md](FEATURE-PARITY.md). Normal build excludes this injection.
@@ -269,7 +278,8 @@ bridge, synthetic key/temp profile and an actual httptest TLS mock server. Seque
 WebView state/configure+remember/change-config/load/start; native client uses authenticated local TCP to
 GET models and POST Responses/Chat with byte-at-a-time SSE from the TLS mock,
 then opt-in routed Chat, Claude and Gemini SSE/false-stream/omitted-stream JSON
-requests against the same core/mock (12 physical upstream requests in total),
+requests, plus named function SSE/JSON requests against the same core/mock
+(18 physical upstream requests in total),
 checking exact namespace/unknown-field/Unicode bytes; native client
 holds incomplete fixed-length/chunked uploads before WebView Stop, verifies zero
 active without waiting for the upload timeout, then

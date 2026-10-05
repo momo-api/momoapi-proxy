@@ -20,6 +20,7 @@ type responseWriter struct {
 	index            int
 	completed        bool
 	buffered         bool
+	toolCount        int
 }
 
 var errRoutedWrite = errors.New("routed response write failed")
@@ -205,11 +206,15 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 		return e.textDelta(ev.text)
 	case "tool":
 		tool, ok := plan.restoreTool(ev.call.name)
-		if !ok {
+		if !ok || plan.choice == "none" || plan.selected != "" && tool.wire != plan.selected {
 			return errRouted
 		}
+		e.toolCount++
 		return e.toolCall(ev.call, tool)
 	case "complete":
+		if (plan.choice == "required" || plan.selected != "") && e.toolCount == 0 {
+			return errRouted
+		}
 		e.completed = true
 		if err := e.flushText(); err != nil {
 			return err

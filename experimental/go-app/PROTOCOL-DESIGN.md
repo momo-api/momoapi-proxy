@@ -133,3 +133,13 @@ Chat 请求编码明确添加 stream_options.include_usage=true，默认透传�
 仍为成功条件；usage 不提升未完成响应。53组统一 mock 黑盒精确断言 Node 不请求/
 不输出 usage 的差异，真实 WebView 验证三种返回路径。尚未真实上游验收，不把
 token 当钱包或费用。DSML、签名续接、compact 与全客户端兼容仍待实现。
+
+## 工具选择增量（2026-10-05）
+
+IR新增单个指定工具的wire身份，仍复用声明/历史/输出映射；function/custom类型
+必须与声明一致，带namespace精确匹配、裸名唯一才接受，不把selector当schema。
+Chat/Claude/Gemini直编码各自selector，共享encoder对none/required/指定工具进行
+输出契约门禁，防止上游忽略choice却报告completed。77组同mock黑盒精确记录Node
+扁平Chat selector/忽略choice/错误输出仍完成的差异；48组输出契约单测和三平台
+真实WebView命名function探针进入CI。allowed_tools集合/exec/apply_patch仍待迁移，
+不为通过测试降级约束；默认透传不改，工具执行仍由客户端负责。

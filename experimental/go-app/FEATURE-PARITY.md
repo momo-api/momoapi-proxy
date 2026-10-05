@@ -93,6 +93,18 @@ usage 尾帧不是成功终端，仍须 finish_reason+[DONE]。include_usage 被
 不自动回退重发。单测另覆零值/安全整数边界/重复和递增 usage/缺字段/无提前写入；
 真实 WebView 三种 Chat 返回均检查完整 token usage。默认原字节透传仍不改。
 
+工具选择轮扩为77组：三协议 SSE / JSON 各增加指定 function/custom 的成功返回、
+none 却调用工具、指定工具却返回另一工具。声明/selector/历史/输出共用身份映射；
+裸 selector 歧义/类型不符/未声明工具/未知字段在上游发送前400拒绝。Chat 使用
+function:{name:别名}，Claude 使用 type:tool，Gemini ANY+allowedFunctionNames。
+Node 此 Chat 路径保留原来的扁平 type/name/namespace（包括 custom），Claude/
+Gemini 忽略 selector；该custom输入hi被Node改为exec_command包装，Go原样保留，
+不是执行此包装；全部差异精确断言。Go 共享 encoder 拒绝 none 的调用、
+指定工具外调用、required/指定工具却仅有文本的假成功。原两组 required+文本
+夹具不删，改为断言 Go 拒绝、Node completed。单测另覆盖required成功/失败、
+显式top-level namespace、裸selector歧义与48组三协议输出契约。真实WebView另测
+三协议指定function的SSE/JSON，合计18次物理上游发送。allowed_tools集合未支持。
+
 ## Magpie 借鉴边界
 
 参考 `yetone/magpie` 的 `internal/gui/assets/index.html` / `app.css`

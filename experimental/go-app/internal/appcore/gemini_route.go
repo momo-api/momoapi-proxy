@@ -74,6 +74,9 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 		body["tools"] = []any{map[string]any{"functionDeclarations": declarations}}
 		mode := map[string]string{"auto": "AUTO", "none": "NONE", "required": "ANY"}[ir.choice]
 		body["toolConfig"] = map[string]any{"functionCallingConfig": map[string]string{"mode": mode}}
+		if ir.selected != "" {
+			body["toolConfig"] = map[string]any{"functionCallingConfig": map[string]any{"mode": "ANY", "allowedFunctionNames": []string{ir.selected}}}
+		}
 	}
 	return serializePlan(ir, body)
 }

@@ -33,6 +33,9 @@ const gc=gf([{functionCall:{id:'call_read',name:'pad__read',args:{x:1}}},{functi
 const chatUsage={prompt_tokens:3,completion_tokens:5,total_tokens:8,prompt_tokens_details:{cached_tokens:2},completion_tokens_details:{reasoning_tokens:1}};
 const cu=u=>'data: '+JSON.stringify({choices:[],usage:u})+'\r\n\r\n';
 const withChatUsage=(stream,usage)=>stream.replace('data: [DONE]\r\n\r\n',cu(usage)+'data: [DONE]\r\n\r\n');
+const chatSingle=name=>sse([chunk({tool_calls:[{index:0,id:'call_one',type:'function',function:{name:'pad__'+name,arguments:name==='read'?'{}':JSON.stringify({input:'hi'})}}]},'tool_calls')]);
+const claudeSingle=name=>cs+ctool(0,'call_one','pad__'+name,name==='read'?'{}':JSON.stringify({input:'hi'}))+ce('tool_use');
+const geminiSingle=name=>gf([{functionCall:{id:'call_one',name:'pad__'+name,args:name==='read'?{}:{input:'hi'}}}])+gf(null,'STOP',gu);
 const cases=[
  {name:'text Unicode fragmented',stream:text,payload},
  {name:'function custom namespace fragmented',stream:calls,payload},
@@ -49,14 +52,14 @@ const cases=[
  {name:'Claude four concurrent same-resource',stream:claudeText,payload:cp,path:'/v1/messages',concurrent:4},
  ...[401,429,500].map(status=>({name:'Claude upstream '+status,stream:'',status,payload:cp,path:'/v1/messages'})),
  {name:'Claude truncated EOF safety difference',stream:cs+ct(0,'partial'),payload:cp,path:'/v1/messages',truncate:true},
- {name:'Claude system/tool choice preservation',stream:claudeText,payload:{...cp,tool_choice:'required',input:[{role:'developer',content:'rules'},...cp.input]},path:'/v1/messages',systemDifference:true},
+ {name:'Claude system/tool choice preservation',stream:claudeText,payload:{...cp,tool_choice:'required',input:[{role:'developer',content:'rules'},...cp.input]},path:'/v1/messages',systemDifference:true,reject:true},
  {name:'Gemini Unicode fragmented',stream:gt,payload:gp,path:gpath},
  {name:'Gemini function/custom namespace',stream:gc,payload:gp,path:gpath},
  {name:'Gemini paired function history',stream:gt,payload:{...gp,input:[...gp.input,{role:'assistant',content:'checking'},{type:'function_call',call_id:'a',namespace:'pad',name:'read',arguments:'{}'},{type:'function_call_output',call_id:'a',output:'read'},{role:'user',content:'continue'}]},path:gpath,geminiHistory:true},
  {name:'Gemini four concurrent same-resource',stream:gt,payload:gp,path:gpath,concurrent:4},
  ...[401,429,500].map(status=>({name:'Gemini upstream '+status,stream:'',status,payload:gp,path:gpath})),
  {name:'Gemini premature EOF safety difference',stream:gf([{text:'partial'}]),payload:gp,path:gpath,truncate:true},
- {name:'Gemini system/tool choice',stream:gt,payload:{...gp,tool_choice:'required',input:[{role:'developer',content:'rules'},...gp.input]},path:gpath},
+ {name:'Gemini system/tool choice',stream:gt,payload:{...gp,tool_choice:'required',input:[{role:'developer',content:'rules'},...gp.input]},path:gpath,reject:true},
  {name:'Gemini usage-only trailer',stream:gf([{text:'中文🙂'}],'STOP')+gf(null,null,gu),payload:gp,path:gpath},
  ...[{label:'Chat',payload,stream:text,calls,path:undefined,partial:'data: '+JSON.stringify(chunk({content:'partial'}))+'\n\n'},
      {label:'Claude',payload:cp,stream:claudeText,calls:claudeCalls,path:'/v1/messages',partial:cs+ct(0,'partial')},
@@ -73,6 +76,11 @@ const cases=[
   {name:'Chat decreasing usage '+(stream?'SSE':'JSON'),payload:{...payload,stream},stream:withChatUsage(text,chatUsage).replace('data: [DONE]\r\n\r\n',cu({...chatUsage,completion_tokens:4,total_tokens:7})+'data: [DONE]\r\n\r\n'),json:!stream,reject:true},
   {name:'Chat usage missing DONE '+(stream?'SSE':'JSON'),payload:{...payload,stream},stream:withChatUsage(text,chatUsage).replace('data: [DONE]\r\n\r\n',''),json:!stream,reject:true},
  ]),
+ ...[{label:'Chat',payload,path:undefined,single:chatSingle}, {label:'Claude',payload:cp,path:'/v1/messages',single:claudeSingle},{label:'Gemini',payload:gp,path:gpath,single:geminiSingle}].flatMap(f=>[true,false].flatMap(stream=>[
+  ...[{kind:'function',name:'read'},{kind:'custom',name:'write'}].map(s=>({name:f.label+' named '+s.kind+' '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:{type:s.kind,name:s.name,namespace:'pad'}},path:f.path,stream:f.single(s.name),json:!stream,selected:'pad__'+s.name,singleNamespace:true})),
+  {name:f.label+' none rejects call '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:'none'},path:f.path,stream:f.single('read'),json:!stream,reject:true},
+  {name:f.label+' named rejects wrong call '+(stream?'SSE':'JSON'),payload:{...f.payload,stream,tool_choice:{type:'function',name:'read',namespace:'pad'}},path:f.path,stream:f.single('write'),json:!stream,selected:'pad__read',reject:true},
+ ])),
 ];
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
@@ -120,9 +128,9 @@ for(const fixture of cases){
   assert.equal(captures.length,count*2,fixture.name+' no duplicate fallback');
   for(let i=0;i<count;i++){
    const n=structuredClone(captures[i]),g=structuredClone(captures[count+i]);
-   if(!fixture.path){assert.deepEqual(g.stream_options,{include_usage:true});assert.equal(n.stream_options,undefined);delete g.stream_options;}
+   if(!fixture.path){assert.deepEqual(g.stream_options,{include_usage:true});assert.equal(n.stream_options,undefined);delete g.stream_options;if(fixture.selected){assert.deepEqual(g.tool_choice,{type:'function',function:{name:fixture.selected}});assert.deepEqual(n.tool_choice,fixture.payload.tool_choice);delete g.tool_choice;delete n.tool_choice;console.log('DIFFERENCE Go named Chat selector uses upstream function shape/declared alias; Node keeps flat selector/name/namespace')}}
    if(fixture.path==='/v1/messages'){
-    assert.equal(g.tool_choice.type,fixture.systemDifference?'any':'auto');assert.equal(n.tool_choice,undefined);delete g.tool_choice;
+    if(fixture.selected){assert.deepEqual(g.tool_choice,{type:'tool',name:fixture.selected});}else assert.equal(g.tool_choice.type,fixture.payload.tool_choice==='required'?'any':fixture.payload.tool_choice==='none'?'none':'auto');assert.equal(n.tool_choice,undefined);delete g.tool_choice;
     if(fixture.systemDifference){assert.equal(g.system,'Be concise.\n\nrules');assert.equal(n.system,'Be concise.');assert.equal(g.messages.length,1);assert.deepEqual(n.messages,[{role:'user',content:[{type:'text',text:'rules'},{type:'text',text:'中文🙂'}]}]);g.system=n.system;g.messages[0].content.unshift({type:'text',text:'rules'});console.log('DIFFERENCE Go keeps system instructions and tool choice; Node Claude maps developer to user and omits choice')}
     if(fixture.historyDifference){
      assert.equal(g.messages.length,3);assert.equal(n.messages.length,3);
@@ -134,7 +142,7 @@ for(const fixture of cases){
     }
    }
    if(fixture.path===gpath){
-    assert.deepEqual(g.toolConfig,{functionCallingConfig:{mode:fixture.payload.tool_choice==='required'?'ANY':'AUTO'}});assert.equal(n.toolConfig,undefined);delete g.toolConfig;
+    assert.deepEqual(g.toolConfig,{functionCallingConfig:fixture.selected?{mode:'ANY',allowedFunctionNames:[fixture.selected]}:{mode:fixture.payload.tool_choice==='required'?'ANY':fixture.payload.tool_choice==='none'?'NONE':'AUTO'}});assert.equal(n.toolConfig,undefined);delete g.toolConfig;
     if(fixture.geminiHistory){
      assert.equal(g.contents.length,3);assert.equal(n.contents.length,3);
      const gcall=g.contents[1].parts[1].functionCall,ncall=n.contents[1].parts[1].functionCall;
@@ -155,8 +163,9 @@ for(const fixture of cases){
     if(fixture.json){assert.equal(g.json,true);assert.equal(n.json,undefined);assert.equal(n.events[0].type,'response.created');console.log('DIFFERENCE Go returns completed JSON for false/omitted stream; legacy Node returns SSE')}
     // Legacy Node drops explicit namespaces on Chat calls; Go restores them.
     const normalized=g.output.map(({namespace,...item})=>item);
+    if(fixture.singleNamespace&&fixture.payload.tool_choice.type==='custom'){assert.equal(g.output[0].input,'hi');assert.equal(n.output[0].input,'await tools.exec_command({ cmd: "hi" });');normalized[0].input=n.output[0].input;console.log('DIFFERENCE Go preserves custom raw input; Node synthesizes an exec_command wrapper for this fixture')}
     assert.deepEqual(normalized,n.output,fixture.name+' Responses semantic output mismatch');
-    if(fixture.stream===calls||fixture.stream===bare||fixture.stream===claudeCalls||fixture.stream===gc){for(let j=0;j<g.output.length;j++){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}console.log('DIFFERENCE explicit namespace restored in Go; legacy Node output lacks it')}
+    if(fixture.singleNamespace||fixture.stream===calls||fixture.stream===bare||fixture.stream===claudeCalls||fixture.stream===gc){for(let j=0;j<g.output.length;j++){assert.equal(g.output[j].namespace,'pad');assert.equal(n.output[j].namespace,undefined)}console.log('DIFFERENCE explicit namespace restored in Go; legacy Node output lacks it')}
     if(fixture.path==='/v1/messages'){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:8});assert.equal(n.completed.response.usage,undefined)}
     if(fixture.path===gpath){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:10,input_tokens_details:{cached_tokens:2},output_tokens_details:{reasoning_tokens:2}});assert.deepEqual(g.completed.response.usage,n.completed.response.usage)}
     if(fixture.chatUsage){assert.deepEqual(g.completed.response.usage,{input_tokens:3,output_tokens:5,total_tokens:8,input_tokens_details:{cached_tokens:2},output_tokens_details:{reasoning_tokens:1}});assert.equal(n.completed.response.usage,undefined);console.log('DIFFERENCE Go requests/maps validated Chat usage; Node does not request/map it')}
@@ -168,4 +177,4 @@ for(const fixture of cases){
   child.kill();await Promise.race([new Promise(r=>child.once('exit',r)),new Promise(r=>setTimeout(r,3000))]);
  }
 }
-console.log('PASS 53 shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');
+console.log('PASS 77 shared mock/resource routing cases; explicit JSON/namespace/history/system/choice/usage/truncation differences, not full parity or performance proof');
