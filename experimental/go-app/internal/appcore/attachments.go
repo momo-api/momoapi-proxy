@@ -80,7 +80,9 @@ func (s *attachmentStore) expire(now time.Time) {
 }
 
 func attachmentPart(data []byte) (json.RawMessage, attachmentMetadata, error) {
-	p, err := decodeObject(string(data))
+	// Check original bytes before canonicalization can erase ambiguous fields
+	// or substitute invalid UTF-8. Registration is an explicit local API.
+	p, err := decodeVideoObject(data)
 	if err != nil || !only(p, "part") {
 		return nil, attachmentMetadata{}, errRouted
 	}
@@ -219,6 +221,11 @@ var errAttachment = errors.New("unsupported or expired attachment")
 // recursively rewrite function arguments, tools/schemas, assistant or instructions.
 // Call BEFORE history preparation: anchors own inline snapshots, not TTL references.
 func (c *Core) expandAttachments(ctx context.Context, data []byte, generation uint64) ([]byte, error) {
+	// compact is not a converted Responses request: it needs the same raw
+	// framing gate here, before reference expansion reserializes any objects.
+	if _, err := decodeVideoObject(data); err != nil {
+		return nil, errAttachment
+	}
 	var body map[string]json.RawMessage
 	var items []json.RawMessage
 	if json.Unmarshal(data, &body) != nil || json.Unmarshal(body["input"], &items) != nil || items == nil {

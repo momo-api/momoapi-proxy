@@ -36,7 +36,19 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### 首轮原生 CI 失败与诊断修复（2026-10-06；未验收）
+### 附件原始 JSON 校验（2026-10-06；本地通过，CI待验收）
+
+TCP红测复现：注册duplicate root/part/escaped key、invalid UTF8接受且存入
+资产；compact显式attachment展开先重序列化，duplicate model/reference
+可成为成功checkpoint。新增registration与expand前共享duplicate-free UTF8
+depth64检查，固定400且无store/upstream副作用；不改变native/default原样透传。
+回归含嵌套/转义重复、非法UTF8、trailing/null/depth、注册budget不变、有效
+asset与真正有损checkpoint正例，转换Responses既有strict gate仍保持。
+双tag全量各5、两vet、WSLfullrace、489same mock/resources黑盒、Win197TLS
+和普通productionblackbox通过；新增rawJSON针对Go本地API，不冒充Node同API。
+Prism启动仍toolerror，无job/专家批准；无账户/付费推理/本机installer。
+
+### 首轮原生 CI 失败与诊断修复（2026-10-06；b8f40d4已三平台验收）
 
 465d841首轮PR native37394366598的Linux单测/race/489TCP通过，WebView
 界面断言失败；report带step query被探针调用production鉴权时拒绝，导致
@@ -49,6 +61,12 @@ step标签（生产query拒绝门禁不动），先红回归再绿；细分图�
 运行copy的version/runtime；不force detach、不retry/跳过/本机install。
 Win197TLS、page、packaging与probe百次/全量nogui单测/vet本地通过；新HEAD
 三平台待验收，原始LinuxUI根因仍须下一轮可核查诊断，PR保持draft。
+b8f40d4首轮PRnative37395538816/main37395538753与pushnative37395535116/
+main37395533946共18checks全成功；6native各489TCP197TLS/普通payload/
+隔离installer，Unix各5独立fullrace。3OS freshSHA/manifest/version/mode/
+format与下载Win普通blackbox/官方SDK图片视频及Web/Gemini edit生命周期通过。
+新诊断路径已回归，但两轮Linux未再复现原断言，不能宣称其根因已修复或
+用成功覆盖465d841失败；无rerun/no force detach，正式稳定性soak未完成。
 
 ### 有界 UTF-8 文本附件（2026-10-06；本地增量，当前CI待验收）
 
