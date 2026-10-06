@@ -2,19 +2,19 @@
 
 - **版本**：v0.1
 - **状态**：Draft / Alpha 设计基线
-- **范围**：Go Router Core、协议转换、Provider/Model 路由、诊断与最小控制平面
-- **非范围**：完整 Codex 聊天客户端、Muse 转换、云端账号池、Provider 数量竞赛
+- **范围**：Go Router Core、MOMO 模型/目标路由、协议转换、诊断与最小控制平面
+- **非范围**：完整 Codex 聊天客户端、Muse 转换、账号池/账号切换/钱包余额、Provider 数量竞赛
 
 ## 1. 产品定义
 
-MOMO Router 是一个跨平台本地路由网关：
+MOMO Router 是 **MOMO API 中转站的优化版**：一个跨平台本地路由网关，使用用户配置的 MOMO API Key，把客户端请求稳定地接入 MOMO 服务端路由。
 
 ```text
 客户端
   → 鉴权与预算
   → 路由决策与能力预检
   → 原生协议透传，或显式 momo-routing 转换
-  → Provider / Model / Account
+  → MOMO 目标 / Model / 已配置连接
   → 上游
 ```
 
@@ -25,7 +25,7 @@ MOMO Router 是一个跨平台本地路由网关：
 1. **原生透传优先**：未明确启用 `momo-routing` 时，不进入跨协议转换。
 2. **显式转换**：Responses→Chat/Claude/Gemini 只支持能力矩阵声明的严格子集。
 3. **失败关闭**：未知字段、未知事件、无法表达的语义直接拒绝，不静默丢失。
-4. **可解释路由**：每次请求都能说明为什么选择某个 provider/model/account。
+4. **可解释路由**：每次请求都能说明为什么选择某个 MOMO 目标/model/连接配置。
 5. **可审计配置**：预览、确认、revision、私有备份、锁和冲突检测必须保留。
 6. **证据分级**：CI、mock 黑盒、真实 provider、性能和生产稳定性不得混为一谈。
 
@@ -42,11 +42,11 @@ MOMO Router 是一个跨平台本地路由网关：
 
 ### 2.2 借鉴 OpenCodex
 
-- Providers、Models、Routes、Accounts、Usage、Logs 的控制平面信息架构；
+- Providers/目标、Models、Routes、Usage、Logs 的控制平面信息架构；
 - capability matrix、路由解释、dry-run 和健康状态；
 - 配置 revision 与可恢复操作。
 
-**不照搬**其 Bun/TypeScript 数据平面、第二套路由引擎、账号池策略或完整 Dashboard-first 重构。
+**不照搬**其 Bun/TypeScript 数据平面、第二套路由引擎、账号池/账号切换/钱包策略或完整 Dashboard-first 重构。
 
 ## 3. 产品边界
 
@@ -62,17 +62,18 @@ MOMO Router 是一个跨平台本地路由网关：
 
 ### 3.2 连接模式
 
-- **native**：客户端连接官方 provider，沿用官方登录；
+- **native**：可选的 Codex 官方连接互操作模式，不属于 MOMO Router 的账号系统；沿用客户端自己的官方登录，不由 MOMO Router 管理；
 - **direct**：客户端直连 MOMO HTTPS 上游；
 - **proxy**：客户端连接本地 Go 网关，再由网关连接 MOMO。
 
-三种模式是连接目标，不等于协议转换；原生 Responses 仍可在 direct/proxy 中透传。
+三种模式是连接目标，不等于协议转换；原生 Responses 仍可在 direct/proxy 中透传。MOMO Router 的主产品路径是 direct/proxy；native 只是安全的外部互操作选项。
 
 ### 3.3 明确不承诺
 
 - 不承诺 OpenAI、Claude、Gemini 之间完整语义等价；
 - 不承诺任意 Provider 的未知扩展自动兼容；
-- 不默认跨账号、跨信任域或跨协议 fallback；
+- 不默认跨 MOMO 连接、跨信任域或跨协议 fallback；
+- 不管理第三方账号、账号池、账号切换、余额或钱包；MOMO 服务端计费和路由仍由 MOMO 服务端负责；
 - 不迁移 Muse；
 - 不把 621 个同 mock/resource 黑盒案例当作性能或生产成熟证明。
 
@@ -83,7 +84,7 @@ MOMO Router 是一个跨平台本地路由网关：
 1. 固化 native/direct/proxy 和 `momo-routing` 的默认语义；
 2. 单一、机器可执行的能力矩阵：
    `native / translated / lossy / unsupported / unverified`；
-3. 请求预检：入口协议 × 能力 × Provider/Model/Account × 流式模式；
+3. 请求预检：入口协议 × 能力 × MOMO 目标/Model/连接配置 × 流式模式；
 4. typed request / stream event 只用于转换路径；
 5. 工具 namespace、alias、allowed_tools、history、usage、output limit、checkpoint 统一门禁；
 6. 流式状态机验证 start、delta、tool、usage、stop、error、cancel、EOF；
@@ -92,7 +93,7 @@ MOMO Router 是一个跨平台本地路由网关：
 
 ### P1：可运营性
 
-1. Providers / Models / Accounts / Routes 管理；
+1. MOMO 目标 / Models / Routes 管理；不提供账号池或账号切换；
 2. 路由 dry-run：展示候选、能力不匹配和最终选择；
 3. 统一错误模型：配置、鉴权、能力、转换、上游、超时、取消、内部错误；
 4. request ID、route revision、转换路径、retry/fallback、usage 来源；
@@ -102,7 +103,7 @@ MOMO Router 是一个跨平台本地路由网关：
 ### P2：规模化与体验
 
 - 质量/延迟/成本加权路由；
-- 多账号池和自动健康降级；
+- 多连接池和自动健康降级（仅在另立安全与计费边界后评审；不是账号池）；
 - 更完整的 Dashboard、远程管理和 adapter SDK；
 - 新协议与新 Provider。
 
@@ -173,7 +174,7 @@ MOMO Router 是一个跨平台本地路由网关：
 - 隐式跨协议转换；
 - 未知字段/事件静默丢弃；
 - 无 loss report 的有损 fallback；
-- 跨账号或跨信任域隐式 fallback；
+- 跨 MOMO 连接或跨信任域隐式 fallback；
 - 用 CI 绿或 mock 总数宣传生产成熟。
 
 ## 8. 版本路线
@@ -190,7 +191,19 @@ MOMO Router 是一个跨平台本地路由网关：
 
 完成升级/回滚、生产负载基线、SLO、Provider 变更监测，并确认不存在未声明的静默有损转换。
 
-## 9. 当前状态声明
+## 9. 明确不做的账号能力
+
+以下内容不属于 MOMO Router，也不会因为参考 OpenCodex 而加入：
+
+- 第三方 provider 账号收集或登录；
+- 多账号池、账号轮换、账号优先级和自动切换；
+- 钱包余额、账户余额、订阅额度或支付信息管理；
+- 读取其他客户端的账号文件、OAuth 会话或登录历史；
+- 替代 MOMO 服务端的计费、渠道调度和账号风控。
+
+界面中若展示 MOMO 的 token quota，只能作为用户明确点击后的脱敏只读状态；它不是余额、钱包或账号管理功能。
+
+## 10. 当前状态声明
 
 `48a961dbe17bc4e91a4ddd97e0639db7d44ae2d4` 是三平台工程基线，不是 Stable 发布证明。
-真实官方登录、真实付费推理、长时间稳定性、真实 Provider 全能力和生产容量仍需单独验收。
+真实官方登录、真实付费推理、长时间稳定性、真实 MOMO 模型/目标全能力和生产容量仍需单独验收。
