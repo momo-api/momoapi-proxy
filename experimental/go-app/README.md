@@ -7,6 +7,36 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
 
+### Explicit Node media-plugin call compatibility (partial)
+
+The existing Node plugins use flat arguments and image_task_status /
+video_task_status, not the preview confirmed/request envelope. Explicitly run
+`momo-preview mcp image --endpoint http://127.0.0.1:<port>` or `mcp video`
+with the same endpoint option. These modes connect to the running Go gateway;
+the trusted client must intentionally inherit MOMO_LOCAL_API_KEY (LOCAL full
+session token, never upstream key). Do not paste it in exported config/argv/logs.
+Flat generate/edit calls count as client intent, NOT verified human consent;
+obtain user intent for each potentially billed call. Model is required, catalog
+must be queried explicitly first; no silent defaults, fallback/retries or polling.
+
+`plugin-mcp-config image --endpoint http://127.0.0.1:<port>` (or video) prints
+a secret-free, single-server launcher override using the current executable.
+Review/apply manually in a trusted client. It does not install/modify plugins,
+read profiles, or hijack the existing momoapi-proxy executable. Port/session
+change requires a new override/token. Normal mcp and confirmed/request media
+modes are unchanged. Init/list do not query the provider.
+
+Tools: image_capabilities, image_generate, image_edit, image_task_status;
+video_capabilities, video_generate, video_task_status. Catalog also includes
+Node-style per-model limits and parameter_schema while retaining actual Core
+constraints. Image results remain URL/base64 JSON, NOT saved asset references;
+image_asset_get/list, asset: reuse, signed vision references and automatic image
+downloads are NOT implemented. Video returned remote_url is text, with no
+download or browser playback. No generate_audio/legacy video routes. The
+unchanged Node image Skill expects disk assets, so this is call-format
+compatibility plus manual launcher override, NOT full existing-plugin parity.
+Mock lifecycle verification is not a real paid upstream generation claim.
+
 Public route dispatch matches Node: GET /v1/models or /models; POST /v1/responses
 or /responses, /v1/chat/completions or /chat/completions, /v1/responses/compact
 or /responses/compact. Trailing slashes accepted only on those exact API paths.

@@ -23,6 +23,25 @@ func main() {
 	}
 }
 func run() error {
+	// Explicit compatibility launcher; no Node/profile/endpoint discovery.
+	if len(os.Args) == 5 && os.Args[1] == "mcp" && (os.Args[2] == "image" || os.Args[2] == "video") && os.Args[3] == "--endpoint" {
+		return runConnectedPluginMCP(os.Args[4], os.Args[2] == "video")
+	}
+	if len(os.Args) == 5 && os.Args[1] == "plugin-mcp-config" && (os.Args[2] == "image" || os.Args[2] == "video") && os.Args[3] == "--endpoint" {
+		executable, err := os.Executable()
+		if err != nil {
+			return errors.New("plugin executable unavailable")
+		}
+		config, err := integration.PluginMCPConfig(executable, os.Args[4], os.Args[2] == "video")
+		if err != nil {
+			return err
+		}
+		n, err := io.WriteString(os.Stdout, config+"\n")
+		if err != nil || n != len(config)+1 {
+			return errors.New("plugin config output unavailable")
+		}
+		return nil
+	}
 	if len(os.Args) == 2 && os.Args[1] == "diagnostics" {
 		return writeDiagnostics(os.Stdout) // offline allowlisted report only
 	}
@@ -60,7 +79,7 @@ func run() error {
 		return desktop()
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("MOMO preview: desktop (no args) | --version | diagnostics (offline, not running app health) | codex-text-tools-catalog --model gpt-5.5 (manual secret-free client contract) | mcp (read-only stdio) | mcp-videos (opt-in private config line) | mcp-videos-connect --endpoint <local-origin> (explicit local key environment) | mcp-images (opt-in private config line then stdio) | mcp-images-connect --endpoint <local-origin> (explicit local key environment) | serve (upstream config on private stdin)")
+		return errors.New("MOMO preview: desktop (no args) | --version | diagnostics (offline, not running app health) | codex-text-tools-catalog --model gpt-5.5 | mcp (read-only stdio) | mcp image|video --endpoint <local-origin> (explicit flat plugin subset) | plugin-mcp-config image|video --endpoint <local-origin> (secret-free launcher override) | mcp-videos | mcp-videos-connect --endpoint <local-origin> | mcp-images | mcp-images-connect --endpoint <local-origin> | serve (upstream config on private stdin)")
 	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
 	_ = os.Stdin.Close()

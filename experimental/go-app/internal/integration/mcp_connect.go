@@ -43,6 +43,19 @@ func VideoMCPConfig(executable, endpoint string) (string, error) {
 	return mediaMCPConfig(executable, endpoint, true)
 }
 
+// Reviewed launcher override only. No env values, file writes or installation.
+func PluginMCPConfig(executable, endpoint string, video bool) (string, error) {
+	if executable == "" || strings.ContainsAny(executable, "\r\n\x00") || ValidateLocalEndpoint(endpoint) != nil {
+		return "", errors.New("local plugin export unavailable")
+	}
+	modality := "image"
+	if video {
+		modality = "video"
+	}
+	data, err := json.MarshalIndent(map[string]any{"mcpServers": map[string]any{"momo-" + modality: map[string]any{"type": "stdio", "command": executable, "args": []string{"mcp", modality, "--endpoint", endpoint}}}}, "", "  ")
+	return string(data), err
+}
+
 func mediaMCPConfig(executable, endpoint string, video bool) (string, error) {
 	if executable == "" || strings.ContainsAny(executable, "\r\n\x00") || ValidateLocalEndpoint(endpoint) != nil {
 		return "", errors.New("local MCP export unavailable")

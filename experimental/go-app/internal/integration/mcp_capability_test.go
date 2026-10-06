@@ -10,7 +10,7 @@ import (
 )
 
 func TestMCPSelectedCapabilityFitsClientBudget(t *testing.T) {
-	for _, serve := range []func(context.Context, io.Reader, io.Writer, ImageDispatch) error{ServeImageMCP, ServeVideoMCP, func(_ context.Context, in io.Reader, out io.Writer, _ ImageDispatch) error { return ServeMCP(in, out) }} {
+	for _, serve := range []func(context.Context, io.Reader, io.Writer, ImageDispatch) error{ServeImageMCP, ServeVideoMCP, ServePluginImageMCP, ServePluginVideoMCP, func(_ context.Context, in io.Reader, out io.Writer, _ ImageDispatch) error { return ServeMCP(in, out) }} {
 		var out bytes.Buffer
 		input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gateway_capabilities","arguments":{"capability":"gemini_thinking"}}}` + "\n"
 		if err := serve(context.Background(), strings.NewReader(input), &out, func(context.Context, string, []byte) ([]byte, int) {

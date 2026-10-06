@@ -30,6 +30,12 @@ func ServeVideoMCP(ctx context.Context, input io.Reader, output io.Writer, dispa
 }
 
 func serveMediaMCP(ctx context.Context, input io.Reader, output io.Writer, dispatch ImageDispatch, video bool) error {
+	return serveMediaMCPResult(ctx, input, output, dispatch, video, mediaMCPResult)
+}
+
+type mediaResultFunc func(context.Context, string, json.RawMessage, ImageDispatch, bool) (any, int, string)
+
+func serveMediaMCPResult(ctx context.Context, input io.Reader, output io.Writer, dispatch ImageDispatch, video bool, resultFor mediaResultFunc) error {
 	if dispatch == nil {
 		return errors.New("image MCP unavailable")
 	}
@@ -64,7 +70,7 @@ func serveMediaMCP(ctx context.Context, input io.Reader, output io.Writer, dispa
 			}
 			continue
 		}
-		result, code, message := mediaMCPResult(ctx, method, req["params"], dispatch, video)
+		result, code, message := resultFor(ctx, method, req["params"], dispatch, video)
 		if ctx.Err() != nil {
 			return nil
 		}

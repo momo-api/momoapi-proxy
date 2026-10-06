@@ -268,6 +268,48 @@ def check_connected_video_mcp(binary, session):
     session.request("GET", "/v1/models", 401, authenticated=False)  # connector never stops gateway
 
 
+def check_plugin_mcp(binary, session):
+    endpoint = "http://127.0.0.1:" + str(session.port)
+    env = {**os.environ, "MOMO_LOCAL_API_KEY": session.token}
+    for modality in ("image", "video"):
+        command = [str(binary), "mcp", modality, "--endpoint", endpoint]
+        export = subprocess.run([str(binary), "plugin-mcp-config", modality, "--endpoint", endpoint],
+                                input=SYNTHETIC_KEY.encode(), env=env, capture_output=True, timeout=8)
+        require(export.returncode == 0 and export.stderr == b"", "plugin config export")
+        require(session.token.encode() not in export.stdout and SYNTHETIC_KEY.encode() not in export.stdout,
+                "plugin export exposed input/env")
+        config = json.loads(export.stdout)["mcpServers"]["momo-" + modality]
+        require(config["args"] == command[1:] and "env" not in config, "plugin launcher contract")
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": modality + "_capabilities", "arguments": {}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": modality + "_generate", "arguments": {"model": "seedance-2.5" if modality == "video" else "momoapi-gpt-image-2-5-flare", "prompt": "synthetic"}}},
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": modality + "_task_status", "arguments": {"task_id": "foreign"}}},
+            {"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": modality + "_generate", "arguments": {"confirmed": True, "request": {}}}},
+        ]
+        data = ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
+        result = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
+        require(result.returncode == 0 and result.stderr == b"", "plugin connector startup/EOF")
+        require(session.token.encode() not in result.stdout and SYNTHETIC_KEY.encode() not in result.stdout,
+                "plugin secret reflection")
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        require([r["id"] for r in replies] == list(range(1, 7)), "plugin IDs")
+        tools = {t["name"]: t for t in replies[1]["result"]["tools"]}
+        require(modality + "_task_status" in tools and modality + "_task" not in tools,
+                "plugin task names")
+        properties = tools[modality + "_generate"]["inputSchema"]["properties"]
+        require("prompt" in properties and "model" in properties and "request" not in properties,
+                "plugin flat arguments")
+        require(all(r["result"]["isError"] for r in replies[2:5]) and replies[5]["error"]["code"] == -32602,
+                "plugin Core private DNS/catalog/foreign task/shape gates")
+        for token in ("", SYNTHETIC_KEY):
+            result = subprocess.run(command, input=data, env={**env, "MOMO_LOCAL_API_KEY": token},
+                                    capture_output=True, timeout=8)
+            require(result.returncode == 1 and result.stdout == b"", "plugin missing key gate")
+        session.request("GET", "/v1/models", 401, authenticated=False)
+
+
 class Session:
     def __init__(self, binary):
         self.process = None
@@ -536,6 +578,7 @@ def check_runtime(binary):
         first, second = sessions
         check_connected_image_mcp(binary, first)
         check_connected_video_mcp(binary, first)
+        check_plugin_mcp(binary, first)
         require(first.port != second.port and first.token != second.token, "multiple instances share session")
         second.request("GET", "/v1/models", 401, headers={"Authorization": "Bearer " + first.token})
         check_boundaries(first)
@@ -550,7 +593,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + owned and connected video MCP whitelist/confirmation/Core gates/EOF/idle and blocked-output signals/gateway survival + video API auth/browser/catalog/foreign-ID/private-DNS/method/duplicate-JSON gates + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + owned and connected video MCP whitelist/confirmation/Core gates/EOF/idle and blocked-output signals/gateway survival + explicit flat plugin image/video connector/task_status/config-export/local-key/catalog/private-DNS/foreign-task/shape/EOF gates + video API auth/browser/catalog/foreign-ID/private-DNS/method/duplicate-JSON gates + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":

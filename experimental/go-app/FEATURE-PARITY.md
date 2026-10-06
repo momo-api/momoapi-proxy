@@ -6,6 +6,32 @@
 
 ## 可核查的差距
 
+2026-10-06 媒体插件接入增量（未全量兼容）：显式 `mcp image|video
+--endpoint <loopback-origin>` 接入当前 Go gateway，平铺 generate/edit 参数、
+image_task_status/video_task_status 与现有 Node 工具调用名一致。目录增加
+Node-style limits/parameter_schema；`plugin-mcp-config` 只打印无密钥 launcher
+override，需可信客户端手动审阅配置/明确继承 local session env，不自动替换
+现有插件或读取配置。普通只读/confirmed-request接口不变。插件模式启动代表
+启用平铺计费调用，client intent 不等于已核验人工同意；仍先查目录/明确model、
+无自动fallback/retry/poll。图片磁盘asset库/get/list/asset复用/签名vision与
+现有Skill的自动保存语义未实现，结果仍URL/base64文本；视频音频控制/旧路线
+未迁移。不能据此声明两个已安装插件直接零配置替换或完整功能对齐。
+
+e291c81 的首轮 PR 37411195542 / push 37411192549 三OS CI成功，两个main
+workflow也成功；这是状态回执，不证明先前73fdd64 macOS Start失败根因修复。
+此前失败保留，当前增量仍须新提交CI和产物验收，不用旧绿灯代替。
+
+本增量本地验证：integration平铺参数/目录字段/原确认mode隔离/精确大整数ID/
+notification无发送/无密钥导出/metadata不转发/重复与非法参数/短写退出无重放；
+连接实际local TCP与TLS mock Core完成图片generate/edit/task及video generate/task，
+先查目录与session Stop门禁，逐次精确单发送。官方 MCP SDK1.32.1 对普通
+production Windows binary完成三条mock流程，每条exact2发送（生成或编辑+task），
+保留catalog-gate失败、校验原Node videoToolDefs读取limits；不是实际已安装插件
+或真实agent/付费生图证明。两tag全量与vet/page/packaging通过，WSL全量race与
+Linux nogui普通binary、Windows生产binary完整blackbox（新增CLI插件mode门禁）
+通过；Win五fresh native每遍217TLS请求通过。全621统一路由TCP通过，保留
+已知Node/Go差异，不宣称621等价。WSL CLI不是Linux桌面发行验收。
+
 | 能力 | Node 版实现依据（仓库根目录相对路径） | Go 预览实际范围 |
 | --- | --- | --- |
 | 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与 `/v1/responses/compact`；compact 显式 native 请求可尝试原生透传（非真实能力证明），另有本地 checkpoint；已补与Node相同的无版本别名/尾斜线入口，统一canonical路径通过相同安全/历史/选路门禁 |

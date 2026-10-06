@@ -5,6 +5,24 @@ description: Understand the MOMO Go local gateway preview and its protocol/secur
 
 # MOMO local gateway preview
 
+## Explicit media plugin call compatibility
+
+Trusted clients can manually apply a secret-free launcher override from
+plugin-mcp-config image|video --endpoint http://127.0.0.1:<currentPort>.
+It runs mcp image|video with that endpoint and intentionally inherited
+MOMO_LOCAL_API_KEY local full-session token. Never put the token in argv,
+shared config, tool arguments or logs. No automatic installation/discovery.
+These separately enabled modes accept flat image_generate/image_edit and
+video_generate arguments plus image_task_status/video_task_status; explicit
+model and fresh catalog still required. A call is client intent, NOT verified
+human consent; obtain user intent for potentially billed operations.
+Init/list do not query providers; normal readonly/confirmed-request modes stay
+unchanged. No retry or automatic polling. Results remain URL/base64 JSON;
+image_asset_get/list, asset: reuse, disk library and signed vision references
+are NOT implemented. Do not follow the Node image Skill's automatic-save or
+saved-asset workflow on Go. Video no generate_audio/legacy routes/downloads.
+This is call-format compatibility, NOT full installed-plugin compatibility.
+
 ## Local redacted diagnostics
 
 Desktop Settings offers explicit local aggregate diagnostics: runtime, limits,

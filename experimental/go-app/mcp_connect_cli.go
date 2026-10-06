@@ -21,6 +21,14 @@ func runConnectedVideoMCP(endpoint string) error {
 }
 
 func runConnectedMediaMCP(endpoint string, video bool) error {
+	return runConnectedMediaMode(endpoint, video, false)
+}
+
+func runConnectedPluginMCP(endpoint string, video bool) error {
+	return runConnectedMediaMode(endpoint, video, true)
+}
+
+func runConnectedMediaMode(endpoint string, video, plugin bool) error {
 	if integration.ValidateLocalEndpoint(endpoint) != nil {
 		return errors.New("local MCP endpoint unavailable")
 	}
@@ -30,6 +38,12 @@ func runConnectedMediaMCP(endpoint string, video bool) error {
 	serve := integration.ServeImageMCP
 	if video {
 		connect, serve = integration.NewLocalVideoDispatch, integration.ServeVideoMCP
+	}
+	if plugin {
+		serve = integration.ServePluginImageMCP
+		if video {
+			serve = integration.ServePluginVideoMCP
+		}
 	}
 	dispatch, closeClient, err := connect(endpoint, os.Getenv(integration.LocalMCPKeyEnv))
 	if err != nil {
