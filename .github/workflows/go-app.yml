@@ -71,13 +71,8 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then tags=appcheck,gtk3,production; fi
           go test -tags "$tags" -run '^TestProbe' -count=100 .
           go build -tags "$tags" -trimpath -o "$RUNNER_TEMP/momo-appcheck$suffix" .
-      - name: Windows and macOS WebView TCP TLS-mock E2E and shutdown
-        if: runner.os != 'Linux'
-        run: python3 -c 'import os,subprocess; subprocess.run([os.environ["RUNNER_TEMP"]+"/momo-appcheck"+(".exe" if os.name=="nt" else "")],check=True,timeout=40)'
-      - name: Linux WebView TCP TLS-mock E2E and shutdown
-        if: runner.os == 'Linux'
-        run: |
-          timeout 40s xvfb-run -a dbus-run-session -- "$RUNNER_TEMP/momo-appcheck"
+      - name: Five independent WebView TCP TLS-mock E2E and shutdown passes
+        run: python3 -B packaging/native_acceptance.py
       - name: Package unsigned preview
         run: |
           export PREVIEW_DIR="$RUNNER_TEMP/momo-app-preview"

@@ -36,6 +36,17 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 原生界面连续验收门禁（2026-10-06；新CI待验收）
+
+为追查465d841首次Linux偶发page assertion，CI每OS改为5个独立进程/
+新profile的完整WebView197TLS mock验收，不retry；任何exit/40s timeout
+立即终止，未放宽25s actions或40s process gate、未跳过断言。Linux每轮
+独立Xvfb/DBus；共享runner不是独立硬件/长期soak或真实OS对话框点击证明。
+runner回归覆盖exact5、platform、原期限与首次failure/timeout仅两次launch。
+d984a3f首轮18checks/6native489TCP197TLS/3freshOSartifact及下载Win普通/
+SDK生命周期已验收；freshcurrentCodex0.156 Skill/readonlyMCP第二轮exact2
+mock sends通过；Win额外5独立native均197通过。新门禁须新HEAD独立验收。
+
 ### 附件原始 JSON 校验（2026-10-06；本地通过，CI待验收）
 
 TCP红测复现：注册duplicate root/part/escaped key、invalid UTF8接受且存入
