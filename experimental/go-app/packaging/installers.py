@@ -85,12 +85,21 @@ def macos(preview, download, temp, version):
         assert info["CFBundleShortVersionString"] == version
         executable = app / "MacOS/momo-preview"
         same_file(executable, preview / "MOMO Preview.app/Contents/MacOS/momo-preview")
-        check_binary(executable, version)
-        check_runtime(executable)
         assert (mount / "Applications").is_symlink()
+        # Match drag-install semantics in a fresh CI-only target. Executing
+        # directly from the mounted DMG can keep macOS executable mappings
+        # alive after process exit and make ordinary detach fail EBUSY.
+        # Never force-detach or retry a failed acceptance check.
+        installed = temp / "momo-dmg-ci-installed/MOMO Preview.app"
+        assert not installed.exists(), "refuse to reuse a DMG test copy"
+        shutil.copytree(mount / "MOMO Preview.app", installed)
+        installed_executable = installed / "Contents/MacOS/momo-preview"
+        same_file(installed_executable, executable)
     finally:
         run("hdiutil", "detach", mount)
-    print("PASS macOS DMG verification/mount/payload/version/detach; drag install not automated")
+    check_binary(installed_executable, version)
+    check_runtime(installed_executable)
+    print("PASS macOS DMG verification/mount/payload/copy/detach/version/runtime; Finder drag not automated")
 
 
 def linux(preview, download, temp, version):

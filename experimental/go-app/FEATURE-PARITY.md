@@ -36,6 +36,20 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
+### 首轮原生 CI 失败与诊断修复（2026-10-06；未验收）
+
+465d841首轮PR native37394366598的Linux单测/race/489TCP通过，WebView
+界面断言失败；report带step query被探针调用production鉴权时拒绝，导致
+仅看到watchdog与未到达image save，不能据此确定原始UI断言根因。
+同HEAD push native37394358698的Linux通过；macOS native通过197TLS，
+DMG payload/runtime通过但normal detach EBUSY失败；两轮均不算全平台通过。
+保留首次失败，不rerun掩盖。新增probe-only canonical鉴权请求与固定安全
+step标签（生产query拒绝门禁不动），先红回归再绿；细分图片预览/选择/另存
+断言。DMG新增fresh CI temp copy与byteexact检查，normal detach完成后才
+运行copy的version/runtime；不force detach、不retry/跳过/本机install。
+Win197TLS、page、packaging与probe百次/全量nogui单测/vet本地通过；新HEAD
+三平台待验收，原始LinuxUI根因仍须下一轮可核查诊断，PR保持draft。
+
 ### 有界 UTF-8 文本附件（2026-10-06；本地增量，当前CI待验收）
 
 Claude/Gemini用户与配对工具input_file新增canonical inline text/plain、
