@@ -17,6 +17,8 @@ import {ordinaryStrictBlackbox} from './routecheck_ordinary_strict.mjs';
 import {searchCheckpointBlackbox} from './routecheck_search_checkpoint.mjs';
 import {geminiStateBlackbox} from './routecheck_gemini_state.mjs';
 import {claudeStateBlackbox} from './routecheck_claude_state.mjs';
+import {geminiThinkingBlackbox} from './routecheck_gemini_thinking.mjs';
+import {publicRoutesBlackbox} from './routecheck_public_routes.mjs';
 const binary=process.argv[2];assert.ok(binary);
 const tool={type:'namespace',name:'pad',tools:[{type:'function',name:'read',parameters:{type:'object',properties:{}}},{type:'custom',name:'write'}]};
 const payload={model:'gpt-5.5',stream:true,instructions:'Be concise.',input:[{role:'user',content:[{type:'input_text',text:'中文🙂'}]}],tools:[tool]};
@@ -155,7 +157,7 @@ async function launch(fixture){
   let line='';const timer=setTimeout(()=>reject(Error('routecheck startup timeout')),10000);
   child.once('error',reject);child.once('exit',()=>{clearTimeout(timer);reject(Error('routecheck exited before handoff'))});
   child.stdout.on('data',b=>{line+=b;if(line.includes('\n')){clearTimeout(timer);resolve(JSON.parse(line.split('\n')[0]))}});
-  child.stdin.end(JSON.stringify({Stream:fixture.stream,Streams:fixture.streams,Paths:fixture.paths,Status:fixture.status||200,Path:fixture.path,Search:fixture.search,JSON:fixture.upstreamJSON,Image:fixture.image,ImageCatalog:fixture.imageCatalog,Video:fixture.video}));
+  child.stdin.end(JSON.stringify({Stream:fixture.stream,Streams:fixture.streams,Paths:fixture.paths,Status:fixture.status||200,Path:fixture.path,Search:fixture.search,JSON:fixture.upstreamJSON,Image:fixture.image,ImageCatalog:fixture.imageCatalog,Video:fixture.video,Models:fixture.models}));
  });
  return {child,handoff};
 }
@@ -479,4 +481,6 @@ const ordinaryStrictCount=await ordinaryStrictBlackbox(launch,invoke);
 const searchCheckpointCount=await searchCheckpointBlackbox(launch,invoke);
 const geminiStateCount=await geminiStateBlackbox(launch,invoke);
 const claudeStateCount=await claudeStateBlackbox(launch,invoke);
-console.log('PASS '+(cases.length+8+imageCount+imageEditCount+chatImageCount+videoCount+dsmlCount+providerReplayCount+toolAliasCount+parallelToolsCount+ordinaryStrictCount+searchCheckpointCount+geminiStateCount+claudeStateCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; converted provider replay and DSML explicit text conversion and marker-leak differences independently asserted; signed Gemini calls retained by both, public-summary/text-state differences and Claude signed/redacted-state loss independently asserted; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+const geminiThinkingCount=await geminiThinkingBlackbox(launch,invoke);
+const publicRouteCount=await publicRoutesBlackbox(launch,invoke);
+console.log('PASS '+(cases.length+8+imageCount+imageEditCount+chatImageCount+videoCount+dsmlCount+providerReplayCount+toolAliasCount+parallelToolsCount+ordinaryStrictCount+searchCheckpointCount+geminiStateCount+claudeStateCount+geminiThinkingCount+publicRouteCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; converted provider replay and DSML explicit text conversion and marker-leak differences independently asserted; signed Gemini calls retained by both, public-summary/text-state differences and Claude signed/redacted-state loss independently asserted; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

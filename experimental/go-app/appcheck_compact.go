@@ -80,7 +80,7 @@ func probeNativeCompactRequests(core *appcore.Core) error {
 	}
 	client := http.Client{Timeout: 4 * time.Second}
 	defer client.CloseIdleConnections()
-	req, _ := http.NewRequest("POST", base+"/responses/compact", strings.NewReader(` {"model":"gpt-5.6-sol","input":[{"role":"user","content":"native-compact-probe"}],"unknown":"中文🙂"} `))
+	req, _ := http.NewRequest("POST", strings.TrimSuffix(base, "/v1")+"/responses/compact/", strings.NewReader(` {"model":"gpt-5.6-sol","input":[{"role":"user","content":"native-compact-probe"}],"unknown":"中文🙂"} `))
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-MOMO-Compact", "native")

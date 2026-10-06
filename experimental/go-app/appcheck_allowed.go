@@ -60,7 +60,7 @@ func probeAllowedRequests(core *appcore.Core) error {
 		for _, stream := range []bool{true, false} {
 			p := map[string]any{"model": model, "stream": stream, "input": []any{map[string]string{"role": "user", "content": "allowed-probe"}}, "tools": []any{map[string]any{"type": "namespace", "name": "pad", "tools": []any{map[string]string{"type": "function", "name": "read"}, map[string]string{"type": "custom", "name": "write"}}}}, "tool_choice": map[string]any{"type": "allowed_tools", "mode": "required", "tools": []any{map[string]string{"type": "function", "name": "read", "namespace": "pad"}}}}
 			b, _ := json.Marshal(p)
-			req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(string(b)))
+			req, _ := http.NewRequest("POST", strings.TrimSuffix(base, "/v1")+"/responses///", strings.NewReader(string(b)))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+key)
 			resp, err := client.Do(req)

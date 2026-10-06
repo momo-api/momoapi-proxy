@@ -7,6 +7,16 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
 
+Public route dispatch matches Node: GET /v1/models or /models; POST /v1/responses
+or /responses, /v1/chat/completions or /chat/completions, /v1/responses/compact
+or /responses/compact. Trailing slashes accepted only on those exact API paths.
+Aliases canonicalize before protocol/history/media/admission gates; same body
+and canonical upstream path, no redirect or extra send. Queries/encoded paths,
+dot segments/duplicate internal slashes and internal management aliases remain
+rejected. Auth/browser/method/resource gates unchanged. Chat entry stays Chat,
+even for Claude/Gemini model names. Explicit momo-routing Responses entry uses
+Node's same model classifier; Muse remains deliberately excluded (501).
+
 ### Local diagnostics (explicit, no network)
 
 Settings: View redacted diagnostics reads only this Core under its lock. It reports
@@ -115,18 +125,35 @@ These are part-shape preservation flags, not proof of authenticity; clients must
 retain them. Summaries reject both flags, and text rejects call_id_absent.
 Decoder checks duplicate-free UTF8/depth64 framing, <=2048 native Parts and conservative metadata
 charging within the existing 1MiB retained/history/wire limits. Only completed
-clean EOF and successful terminal write can mint an anchor. Thinking effort and
--thinking aliases remain rejected; no guessed model budgets or silent clamps.
+clean EOF and successful terminal write can mint an anchor. -thinking aliases
+remain rejected; no guessed model budgets or silent clamps.
 Only complete native text/function Parts are supported: signature-only streaming
 chunks/partial function arguments/Interactions API are not. Unsigned adjacent text
 keeps legacy coalescing; no claim of general native streaming boundary recovery.
 REST wire reference: https://ai.google.dev/api/generate-content (Part, not the
 Interactions API thinking steps). Synthetic mock evidence is not live capability.
 
+MCP clients may read `gateway_capabilities({"capability":"gemini_thinking"})`
+for one complete contract instead of a large all-capabilities result; `{}` remains
+unchanged. Client-side truncation of all contracts is not proxy data loss.
+Explicit generateContent control `momo_gemini_thinking` accepts a nonempty
+object with optional `includeThoughts` boolean (false preserved), and either
+`thinkingLevel:"MINIMAL"|"LOW"|"MEDIUM"|"HIGH"` or `thinkingBudget` integer
+-1..2147483647 (0 disabled, -1 automatic, model-dependent support/ranges).
+No snake-case aliases, nulls, unknown fields or combined level+budget.
+Canonical effort minimal/low/medium/high maps to those EXACT native levels;
+all three effort aliases must agree. Consistent explicit level+effort is allowed;
+budget+effort and xhigh/max/ultra/none reject, never silently clamped/ignored.
+Use explicit budget 0 to request disable; this does not guarantee model support.
+Controls coexist with max_output_tokens, are per-request, never inherited from
+history, and never guessed from model names. Provider errors do not trigger
+fallback/retry. Default/native passthrough bytes remain unchanged. This is not
+signature-only streaming reconstruction or Interactions API support.
+
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
 reasoning effort (Chat; Claude only with explicit adaptive control below;
-Gemini effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
+Gemini supports minimal/low/medium/high as above). It restores namespace explicitly and fails ambiguous bare names.
 It rejects unknown payload fields/options, unsupported media, foreign/expired history references, opaque/provider compaction on converted paths,
 hosted built-in tools, grammar on converted paths, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally

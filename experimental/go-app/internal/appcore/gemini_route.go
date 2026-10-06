@@ -9,7 +9,7 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !geminiModelName(ir.model) || ir.effort != "" || strings.Contains(ir.model, "-thinking") {
+	if !geminiModelName(ir.model) || strings.Contains(ir.model, "-thinking") {
 		return nil, errRouted
 	}
 	contents := []any{}
@@ -143,8 +143,15 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 		return nil, errRouted
 	}
 	body := map[string]any{"contents": contents}
+	config := map[string]any{}
 	if ir.maxOutputTokens != 0 {
-		body["generationConfig"] = map[string]any{"maxOutputTokens": ir.maxOutputTokens}
+		config["maxOutputTokens"] = ir.maxOutputTokens
+	}
+	if ir.geminiThinking != nil {
+		config["thinkingConfig"] = ir.geminiThinking
+	}
+	if len(config) > 0 {
+		body["generationConfig"] = config
 	}
 	if len(systems) > 0 {
 		body["systemInstruction"] = map[string]any{"parts": systems}

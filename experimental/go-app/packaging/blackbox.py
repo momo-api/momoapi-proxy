@@ -420,6 +420,16 @@ def check_boundaries(session):
                     body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}')
     session.request("GET", "/v1/models?extra=1", 400)
     session.request("GET", "/v1/%6dodels", 400)
+    for path in ("/models", "/responses", "/chat/completions", "/responses/compact"):
+        session.request("POST", path, 401, authenticated=False)
+        session.request("POST", path, 403, headers={"Origin": "https://foreign.invalid"})
+    for method, path in (("POST", "/models"), ("GET", "/responses/"), ("GET", "/chat/completions"), ("GET", "/responses/compact///")):
+        session.request(method, path, 405)
+    session.request("GET", "/models?extra=1", 400)
+    session.request("POST", "/respon%73es", 400, body=b"{}")
+    session.request("POST", "/responses", 400, body=b"{}")
+    session.request("POST", "/responses/compact", 501, body=b'{"model":"gpt-5.5","input":[{"role":"user","content":"hi"}]}')
+    session.request("GET", "/models/", 502)
     for method, path in (("POST", "/v1/models"), ("GET", "/v1/responses"), ("GET", "/v1/chat/completions")):
         session.request(method, path, 405)
     session.request("GET", "/v1/models", 400, body=b"{}")

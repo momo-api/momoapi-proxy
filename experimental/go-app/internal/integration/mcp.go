@@ -66,16 +66,28 @@ func mcpResult(method string, params json.RawMessage) (any, int, string) {
 	case "ping":
 		return map[string]any{}, 0, ""
 	case "tools/list":
-		return map[string]any{"tools": []any{map[string]any{"name": "gateway_capabilities", "description": "Read preview support boundaries. No account/key access or model invocation.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}}}, 0, ""
+		return map[string]any{"tools": []any{map[string]any{"name": "gateway_capabilities", "description": "Read preview support boundaries. Optional capability selects one complete contract to avoid client truncation; omitted returns all. No account/key access or model invocation.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"capability": map[string]any{"type": "string", "minLength": 1, "maxLength": 64}}, "additionalProperties": false}}}}, 0, ""
 	case "tools/call":
 		var p struct {
 			Name      string
 			Arguments map[string]json.RawMessage
 		}
-		if json.Unmarshal(params, &p) != nil || p.Name != "gateway_capabilities" || len(p.Arguments) != 0 {
+		if json.Unmarshal(params, &p) != nil || p.Name != "gateway_capabilities" || !mcpFields(p.Arguments, "capability") {
 			return nil, -32602, "Unsupported tool or arguments"
 		}
-		b, _ := json.Marshal(Capabilities())
+		capabilities := Capabilities()
+		if raw, present := p.Arguments["capability"]; present {
+			var key string
+			if json.Unmarshal(raw, &key) != nil || key == "" || len(key) > 64 {
+				return nil, -32602, "Unsupported tool or arguments"
+			}
+			value, ok := capabilities[key]
+			if !ok {
+				return nil, -32602, "Unsupported tool or arguments"
+			}
+			capabilities = map[string]any{key: value}
+		}
+		b, _ := json.Marshal(capabilities)
 		return map[string]any{"content": []any{map[string]string{"type": "text", "text": string(b)}}}, 0, ""
 	case "resources/list":
 		return map[string]any{"resources": []any{map[string]string{"uri": skillURI, "name": "MOMO local gateway skill", "mimeType": "text/markdown"}}}, 0, ""

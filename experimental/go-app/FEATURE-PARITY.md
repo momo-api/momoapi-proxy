@@ -8,11 +8,11 @@
 
 | 能力 | Node 版实现依据（仓库根目录相对路径） | Go 预览实际范围 |
 | --- | --- | --- |
-| 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与 `/v1/responses/compact`；compact 显式 native 请求可尝试原生透传（非真实能力证明），另有本地 checkpoint；无无版本别名 |
+| 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与 `/v1/responses/compact`；compact 显式 native 请求可尝试原生透传（非真实能力证明），另有本地 checkpoint；已补与Node相同的无版本别名/尾斜线入口，统一canonical路径通过相同安全/历史/选路门禁 |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
 | Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；有序用户/配对工具图片与 PDF 子集；未知选项/其他媒体/grammar 等拒绝，不宣称完整兼容 |
 | Claude | `src/claude-adapter.mjs` | Messages 文本/function/custom、有序图片/文档与配对结果；新增公开 thinking 摘要、opaque 签名/redacted 块原模型有序回放；显式 adaptive/manual/disabled 控制与 adaptive effort；不含 updates/beta/输出媒体/完整原生流 |
-| Gemini | `src/gemini-adapter.mjs` | 原生 SSE 文本/function/custom 子集、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；新增公开 thought 摘要独立输出与文本/工具签名 exact-model 回放；thinking 控制/签名-only Part/输出媒体/完整签名协议仍不支持 |
+| Gemini | `src/gemini-adapter.mjs` | 原生 SSE 文本/function/custom 子集、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；新增公开 thought 摘要独立输出与文本/工具签名 exact-model 回放；新增显式原生 thinking 控制与四级 effort（不猜模型能力）；签名-only Part/输出媒体/完整签名协议仍不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；已完成搜索/加载/调用结果支持显式本地 checkpoint 与手动回放；hosted/复杂 schema 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或跨模型签名供应商状态转换 |
@@ -36,7 +36,64 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### Claude 有界 thinking 状态（2026-10-06；当前增量未验收）
+### MOMO 公共入口与模型选路对齐（2026-10-06；当前待CI验收）
+
+按src/route-dispatch.mjs与model-routing.mjs逐项对照，新增四个无版本
+API别名与公共API尾斜线规范化；同canonical路径接入既有鉴权/浏览器拒绝/
+method/并发/预算/取消/history/compact策略，非redirect/新请求。不clean
+dot或内部重复斜线/编码路径；query继续拒绝，内部管理路径不扩张。
+默认透传不改；明确momo-routing后Responses分类与Node相同：mimo-*/
+*-sol/*-luna/*-responses原生Responses，claude-* Messages，gemini-* native
+generateContent，其余Chat。Chat入口仍Chat，不看model偷偷转换；Muse排除。
+别名404真实红测后修复，unit实际TCP覆盖15类模型canonical/alias与精确
+上游路径/body、Chat入口模型不改、native compact及security gates。
+统一新增72组计划621，同input/mock/resources，两方实际请求独立验证
+上游路径与每方exact1send；含gpt5.5/5.6terra/mini/grok/cursor、六Responses
+规则、Claude/Gemini、四种入口形式、models/Chat/native compact。Native原
+探针217请求不增，改部分为legacy/trailing alias检验同signed continuation/
+Chat/compact/models。普通包补别名auth/browser/method/编码query/privateDNS。
+不是完整Node功能平齐，compact/header策略与query/method错误仍有明确差异。
+
+本地72路由专测、两tag全量各5、两vet、page/packaging与普通Win包通过；
+Windows五独立217TLS native通过，public legacy/trailing alias确实调用既有
+Chat/Responses/models/native compact与Claude/Gemini完整signed续聊，不增
+重试或上游请求。初次夹具误把native Node规范化当byte透传、compact mock
+用未授权hostname、fetch自动Sec-Fetch触发Go浏览器拒绝，保留失败并改成
+独立assert/授权synthetic hostname/真实非浏览器HTTP；未放宽产品门禁。
+完整621统一黑盒及新HEAD三平台CI仍在验收，不以72组替代全量。
+
+单项查询已用fresh隔离Codex0.156与本轮Go CLI验证Skill->readonlyMCP->
+paired第二轮exit0/exact2synthetic请求，完整gemini_thinking合同无truncate。
+本机WSL未安装GTK/WebKit，LinuxCLI以nogui构建；这不是Linux桌面发行验收，
+桌面证明须来自新HEAD Linux CI。Windows普通binary与官方MCP SDK已通过。
+
+### Gemini 显式思考控制（2026-10-06；当前增量待三平台验收）
+
+generateContent 原生 momo_gemini_thinking 非空对象：includeThoughts bool
+保留false，thinkingLevel MINIMAL/LOW/MEDIUM/HIGH 或 thinkingBudget 整数
+-1..2147483647，保留0/-1。level+budget/null/unknown/蛇形别名拒绝；不从
+模型名猜能力/范围，不clamp/回退/重试。普通effort四级精确映射，三个别名
+需一致；同值显式level可合并，budget+effort与xhigh/max/ultra/none拒绝。
+与maxOutputTokens同对象合并。只本次请求，signed full/suffix不继承；
+默认/native透传字节不变。provider范围与是否可关闭由上游判断，不是
+真实模型能力保证、Interactions steps、签名-only流恢复或完整thinking协议。
+
+新回归由原unsupported400红测转绿；覆盖精确wire/false/0/-1/int32边界/
+重复与转义重复key/错误形状与冲突/发送前拒绝/signed续聊控制不继承/
+native默认字节不变/上游400/429/500一次发送无重试。统一相同input/mock/
+资源新增36组，计划549；独立断言Node忽略native控制与max tokens、minimal
+变LOW、xhigh变HIGH、冲突别名静默precedence。native新增12 TLS计划217，
+原4 signed Gemini探针强化原模型完整parts与控制不继承，无新计费请求。
+Skill/MCP/UI能力边界同步。Prism启动toolerror，无job/报告/批准。
+官方generateContent REST及Go/Python SDK校验字段与int32，不引用已改为
+Interactions的Thinking指南来猜generateContent流分片。当前CI需新SHA验收。
+
+实际Codex0.156发现能力结果过长，中间client truncation丢gemini_thinking；
+原MCP完整返回，非proxy丢数据。独立红测后补gateway_capabilities可选
+capability单项查询，{}旧行为不改；单项完整<2048bytes，无网络/账号查询，
+read-only/图片/视频MCP共用。不放大10000客户端预算或隐藏失败。
+
+### Claude 有界 thinking 状态（2026-10-06；7a01e51已独立验收）
 
 thinking 文本独立 reasoning summary，不混入答案；redacted_thinking summary:[]。
 momo_claude:{model,type,signature|data} 保留 provider opaque 字符串，不强加Base64/
@@ -65,8 +122,13 @@ Prism再次返回toolerror，无job/报告/批准。无真实账号/付费推理
 exit0/exact2mock，实际工具输出包含claude_state。畸形SSE初次测试helper把
 预期TCP abort视为失败，修为检查无completion/history，未放宽产品行为。
 模型返回名与请求不一致时签名块拒绝，不静默绑定错模型。相邻unsigned文本
-仍沿用旧coalescing，不声称完整native block-boundary回放。新HEAD三平台CI/
-产物仍须独立验收；不能用本地或上一提交代替。
+仍沿用旧coalescing，不声称完整native block-boundary回放。7a01e51首轮
+PR37404145672/main37404145612与push37404141916/main37404141918已独立
+SHA/attempt1/完整日志验证18checks、6native各513TCP+五独立205TLS，
+Unix各五fullrace，isolated installer与普通payload通过；新下载三平台
+11386159088/11387190087/11386745095的SHA/manifest/version/modes/formats
+验证，Windows普通blackbox与官方MCP SDK生命周期通过。无本地安装/签名/
+merge/production。此证据仅对应7a01e51，不代替后续增量验收。
 
 ### Gemini 有界签名状态（2026-10-06；3053098已独立验收）
 

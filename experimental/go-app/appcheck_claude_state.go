@@ -78,7 +78,7 @@ func probeClaudeStateRequests(core *appcore.Core) error {
 		p := map[string]any{"model": "claude-sonnet-4-6", "stream": stream, "input": []any{map[string]any{"role": "user", "content": "claude-state-native"}}, "tools": []any{map[string]any{"type": "function", "name": "read", "parameters": map[string]any{"type": "object", "properties": map[string]any{}}}}, "momo_claude_thinking": map[string]any{"type": "adaptive", "display": "summarized"}, "reasoning": map[string]any{"effort": "high"}}
 		for turn := 0; turn < 2; turn++ {
 			b, _ := json.Marshal(p)
-			req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(string(b)))
+			req, _ := http.NewRequest("POST", strings.TrimSuffix(base, "/v1")+"/responses/", strings.NewReader(string(b)))
 			req.Header.Set("Authorization", "Bearer "+key)
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := client.Do(req)
@@ -141,5 +141,5 @@ func probeClaudeStateRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return probeMediaRequests(core)
+	return probeGeminiThinkingRequests(core)
 }

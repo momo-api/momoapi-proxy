@@ -210,6 +210,12 @@ func (c *Core) Handler() http.Handler {
 			http.Error(w, "invalid route", 400)
 			return
 		}
+		if path := canonicalPublicRoute(r.URL.Path); path != "" && path != r.URL.Path {
+			// Clone instead of mutating the caller's request/URL. All downstream
+			// admission, history and protocol gates see the canonical API route.
+			r = r.Clone(r.Context())
+			r.URL.Path = path
+		}
 		attachmentRoute, attachmentMethod := attachmentRoute(r.URL.Path, r.Method)
 		imageRoute, imageMethod := imageRoute(r.URL.Path, r.Method)
 		videoRoute, videoMethod := videoRoute(r.URL.Path, r.Method)

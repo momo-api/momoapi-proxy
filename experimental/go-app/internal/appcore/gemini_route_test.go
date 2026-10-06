@@ -177,7 +177,7 @@ func TestGeminiRequestHistoryAndChoices(t *testing.T) {
 func TestGeminiRejectsBeforeSend(t *testing.T) {
 	c, endpoint := routedClaudeCore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("unsupported Gemini sent upstream") }))
 	for name, p := range map[string]string{
-		"thinking":         strings.Replace(geminiPayload, `"stream":true`, `"stream":true,"reasoning_effort":"high"`, 1),
+		"invalidThinking":  strings.Replace(geminiPayload, `"stream":true`, `"stream":true,"reasoning_effort":"xhigh"`, 1),
 		"signedHistory":    strings.Replace(geminiPayload, `"role":"user"`, `"role":"user","thoughtSignature":"opaque"`, 1),
 		"media":            strings.Replace(geminiPayload, `"type":"input_text","text":"中文🙂"`, `"type":"input_image","image_url":"https://example.invalid"`, 1),
 		"reference":        strings.Replace(geminiPayload, `"instructions":"Be concise."`, `"previous_response_id":"resp_mock"`, 1),

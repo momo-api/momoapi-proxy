@@ -57,6 +57,7 @@ type routeTool struct {
 }
 type routeRequest struct {
 	claudeThinking        map[string]any
+	geminiThinking        map[string]any
 	stream                bool
 	maxOutputTokens       int64
 	model, choice, effort string
@@ -140,7 +141,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		return nil, errRouted
 	}
 	p, framingErr := decodeVideoObject(data)
-	if framingErr != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images", "momo_tool_files", "momo_claude_thinking") {
+	if framingErr != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images", "momo_tool_files", "momo_claude_thinking", "momo_gemini_thinking") {
 		return nil, errRouted
 	}
 	if v, present := p["stream"]; present {
@@ -646,6 +647,24 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		}
 	}
 	ir.effort = strings.ToLower(effort)
+	if resolveProtocol(ir.model) == "gemini" {
+		// Aliases must agree: precedence must not silently change native thinking.
+		for _, key := range []string{"reasoning_effort", "model_reasoning_effort"} {
+			if value, present := p[key]; present && (str(value) == "" || strings.ToLower(str(value)) != ir.effort) {
+				return nil, errRouted
+			}
+		}
+		if r := obj(p["reasoning"]); r != nil && strings.ToLower(str(r["effort"])) != ir.effort {
+			return nil, errRouted
+		}
+		v, present := p["momo_gemini_thinking"]
+		ir.geminiThinking, err = geminiThinkingControl(v, present, ir.effort)
+		if err != nil {
+			return nil, err
+		}
+	} else if _, present := p["momo_gemini_thinking"]; present {
+		return nil, errRouted
+	}
 	if v, present := p["momo_claude_thinking"]; present {
 		if resolveProtocol(ir.model) != "claude" {
 			return nil, errRouted

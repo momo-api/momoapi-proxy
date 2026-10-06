@@ -24,6 +24,11 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   it contains a LOCAL token, never the upstream key. Do not log or upload it.
 - Supported upstream routes: GET /v1/models, POST /v1/responses and
   POST /v1/chat/completions, using the matching upstream protocol.
+  Public aliases /models, /responses, /chat/completions, /responses/compact
+  and exact API trailing slashes canonicalize to /v1 paths without redirects.
+  Compact retains its explicit policy. Auth/browser/method/budget/history gates
+  unchanged; no query/encoded/dot/internal path normalization. Chat entry stays
+  Chat; opt-in Responses routing uses Node's model classification; Muse excluded.
 - Responses namespace/custom tools and unknown fields are passed through.
   Skill/MCP tools execute in the agent client, not inside the API proxy.
 - Default is exact same-protocol passthrough. Explicit Mode=momo-routing enables
@@ -189,7 +194,18 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   thought_false:true retains an explicit native false flag on signed text/calls.
   Preserve these flags too; generated local call IDs are not native IDs.
   Full/suffix anchors retain state; local checkpoint protects entire state-bearing
-  turns. Different-model replay rejects even with replay-v1. Thinking controls,
+  turns. Different-model replay rejects even with replay-v1. Explicit per-request
+  Read gateway_capabilities with {"capability":"gemini_thinking"} for its complete
+  small contract; {} returns all contracts and may be truncated by the client.
+  momo_gemini_thinking accepts optional includeThoughts:boolean (false preserved),
+  thinkingLevel:MINIMAL/LOW/MEDIUM/HIGH OR thinkingBudget integer -1..2147483647
+  (0 disabled/-1 automatic, model-dependent support). Reject null/empty/unknown,
+  level+budget. Effort minimal/low/medium/high maps EXACT native levels; aliases
+  must agree, explicit level may agree, budget+effort/xhigh/max/ultra/none reject.
+  No budget/capability guesses, clamps/fallback/retry or inherited controls;
+  generationConfig keeps maxOutputTokens alongside thinkingConfig. Native/default
+  passthrough remains byte-exact. These are generateContent controls, not
+  Interactions API steps or proof of real model support. Still unsupported:
   signature-only/partialArgs Parts and output media remain unsupported. Gemini
   requires STOP/MAX_TOKENS plus clean framed HTTP EOF; early EOF/errors abort without completed.
   max_output_tokens is an integer 1..1048576: Chat max_completion_tokens, Claude

@@ -33,6 +33,7 @@ func main() {
 		Image        bool
 		ImageCatalog string
 		Video        bool
+		Models       bool
 	}
 	if json.NewDecoder(io.LimitReader(os.Stdin, 1<<20)).Decode(&fixture) != nil {
 		os.Exit(1)
@@ -56,6 +57,14 @@ func main() {
 			defer mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(captures)
+			return
+		}
+		if fixture.Models && r.URL.Path == "/v1/models" && r.Method == "GET" && r.Header.Get("Authorization") == "Bearer synthetic-unified-only" {
+			mu.Lock()
+			captures = append(captures, map[string]any{"models_path": r.URL.Path})
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"data":[{"id":"gpt-5.5"},{"id":"gpt-5.6-sol"},{"id":"claude-sonnet-4-6"},{"id":"gemini-3.5-flash"}]}`)
 			return
 		}
 		if fixture.Image && r.Method == "GET" && r.URL.Path == "/agent/media-capabilities" && r.Header.Get("Authorization") == "Bearer synthetic-unified-only" {

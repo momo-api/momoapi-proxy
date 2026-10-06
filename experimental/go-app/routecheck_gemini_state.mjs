@@ -18,7 +18,7 @@ export async function geminiStateBlackbox(launch,invoke){
    const loggingRuntime={env,enqueueRequest:()=>true,enqueueDiagnostic:()=>true,snapshot:()=>({})};
    server=createMomoSwitch({endpoint:'https://mock.example',apiKey:'synthetic-unified-only',localToken:'synthetic-node-only',host:'127.0.0.1',port:0,diagnosticsEnabled:false,requestAdmission:{maxConcurrent:4,maxQueued:0,maxBodyBudgetMb:4,bodyReadTimeoutMs:15000},contextPolicy:{outboundBodyHardLimitBytes:1048576,outboundBodySoftLimitBytes:1047552},outputPolicy:{maxStreamMb:16,maxRetainedMb:1}}, {env,loggingRuntime,assetStore:{},attachmentAssetStore:{},fetchImpl:(url,init)=>{const u=new URL(url);assert.equal(u.hostname,'mock.example');return fetch(handoff.mock_url+u.pathname+u.search,init)}});
    await new Promise(r=>server.listen(0,'127.0.0.1',r));const nodeURL='http://127.0.0.1:'+server.address().port,goURL=handoff.base_url.slice(0,-3);
-   const initial={model,stream,input:[{role:'user',content:'first signed turn'}],tools};
+   const initial={model,stream,input:[{role:'user',content:'first signed turn'}],tools,momo_gemini_thinking:{includeThoughts:true},reasoning_effort:'high'};
    const n=await invoke(nodeURL,'synthetic-node-only',initial),g=await invoke(goURL,handoff.api_key,initial);
    assert.equal(n.status,200);assert.equal(g.status,200);assert.ok(n.completed&&g.completed);
    assert.equal(g.output.length,rich?4:1);
@@ -40,6 +40,10 @@ export async function geminiStateBlackbox(launch,invoke){
    const n2=await invoke(nodeURL,'synthetic-node-only',nodeNext),g2=await invoke(goURL,handoff.api_key,next);
    assert.equal(n2.status,200);assert.equal(g2.status,200);assert.ok(n2.completed&&g2.completed);
    const captures=await(await fetch(handoff.mock_url+'/capture')).json();assert.equal(captures.length,4);
+   assert.deepEqual(captures[0].generationConfig,{thinkingConfig:{thinkingLevel:'HIGH'}});
+   assert.deepEqual(captures[1].generationConfig,{thinkingConfig:{thinkingLevel:'HIGH',includeThoughts:true}});
+   assert.equal(captures[2].generationConfig,undefined,'Node controls not inherited');
+   assert.equal(captures[3].generationConfig,undefined,'Go controls not inherited with signed full/suffix replay');
    assert.deepEqual(captures[0].contents,captures[1].contents);
    for(const [index,body] of captures.slice(2).entries()){
     const recalled=body.contents.flatMap(v=>v.parts).find(v=>v.functionCall);

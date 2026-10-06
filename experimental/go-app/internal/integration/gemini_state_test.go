@@ -15,4 +15,13 @@ func TestGeminiStateContract(t *testing.T) {
 			t.Fatal("missing state boundary", s)
 		}
 	}
+	controls, ok := Capabilities()["gemini_thinking"].(string)
+	if !ok {
+		t.Fatal("missing Gemini controls")
+	}
+	for _, s := range []string{"momo_gemini_thinking", "includeThoughts", "thinkingLevel", "thinkingBudget", "generateContent", "per-request", "xhigh/max/ultra/none"} {
+		if !strings.Contains(controls, s) || !strings.Contains(Skill, s) {
+			t.Fatal("missing thinking boundary", s)
+		}
+	}
 }

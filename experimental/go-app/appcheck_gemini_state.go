@@ -37,6 +37,12 @@ func probeGeminiStateUpstream(w http.ResponseWriter, r *http.Request, data []byt
 		return false
 	}
 	parts := probeGeminiStateParts()
+	if len(contents) == 1 && !reflect.DeepEqual(body["generationConfig"], map[string]any{"thinkingConfig": map[string]any{"thinkingLevel": "HIGH", "includeThoughts": true}}) {
+		return false
+	}
+	if len(contents) != 1 && body["generationConfig"] != nil {
+		return false
+	}
 	if len(contents) != 1 {
 		if len(contents) != 3 {
 			return false
@@ -65,8 +71,15 @@ func probeGeminiStateRequests(core *appcore.Core) error {
 	for _, stream := range []bool{false, true} {
 		p := map[string]any{"model": probeGeminiStateModel, "stream": stream, "input": []any{map[string]any{"role": "user", "content": "gemini-state-native"}}, "tools": []any{map[string]any{"type": "function", "name": "read", "parameters": map[string]any{"type": "object", "properties": map[string]any{}}}}}
 		for turn := 0; turn < 2; turn++ {
+			if turn == 0 {
+				p["momo_gemini_thinking"] = map[string]any{"includeThoughts": true}
+				p["reasoning_effort"] = "high"
+			} else {
+				delete(p, "momo_gemini_thinking")
+				delete(p, "reasoning_effort")
+			}
 			b, _ := json.Marshal(p)
-			req, _ := http.NewRequest("POST", base+"/responses", strings.NewReader(string(b)))
+			req, _ := http.NewRequest("POST", strings.TrimSuffix(base, "/v1")+"/responses", strings.NewReader(string(b)))
 			req.Header.Set("Authorization", "Bearer "+key)
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := client.Do(req)

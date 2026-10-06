@@ -139,6 +139,13 @@ beta/输出媒体/live推理证明。当前合同与验收见README/FEATURE-PARI
 
 ## Gemini 增量（2026-10-05）
 
+2026-10-06追加：显式 generateContent ThinkingConfig 原生编码到共享IR，
+与maxOutputTokens合并；includeThoughts bool保留false，level四种枚举或
+budget -1..int32max，保留0/-1，不猜model范围。普通effort四级精确映射，
+别名冲突/budget+effort与无法精确表达的xhigh/max/ultra/none拒绝，不clamp。
+控制仅本次请求、signed history不继承；不改变透传、不增加重试/付费请求。
+不是Interactions steps，不猜signature-only流分片聚合。细节见README。
+
 2026-10-06追加：Gemini有界完整text/function Part签名续接已实现。公开thought
 文本用reasoning summary；momo_gemini绑定原模型，signedtext/call保留Base64
 与顺序/空文本，checkpoint整回合保护；跨model/provider不得剥离状态。strict
