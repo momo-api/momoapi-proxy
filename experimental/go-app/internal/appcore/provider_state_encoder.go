@@ -1,8 +1,18 @@
 package appcore
 
-func (e *responseWriter) geminiPart(ev streamEvent) error {
-	if ev.gemini == nil || ev.gemini.Model != e.model || ev.gemini.CallIDAbsent || ev.gemini.Signature != "" && !validGeminiSignature(ev.gemini.Signature) {
-		return errRouted
+// Complete validated state-bearing Parts share Responses item/summary lifecycle.
+func (e *responseWriter) providerPart(ev streamEvent) error {
+	if ev.kind == "claude-thinking" {
+		if ev.claude == nil {
+			return errRouted
+		}
+		if _, err := parseClaudeState(objFromClaudeState(ev.claude), e.model); err != nil {
+			return err
+		}
+	} else {
+		if ev.gemini == nil || ev.gemini.Model != e.model || ev.gemini.CallIDAbsent || ev.gemini.Signature != "" && !validGeminiSignature(ev.gemini.Signature) {
+			return errRouted
+		}
 	}
 	if err := e.flushText(); err != nil {
 		return err
@@ -21,7 +31,17 @@ func (e *responseWriter) geminiPart(ev streamEvent) error {
 		field = "summary"
 		event = "response.reasoning_summary_text"
 	}
+	if ev.kind == "claude-thinking" {
+		item = map[string]any{"id": id, "type": "reasoning", "status": "completed", "momo_claude": ev.claude}
+		part = map[string]any{"type": "summary_text", "text": ev.text}
+		field = "summary"
+		event = "response.reasoning_summary_text"
+	}
 	item[field] = []any{part}
+	redacted := ev.claude != nil && ev.claude.Type == "redacted_thinking"
+	if redacted {
+		item[field] = []any{}
+	}
 	added := map[string]any{}
 	for k, v := range item {
 		added[k] = v
@@ -30,6 +50,14 @@ func (e *responseWriter) geminiPart(ev streamEvent) error {
 	added[field] = []any{}
 	if err := e.event("response.output_item.added", map[string]any{"response_id": e.id, "output_index": e.index, "item": added}); err != nil {
 		return err
+	}
+	if redacted {
+		if err := e.event("response.output_item.done", map[string]any{"response_id": e.id, "output_index": e.index, "item": item}); err != nil {
+			return err
+		}
+		e.output = append(e.output, item)
+		e.index++
+		return nil
 	}
 	common := func() map[string]any {
 		p := map[string]any{"response_id": e.id, "item_id": id, "output_index": e.index}

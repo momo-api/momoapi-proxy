@@ -172,7 +172,7 @@ func (c *Core) prepareRoutedHistoryPolicy(data []byte, model string, replay bool
 		if entry.model != model {
 			for _, raw := range entry.input {
 				item, err := decodeObject(string(raw))
-				if err != nil || hasGeminiState([]any{item}) {
+				if err != nil || hasProviderState([]any{item}) {
 					c.mu.Unlock()
 					return nil, nil, errRouted
 				}

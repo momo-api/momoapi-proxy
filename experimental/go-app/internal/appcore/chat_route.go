@@ -36,6 +36,7 @@ type routeCall struct {
 // Block-capable providers retain text/tool interleaving within an assistant turn.
 // Chat has only content + tool_calls and cannot express that block order.
 type routePart struct {
+	claude  *claudeState
 	gemini  *geminiState
 	thought bool
 	text    string
@@ -55,6 +56,7 @@ type routeTool struct {
 	strict      *bool
 }
 type routeRequest struct {
+	claudeThinking        map[string]any
 	stream                bool
 	maxOutputTokens       int64
 	model, choice, effort string
@@ -138,7 +140,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		return nil, errRouted
 	}
 	p, framingErr := decodeVideoObject(data)
-	if framingErr != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images", "momo_tool_files") {
+	if framingErr != nil || !only(p, "model", "stream", "input", "instructions", "tools", "tool_choice", "reasoning", "reasoning_effort", "model_reasoning_effort", "max_output_tokens", "momo_tool_loading", "parallel_tool_calls", "momo_tool_images", "momo_tool_files", "momo_claude_thinking") {
 		return nil, errRouted
 	}
 	if v, present := p["stream"]; present {
@@ -148,6 +150,9 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 	}
 	plan := &chatPlan{model: str(p["model"]), tools: map[string]chatTool{}}
 	ir := &routeRequest{model: plan.model, stream: p["stream"] == true, constraints: map[string]map[string]any{}}
+	if resolveProtocol(ir.model) == "claude" && !validClaudeUnicode(data) {
+		return nil, errRouted
+	}
 	if value, present := p["parallel_tool_calls"]; present {
 		b, ok := value.(bool)
 		if !ok {
@@ -386,6 +391,9 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		switch str(m["type"]) {
 		case "reasoning":
 			part, err := geminiHistoryReasoning(m, ir.model)
+			if _, present := m["momo_claude"]; present {
+				part, err = claudeHistoryReasoning(m, ir.model)
+			}
 			hasPending := len(pending) != 0 || loading != nil && loading.pending != ""
 			if err != nil || hasPending && len(messages) > 0 && messages[len(messages)-1].role == "tool" {
 				return nil, errRouted
@@ -462,7 +470,10 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 				ok = true
 			}
 			parsed, err := decodeObject(args)
-			if ir.constraints[wire] != nil {
+			if ir.constraints[wire] != nil || resolveProtocol(ir.model) == "claude" {
+				if resolveProtocol(ir.model) == "claude" && !validClaudeUnicode([]byte(args)) {
+					return nil, errRouted
+				}
 				parsed, err = decodeVideoObject([]byte(args))
 			}
 			if !ok || err != nil {
@@ -635,6 +646,21 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 		}
 	}
 	ir.effort = strings.ToLower(effort)
+	if v, present := p["momo_claude_thinking"]; present {
+		if resolveProtocol(ir.model) != "claude" {
+			return nil, errRouted
+		}
+		// Claude effort aliases must agree, never silently choose one.
+		for _, value := range []string{str(p["reasoning_effort"]), str(p["model_reasoning_effort"]), str(obj(p["reasoning"])["effort"])} {
+			if value != "" && strings.ToLower(value) != ir.effort {
+				return nil, errRouted
+			}
+		}
+		ir.claudeThinking, err = claudeThinkingControl(v, ir)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return ir, nil
 }
 

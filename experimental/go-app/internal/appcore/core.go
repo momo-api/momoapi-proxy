@@ -350,6 +350,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		// Reject duplicate controls/schema keys before history normalization
 		// can reserialize them away. Native/default bytes still bypass this.
 		if converted {
+			if protocol == "claude" && !validClaudeUnicode(body) {
+				http.Error(w, "invalid explicit conversion request", 400)
+				return
+			}
 			if _, err := decodeVideoObject(body); err != nil {
 				http.Error(w, "invalid explicit conversion request", 400)
 				return
@@ -364,6 +368,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 		if attachmentInline {
 			protocol := resolveProtocol(model)
+			if protocol == "claude" && !validClaudeUnicode(body) {
+				http.Error(w, "invalid explicit conversion request", 400)
+				return
+			}
 			if config.Mode != "momo-routing" || nativeCompact || protocol != "chat" && protocol != "claude" && protocol != "gemini" {
 				http.Error(w, "attachment policy requires converted routing", 400)
 				return

@@ -34,6 +34,9 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 	}
 	model := str(p["model"])
 	protocol := resolveProtocol(model)
+	if protocol == "claude" && !validClaudeUnicode(data) {
+		return nil, errRouted
+	}
 	if protocol != "chat" && protocol != "claude" && protocol != "gemini" {
 		return nil, errRouted
 	}
@@ -74,7 +77,7 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 		}
 		protectedTurn := false
 		for i := start; i < end; i++ {
-			if hasGeminiState([]any{objects[i]}) {
+			if hasProviderState([]any{objects[i]}) {
 				protectedTurn = true
 			}
 			if values, ok := objects[i]["content"].([]any); ok {

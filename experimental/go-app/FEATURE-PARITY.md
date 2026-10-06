@@ -11,7 +11,7 @@
 | 公共 API | `src/route-dispatch.mjs` | 精确 `/v1/models`、`/v1/chat/completions`、`/v1/responses` 与 `/v1/responses/compact`；compact 显式 native 请求可尝试原生透传（非真实能力证明），另有本地 checkpoint；无无版本别名 |
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
 | Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；有序用户/配对工具图片与 PDF 子集；未知选项/其他媒体/grammar 等拒绝，不宣称完整兼容 |
-| Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
+| Claude | `src/claude-adapter.mjs` | Messages 文本/function/custom、有序图片/文档与配对结果；新增公开 thinking 摘要、opaque 签名/redacted 块原模型有序回放；显式 adaptive/manual/disabled 控制与 adaptive effort；不含 updates/beta/输出媒体/完整原生流 |
 | Gemini | `src/gemini-adapter.mjs` | 原生 SSE 文本/function/custom 子集、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；新增公开 thought 摘要独立输出与文本/工具签名 exact-model 回放；thinking 控制/签名-only Part/输出媒体/完整签名协议仍不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；已完成搜索/加载/调用结果支持显式本地 checkpoint 与手动回放；hosted/复杂 schema 未支持 |
@@ -36,7 +36,39 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### Gemini 有界签名状态（2026-10-06；本地增量，当前 CI 待验收）
+### Claude 有界 thinking 状态（2026-10-06；当前增量未验收）
+
+thinking 文本独立 reasoning summary，不混入答案；redacted_thinking summary:[]。
+momo_claude:{model,type,signature|data} 保留 provider opaque 字符串，不强加Base64/
+解密/验签。完整与后缀回放保留顺序/空thinking/配对工具，跨模型即使replay-v1
+也拒绝；checkpoint保护完整状态回合。显式 momo_claude_thinking adaptive/
+enabled/disabled，display summarized/omitted；manual预算>=1024且<max_tokens，
+不clamp/猜模型能力。effort仅显式adaptive下映射output_config.effort，别名冲突
+拒绝。enabled/adaptive拒绝强制named/required，-thinking alias仍拒绝。
+single final signature_delta；全部Claude帧strict UTF8/duplicate-free/depth64/
+拒绝unpaired surrogate；128blocks/256KiB opaque/1MiB保留与历史预算。final
+thinking_tokens只映射已验证reasoning_tokens。clean EOF+终端写成功才存history。
+无updates/interleaved beta/输出媒体/完整原生stream/真实provider能力保证。
+text-tools-v1仍剥离reasoning.summary，Claude用显式native display，不偷偷改合同。
+
+初始TCP红测复现400；实现与针对性回归覆盖malformed/ordered/suffix/full/
+foreign/compact/retained/cancel/Stop/shortwrite/flush/store:false/incomplete。
+统一黑盒新增8组计划513；相同input/mock/resources，独立断言Node忽略native
+control且丢thinking/redacted state。初次测试用text初始块误假定Node读取该文本，
+已保留失败证据并改为双方支持的标准text_delta，不弱化签名断言。
+native新增4次TLS205/每独立pass，未拿旧201回执代替当前验收。
+Prism再次返回toolerror，无job/报告/批准。无真实账号/付费推理/生产变更。
+
+本地双tag全量各5、两vet、page/packaging、WSLfullrace、513统一TCP、Win
+五独立205TLS、普通binary blackbox/官方MCP SDK图片视频与Web/Gemini编辑
+生命周期通过；fresh隔离Codex0.156用当前Skill→readonlyMCP→paired第二轮
+exit0/exact2mock，实际工具输出包含claude_state。畸形SSE初次测试helper把
+预期TCP abort视为失败，修为检查无completion/history，未放宽产品行为。
+模型返回名与请求不一致时签名块拒绝，不静默绑定错模型。相邻unsigned文本
+仍沿用旧coalescing，不声称完整native block-boundary回放。新HEAD三平台CI/
+产物仍须独立验收；不能用本地或上一提交代替。
+
+### Gemini 有界签名状态（2026-10-06；3053098已独立验收）
 
 公开 thought:true 文本单独输出 reasoning summary；provider text/function/custom
 签名原样进入 momo_gemini exact-model metadata。完整/后缀 history 保留有序
@@ -47,7 +79,7 @@ parts、namespace、空 signed text；跨模型即使 replay-v1 也拒绝，chec
 <=256KiB/signature、2048parts 与保守 metadata charge/1MiB 预算；取消、Stop、
 短写/flush 失败、incomplete、store:false、畸形、cross-model 与真实有损 compact
 均有回归。thinking 控制/-thinking alias、signature-only streaming chunks、
-partialArgs、Interactions API、Claude thinking/签名仍未支持；不宣称完整协议。
+partialArgs、Interactions API仍未支持；Claude后续增量见上节，不宣称完整协议。
 统一黑盒新增16组，总505同 input/mock/resources；无native ID时只匹配双方
 独立生成的local ID，不修改内容。分别断言双方 signed call签名保留，以及
 Node suffix-only回放补入local ID改变原signed Part（full保持无ID）、public thought混入answer/standalone
@@ -59,7 +91,12 @@ Prism 再次启动 toolerror，无 job/报告/批准；未调用真实账户或�
 505统一TCP与Win五独立201TLS加最终native回归、普通Winbinary blackbox/
 官方MCP SDK图片视频连接通过。首次negative red和Node无ID full fixture假设
 失败保留；修为分别断言Node full无ID/suffix补ID后重新跑全量505通过，
-不冒充旧失败为成功。当前commit三平台CI/fresh artifacts须独立验收。
+不冒充旧失败为成功。3053098首轮PR37401000568/main37401000453及push
+37400996052/main37400996034，18checks/6native均SHA+attempt1+完整日志验证；
+每native505TCP+5freshprocess×201TLS（30passes/6030sends）。三平台fresh
+artifact11384733775/11385805794/11384823724校验，下载Win普通binary+官方
+MCP SDK及新Codex0.156 Skill→readonlyMCP→paired第二轮exact2mock通过。
+不是完整产品/签名发行/长期soak证明；新Claude增量须新HEAD重验。
 
 ### 原生界面连续验收门禁（2026-10-06；新CI待验收）
 

@@ -9,7 +9,7 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	if ir.effort != "" || strings.Contains(ir.model, "-thinking") {
+	if ir.effort != "" && ir.claudeThinking == nil || strings.Contains(ir.model, "-thinking") {
 		return nil, errRouted
 	}
 	messages := []any{}
@@ -42,6 +42,17 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 			content = append(content, map[string]any{"type": "tool_result", "tool_use_id": m.resultID, "content": result})
 		} else {
 			for _, part := range m.parts {
+				if part.claude != nil {
+					s := part.claude
+					block := map[string]any{"type": s.Type}
+					if s.Type == "thinking" {
+						block["thinking"], block["signature"] = part.text, s.Signature
+					} else {
+						block["data"] = s.Data
+					}
+					content = append(content, block)
+					continue
+				}
 				if part.image != nil {
 					content = append(content, claudeImage(part.image))
 					continue
@@ -83,6 +94,12 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 	body := map[string]any{"model": ir.model, "stream": true, "max_tokens": 12240, "messages": messages}
 	if ir.maxOutputTokens != 0 {
 		body["max_tokens"] = ir.maxOutputTokens
+	}
+	if ir.claudeThinking != nil {
+		body["thinking"] = ir.claudeThinking
+		if ir.effort != "" {
+			body["output_config"] = map[string]string{"effort": ir.effort}
+		}
 	}
 	if len(system) > 0 {
 		body["system"] = strings.Join(system, "\n\n")

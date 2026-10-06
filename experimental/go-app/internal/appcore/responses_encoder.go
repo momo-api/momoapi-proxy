@@ -216,6 +216,7 @@ func (e *responseWriter) searchCall(call streamToolCall, args map[string]any) er
 }
 
 type streamEvent struct {
+	claude *claudeState
 	gemini *geminiState
 	kind   string
 	text   string
@@ -243,7 +244,9 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 	case "text":
 		return e.textDelta(ev.text)
 	case "gemini-text", "gemini-thought":
-		return e.geminiPart(ev)
+		return e.providerPart(ev)
+	case "claude-thinking":
+		return e.providerPart(ev)
 	case "tool":
 		// This is a constraint on newly produced calls, not on historical tool
 		// turns. All protocols (including DSML and incomplete) share this gate.

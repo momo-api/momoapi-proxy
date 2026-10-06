@@ -113,6 +113,15 @@ Stop/configure/TTL/预算仍生效。无需另建provider状态机或复制历�
 
 ## Claude 增量（2026-10-04，后续 Gemini 增量见下节）
 
+2026-10-06追加：Claude thinking/redacted_thinking有界状态支持已实现；以下
+为历史边界。请求使用显式native模式而非猜budget/模型代际；共享IR持有
+exact-model momo_claude，decoder验证单个最后signature_delta与clean EOF，
+共用provider-state Responses生命周期，不复制另一套终端/历史写入事务。
+summary与answer分离，加密块无可读summary；opaque不解密/强加Base64，
+不跨模型剥离。strict Unicode/JSON/预算与整回合checkpoint保护可回归。
+manual/adaptive/disabled和adaptive effort显式映射，仍不是完整native流/
+beta/输出媒体/live推理证明。当前合同与验收见README/FEATURE-PARITY。
+
 - typed routeRequest 保存文本、角色、声明/历史工具身份；Chat 与 Claude 直接编码
   各自 wire，不经 Chat JSON 再转 Messages。共享 decodeObject 使用 json.Number，
   参数/Schema 大整数不因 float64 失真；函数参数只接受 JSON object。

@@ -11,6 +11,8 @@ import (
 type claudeBlock struct {
 	kind, id, name, initial string
 	args                    strings.Builder
+	state                   *claudeState
+	signed                  bool
 }
 
 // Ordered Messages blocks -> neutral events -> the shared Responses encoder.
@@ -20,13 +22,15 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 	if err != nil {
 		return err
 	}
-	started, finished := false, false
+	started, finished, stopped := false, false, false
 	terminal := "complete"
 	next, retained, toolCount := 0, 0, 0
 	var active *claudeBlock
 	ids := map[string]bool{}
 	var inputTokens, outputTokens int64
+	var thinkingTokens *int64
 	usageKnown := false
+	returnedModel := ""
 	charge := func(s string) error {
 		retained += len(s)
 		if retained > maxRoutedRetained {
@@ -34,13 +38,27 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 		}
 		return nil
 	}
-	return readRoutedSSE(ctx, body, func(event, raw string) (bool, error) {
-		m, err := plan.decodeFrame(raw)
+	chargeMetadata := func() error {
+		retained += 512 + len(plan.model)
+		if retained > maxRoutedRetained {
+			return errRouted
+		}
+		return nil
+	}
+	return readRoutedSSEToEOF(ctx, body, func(event, raw string) (bool, error) {
+		if !validClaudeUnicode([]byte(raw)) {
+			return false, errRouted
+		}
+		// Check all frames before signatures or tool arguments can be reserialized.
+		m, err := decodeVideoObject([]byte(raw))
 		if err != nil {
 			return false, err
 		}
 		typ := str(m["type"])
 		if event != "" && event != typ {
+			return false, errRouted
+		}
+		if stopped {
 			return false, errRouted
 		}
 		if typ == "ping" {
@@ -87,6 +105,7 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				}
 			}
 			inputTokens, outputTokens, usageKnown = in, out, true
+			returnedModel = str(message["model"])
 			started = true
 		case "content_block_start":
 			if !only(m, "type", "index", "content_block") {
@@ -102,6 +121,32 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 			}
 			active = &claudeBlock{kind: str(b["type"])}
 			switch active.kind {
+			case "thinking":
+				if returnedModel != plan.model {
+					return false, errRouted
+				}
+				if !only(b, "type", "thinking", "signature") || b["thinking"] != "" || b["signature"] != "" {
+					return false, errRouted
+				}
+				active.state = &claudeState{Model: plan.model, Type: "thinking"}
+				if err := chargeMetadata(); err != nil {
+					return false, err
+				}
+			case "redacted_thinking":
+				if returnedModel != plan.model {
+					return false, errRouted
+				}
+				data := str(b["data"])
+				if !only(b, "type", "data") || !validClaudeOpaque(data) {
+					return false, errRouted
+				}
+				active.state = &claudeState{Model: plan.model, Type: "redacted_thinking", Data: data}
+				if err := chargeMetadata(); err != nil {
+					return false, err
+				}
+				if err := charge(data); err != nil {
+					return false, err
+				}
 			case "text":
 				text, ok := b["text"].(string)
 				if !ok || !only(b, "type", "text") {
@@ -132,7 +177,7 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 					return false, err
 				}
 			default:
-				return false, errRouted // thinking/signatures/media are not implemented
+				return false, errRouted // unknown/media blocks cannot be approximated
 			}
 		case "content_block_delta":
 			if !only(m, "type", "index", "delta") {
@@ -143,7 +188,33 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				return false, errRouted
 			}
 			d := obj(m["delta"])
-			if active.kind == "text" {
+			if active.kind == "thinking" {
+				if active.signed {
+					return false, errRouted // one final signature_delta, not concatenation
+				}
+				switch str(d["type"]) {
+				case "thinking_delta":
+					text, ok := d["thinking"].(string)
+					if !ok || !only(d, "type", "thinking") {
+						return false, errRouted
+					}
+					if err := charge(text); err != nil {
+						return false, err
+					}
+					active.args.WriteString(text)
+				case "signature_delta":
+					sig := str(d["signature"])
+					if !only(d, "type", "signature") || !validClaudeOpaque(sig) {
+						return false, errRouted
+					}
+					if err := charge(sig); err != nil {
+						return false, err
+					}
+					active.state.Signature, active.signed = sig, true
+				default:
+					return false, errRouted
+				}
+			} else if active.kind == "text" {
 				text, ok := d["text"].(string)
 				if !ok || str(d["type"]) != "text_delta" || !only(d, "type", "text") {
 					return false, errRouted
@@ -154,7 +225,7 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				if err := e.accept(streamEvent{kind: "text", text: text}, plan); err != nil {
 					return false, err
 				}
-			} else {
+			} else if active.kind == "tool_use" {
 				s, ok := d["partial_json"].(string)
 				if !ok || str(d["type"]) != "input_json_delta" || !only(d, "type", "partial_json") || active.initial != "{}" {
 					return false, errRouted
@@ -163,6 +234,8 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 					return false, err
 				}
 				active.args.WriteString(s)
+			} else {
+				return false, errRouted
 			}
 		case "content_block_stop":
 			if !only(m, "type", "index") {
@@ -177,10 +250,21 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				if active.args.Len() > 0 {
 					args = active.args.String()
 				}
-				if _, err := decodeObject(args); err != nil {
+				if !validClaudeUnicode([]byte(args)) {
+					return false, errRouted
+				}
+				if _, err := decodeVideoObject([]byte(args)); err != nil {
 					return false, err
 				}
 				if err := e.accept(streamEvent{kind: "tool", call: streamToolCall{active.id, active.name, args}}, plan); err != nil {
+					return false, err
+				}
+			}
+			if active.state != nil {
+				if active.kind == "thinking" && !active.signed {
+					return false, errRouted
+				}
+				if err := e.accept(streamEvent{kind: "claude-thinking", text: active.args.String(), claude: active.state}, plan); err != nil {
 					return false, err
 				}
 			}
@@ -217,6 +301,14 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				return false, errRouted
 			}
 			outputTokens = n
+			if details, present := u["output_tokens_details"]; present {
+				d := obj(details)
+				thinking, ok := tokenCount(d["thinking_tokens"])
+				if d == nil || !only(d, "thinking_tokens") || !ok || thinking > n {
+					return false, errRouted
+				}
+				thinkingTokens = &thinking
+			}
 			finished = true
 			if reason == "max_tokens" {
 				terminal = "incomplete"
@@ -228,12 +320,20 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 			if !started || !finished || active != nil || !usageKnown || inputTokens+outputTokens > 1<<53-1 {
 				return false, errRouted
 			}
-			usage := map[string]any{"input_tokens": inputTokens, "output_tokens": outputTokens, "total_tokens": inputTokens + outputTokens}
-			return true, e.accept(streamEvent{kind: terminal, usage: usage}, plan)
+			stopped = true
 		default:
 			return false, errRouted
 		}
 		return false, nil
+	}, func() error {
+		if !stopped {
+			return errRouted
+		}
+		usage := map[string]any{"input_tokens": inputTokens, "output_tokens": outputTokens, "total_tokens": inputTokens + outputTokens}
+		if thinkingTokens != nil {
+			usage["output_tokens_details"] = map[string]any{"reasoning_tokens": *thinkingTokens}
+		}
+		return e.accept(streamEvent{kind: terminal, usage: usage}, plan)
 	})
 }
 func tokenCount(v any) (int64, bool) {

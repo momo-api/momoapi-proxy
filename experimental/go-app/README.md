@@ -70,6 +70,38 @@ partialArgs and signature-only Parts still fail closed. This is a bounded subset
 NOT full Gemini thinking/streaming-state compatibility. No signature bypass,
 cryptographic verification or artificial signature is introduced.
 
+Claude signed thinking uses canonical reasoning items with
+`momo_claude:{model,type:"thinking",signature}` and one summary_text (possibly
+empty). Redacted blocks use `type:"redacted_thinking",data` and summary:[];
+ciphertext is never decoded or treated as answer text. Preserve opaque strings
+and exact block order, NOT Base64 validation or cryptographic verification.
+Full/suffix continuation binds to the exact model even with replay-v1. Local
+checkpoint protects the whole state-bearing turn.
+Signed blocks require the provider-returned model to equal the requested model;
+no silent alias remapping. Adjacent unsigned text retains legacy coalescing, not
+general native block-boundary preservation.
+
+Opt in with `momo_claude_thinking:{type:"adaptive",display:"summarized"}`;
+display may instead be omitted (empty signed summary) or absent. Manual
+`{type:"enabled",budget_tokens:1024}` requires budget>=1024 and <max_tokens;
+`{type:"disabled"}` has no display/budget. No budget guessing or clamps. Canonical
+effort low/medium/high/xhigh/max requires explicit adaptive mode and maps to
+native output_config.effort; conflicting aliases reject. Availability is delegated
+to the provider, not guessed from model names. Forced named/required tool choice
+with enabled/adaptive thinking and -thinking aliases reject. Controls are per
+request, never inherited. text-tools-v1 still strips reasoning.summary; use native
+display for Claude instead. No updates/interleaved beta/output-media/full-native
+stream compatibility or live-provider claim.
+
+Claude accepts one final signature_delta per thinking block; duplicate signatures,
+thinking after signature, missing signature, malformed/duplicate JSON, invalid
+UTF8 or unpaired UTF16 surrogates reject. 128 blocks,256KiB opaque string and
+1MiB retained/history/wire budgets. Final thinking_tokens if supplied maps to
+validated reasoning_tokens, never invented. Only framed clean EOF after
+message_stop and successful terminal write can store an anchor; late errors,
+truncated HTTP, incomplete/cancellation/Stop/store:false cannot mint one.
+Reference: https://platform.claude.com/docs/en/build-with-claude/extended-thinking
+
 Canonical `momo_gemini:{model,thought_signature}` metadata lives on function/custom
 items, signed assistant output_text blocks and public reasoning items (signature
 optional only for public summaries). Preserve exact part order and empty signed
@@ -93,7 +125,8 @@ Interactions API thinking steps). Synthetic mock evidence is not live capability
 
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
-reasoning effort (Chat only; Claude/Gemini thinking/effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
+reasoning effort (Chat; Claude only with explicit adaptive control below;
+Gemini effort is rejected). It restores namespace explicitly and fails ambiguous bare names.
 It rejects unknown payload fields/options, unsupported media, foreign/expired history references, opaque/provider compaction on converted paths,
 hosted built-in tools, grammar on converted paths, malformed/unmatched
 history and collisions instead of silently dropping them. This is intentionally

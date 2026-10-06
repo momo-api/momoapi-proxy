@@ -160,8 +160,26 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   compact retains whole PDF/text-bearing turns including assistant interpretation.
   Scoped IP URL literals reject for images/files; lexical checks are NOT DNS/
   redirect validation. Native/default provider file IDs remain exact passthrough.
-  Claude Messages text/tools plus validated token usage are supported; thinking,
-  signatures and other media are not. Gemini text/tools,
+  Claude Messages text/tools plus validated token usage and bounded signed
+  thinking/redacted_thinking blocks are supported. Public provider summary is
+  separate reasoning, not answer prose; redacted summary is empty. Preserve exact
+  momo_claude:{model,type,signature|data} metadata and block order, including empty
+  thinking. Opaque signature/data are NOT necessarily Base64; never decrypt,
+  display as prose, fabricate or bypass them. Only same-model replay; cross-model
+  rejects even replay-v1, checkpoint protects the entire state-bearing turn.
+  Explicit momo_claude_thinking:{type:"adaptive",display:"summarized"|"omitted"},
+  {type:"enabled",budget_tokens:N,display:...} or {type:"disabled"}; display optional
+  except disabled. Manual budget>=1024 and <max_tokens (default12240), no clamps.
+  Effort low/medium/high/xhigh/max only with explicit adaptive control, native
+  output_config.effort; no guessed provider support, automatic mode/budget or
+  -thinking aliases. Enabled/adaptive reject forced named/required tool choice.
+  Re-declare controls per request, never inherited. Single final signature_delta;
+  clean EOF plus successful terminal write required, no failed/incomplete anchors.
+  128 blocks/256KiB opaque/1MiB retained-history-wire, strict Unicode/duplicate-free
+  depth64; unpaired surrogates reject rather than corrupt state. No updates,
+  interleaved-beta/output-media/full-native-stream or real-inference guarantee.
+  text-tools-v1 still strips reasoning.summary; use explicit native display.
+  Gemini text/tools,
   paired history, tool choice and validated token usage are supported. Public
   thought:true text is a separate reasoning summary. Text/function/custom signatures
   use momo_gemini:{model,thought_signature}; preserve EXACT metadata/part order,

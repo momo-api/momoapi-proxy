@@ -129,5 +129,5 @@ func probeGeminiStateRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return probeMediaRequests(core)
+	return probeClaudeStateRequests(core)
 }
