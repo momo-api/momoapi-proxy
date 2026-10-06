@@ -608,7 +608,7 @@ def check_diagnostics(binary):
 
 def check_codex_three_routes(binary):
     with tempfile.TemporaryDirectory(prefix="momo-codex-route-") as directory:
-        path = Path(directory) / "config.toml"
+        path = Path(directory).resolve() / "config.toml"
         original = 'model_provider="openai"\nmodel="gpt-5.6-luna"\n[mcp_servers.synthetic]\ncommand="preserve"\n'
         path.write_text(original, encoding="utf-8")
         (path.parent / "auth.json").mkdir()  # Must not attempt login-file reads.

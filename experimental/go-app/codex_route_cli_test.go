@@ -14,7 +14,11 @@ import (
 )
 
 func TestCodexRouteCLIExplicitPreviewApply(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.toml")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("fixture path")
+	}
+	path := filepath.Join(dir, "config.toml")
 	initial := []byte("model_provider='openai'\n[mcp_servers.synthetic]\ncommand='keep'\n")
 	os.WriteFile(path, initial, 0600)
 	args := []string{"--config", path, "--mode", "direct", "--endpoint", "https://momoapi.us"}

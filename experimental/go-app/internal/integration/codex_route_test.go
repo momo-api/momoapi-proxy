@@ -14,6 +14,17 @@ func routeConfig() []byte {
 	return []byte("# keep comment\r\nmodel = 'gpt-5.6-luna'\r\nmodel_provider = 'openai' # keep inline\r\nmodel_reasoning_effort = 'high'\r\nnotes = '''\r\n[model_providers.fake]\r\nmodel_provider = 'not-real'\r\n'''\r\n[mcp_servers.example]\r\ncommand = 'example'\r\n[projects.'C:/synthetic']\r\ntrust_level = 'trusted'\r\n")
 }
 
+// macOS /var is a system symlink. Tests explicitly select its real local
+// target, like a resolved native dialog path; product symlink denial remains.
+func routeTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal("fixture path")
+	}
+	return dir
+}
+
 func TestCodexThreeRoutesPreserveSourceAndHistory(t *testing.T) {
 	data := routeConfig()
 	for _, options := range []CodexRouteOptions{{Mode: "direct", Endpoint: "https://momoapi.us"}, {Mode: "proxy", Endpoint: "http://127.0.0.1:12345"}, {Mode: "native"}, {Mode: "proxy", Endpoint: "http://127.0.0.1:12345"}, {Mode: "native"}, {Mode: "direct", Endpoint: "https://momoapi.us"}} {
@@ -67,7 +78,7 @@ func TestCodexRouteFailClosedAndCatalogConsent(t *testing.T) {
 }
 
 func TestCodexRouteFileRevisionBackupAndNoCredentialAccess(t *testing.T) {
-	dir := t.TempDir()
+	dir := routeTempDir(t)
 	path := filepath.Join(dir, "config.toml")
 	data := routeConfig()
 	if os.WriteFile(path, data, 0600) != nil {
@@ -139,7 +150,7 @@ func TestCodexNativeLegacyNodeAndExplicitCatalogDetach(t *testing.T) {
 }
 
 func TestCodexRouteLockAndSymlinkRejection(t *testing.T) {
-	dir := t.TempDir()
+	dir := routeTempDir(t)
 	path := filepath.Join(dir, "config.toml")
 	os.WriteFile(path, routeConfig(), 0600)
 	o := CodexRouteOptions{Mode: "native"}
@@ -160,7 +171,7 @@ func TestCodexRouteLockAndSymlinkRejection(t *testing.T) {
 		t.Fatal("concurrent writer")
 	}
 	f.Close()
-	linkdir := t.TempDir()
+	linkdir := routeTempDir(t)
 	link := filepath.Join(linkdir, "config.toml")
 	if os.Symlink(path, link) != nil {
 		t.Skip("symlinks unavailable for current Windows account")

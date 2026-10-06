@@ -65,6 +65,10 @@ func check() error {
 	if err != nil {
 		return errors.New("profile")
 	}
+	profile, err = filepath.EvalSymlinks(profile)
+	if err != nil {
+		return errors.New("profile path")
+	}
 	fmt.Println("PROFILE: " + profile)
 	completed := make(chan struct{}, 1)
 	var passed, proxied atomic.Bool

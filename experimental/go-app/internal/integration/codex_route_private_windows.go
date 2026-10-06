@@ -45,7 +45,11 @@ func secureRouteFile(f *os.File) error {
 	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
 		return windows.ERROR_ACCESS_DENIED
 	}
-	if !strings.HasSuffix(actual.String(), "(A;;FA;;;"+user.User.Sid.String()+")") {
+	// Well-known user SIDs (e.g. RID500 on hosted runners) are rendered as
+	// SDDL aliases. Compare OS-canonicalized desired ACE, not raw SID spelling.
+	desired := sd.String()
+	ace := strings.Index(desired, "(")
+	if ace < 0 || !strings.HasSuffix(actual.String(), desired[ace:]) {
 		return windows.ERROR_ACCESS_DENIED
 	}
 	return nil
