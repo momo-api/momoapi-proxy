@@ -31,7 +31,15 @@ jobs:
       - run: go vet -tags nogui ./...
       - run: python3 -B -m unittest discover -s packaging -p 'test_*.py'
       - run: node internal/ui/page_test.mjs
-      - run: go test -tags nogui -count=5 -timeout 60s ./...
+      - name: Five independent full test passes (no retries)
+        # Go's timeout is package-wide across -count, not per pass. Keep the
+        # 60s watchdog for EACH complete pass; do not retry a failed pass or
+        # omit fixtures. Race acceptance below uses the same independent rule.
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "Full test acceptance pass $pass/5 (no retries; 60s per package)"
+            go test -tags nogui -count=1 -timeout 60s ./... || exit "$?"
+          done
       - name: Node and Go unified routing blackbox (same mock and resource settings)
         run: |
           suffix=

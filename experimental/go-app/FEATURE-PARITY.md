@@ -62,6 +62,15 @@ Chat/Responses/models/native compact与Claude/Gemini完整signed续聊，不增
 独立assert/授权synthetic hostname/真实非浏览器HTTP；未放宽产品门禁。
 完整621统一黑盒及新HEAD三平台CI仍在验收，不以72组替代全量。
 
+cdaff7a最终621统一TCP通过，fresh实际Codex通过/responses/alias读取
+单项MCP后paired第二轮exit0/exact2synthetic。首轮PR37408977450的macOS
+五遍共用60s package alarm触发，当时subtest标记0s、在既有tool-image
+TCP中，不声称是该测试死锁或已找到产品根因。其他五native jobs及两main
+workflow通过；同SHA mac push普通五遍42.967s、五独立race38.764~50.082s。
+保留失败，不rerun，不以push代替PR。CI普通全量改为五独立进程，每遍
+原60s package watchdog、count1，首失败立即退出，全部fixtures不变。
+既有TCP3s/cleanup4s/native25s/40s/race120s等门禁不改；新HEAD另验收。
+
 单项查询已用fresh隔离Codex0.156与本轮Go CLI验证Skill->readonlyMCP->
 paired第二轮exit0/exact2synthetic请求，完整gemini_thinking合同无truncate。
 本机WSL未安装GTK/WebKit，LinuxCLI以nogui构建；这不是Linux桌面发行验收，
