@@ -52,11 +52,11 @@ func TestPluginAssetsConnectedGenerateLookupReuseAndNoRetry(t *testing.T) {
 	}
 	defer closeClient()
 	directory := filepath.Join(t.TempDir(), "explicit-new-assets")
-	store, err := integration.NewImageAssetStore(directory, DecodeLocalImageSave)
+	store, err := integration.OpenImageAssetLibrary(directory, DecodeLocalImageSave)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { store.Close() })
 	call := func(name string, args any) map[string]any {
 		t.Helper()
 		raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": name, "arguments": args}})
@@ -89,7 +89,7 @@ func TestPluginAssetsConnectedGenerateLookupReuseAndNoRetry(t *testing.T) {
 		t.Fatal("catalog gate")
 	}
 	cap := text(call("image_capabilities", map[string]any{}))
-	if cap["asset_storage"].(map[string]any)["reopen"] != false {
+	if cap["asset_storage"].(map[string]any)["reopen"] != true {
 		t.Fatal("scope")
 	}
 	result := text(call("image_generate", map[string]any{"model": model, "prompt": "explicit generation"}))
@@ -97,7 +97,7 @@ func TestPluginAssetsConnectedGenerateLookupReuseAndNoRetry(t *testing.T) {
 	id := image["asset_id"].(string)
 	ref := image["reference"].(string)
 	path := image["local_path"].(string)
-	if image["b64_json"] != nil || image["vision_available"] != false || result["asset_scope"] != "connector-session" {
+	if image["b64_json"] != nil || image["vision_available"] != false || result["asset_scope"] != "explicit-local-library" {
 		t.Fatal("compact/scope")
 	}
 	data, err := os.ReadFile(path)
@@ -116,6 +116,14 @@ func TestPluginAssetsConnectedGenerateLookupReuseAndNoRetry(t *testing.T) {
 	}
 	if sends.Load() != 2 {
 		t.Fatal("metadata called upstream")
+	}
+	store.Close()
+	store, err = integration.OpenImageAssetLibrary(directory, DecodeLocalImageSave)
+	if err != nil {
+		t.Fatal("reopen", err)
+	}
+	if text(call("image_asset_get", map[string]any{"asset_id": id}))["asset_id"] != id || sends.Load() != 2 {
+		t.Fatal("reopened metadata send")
 	}
 	call("image_edit", map[string]any{"model": model, "prompt": "explicit edit", "reference_images": []string{ref, reference}})
 	if sends.Load() != 3 || generate.Load() != 1 || edit.Load() != 1 {

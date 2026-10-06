@@ -35,6 +35,12 @@ func runConnectedMediaMode(endpoint string, video, plugin bool) error {
 }
 
 func runConnectedMediaAssetsMode(endpoint string, video, plugin bool, assetDirectory string) error {
+	return runConnectedMediaStoreMode(endpoint, video, plugin, assetDirectory, false)
+}
+func runConnectedMediaLibraryMode(endpoint, directory string) error {
+	return runConnectedMediaStoreMode(endpoint, false, true, directory, true)
+}
+func runConnectedMediaStoreMode(endpoint string, video, plugin bool, assetDirectory string, persistent bool) error {
 	if integration.ValidateLocalEndpoint(endpoint) != nil {
 		return errors.New("local MCP endpoint unavailable")
 	}
@@ -63,7 +69,11 @@ func runConnectedMediaAssetsMode(endpoint string, video, plugin bool, assetDirec
 		if video || !plugin {
 			return errors.New("image asset mode unavailable")
 		}
-		store, err := integration.NewImageAssetStore(assetDirectory, appcore.DecodeLocalImageSave)
+		openStore := integration.NewImageAssetStore
+		if persistent {
+			openStore = integration.OpenImageAssetLibrary
+		}
+		store, err := openStore(assetDirectory, appcore.DecodeLocalImageSave)
 		if err != nil {
 			return err
 		}

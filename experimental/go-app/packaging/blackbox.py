@@ -341,6 +341,18 @@ def check_plugin_asset_mode(binary, session):
         # Existing directories must never be scanned or imported on restart.
         again = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
         require(again.returncode == 1 and again.stdout == b"", "asset existing-directory gate")
+        library = Path(parent) / "new-library"
+        library_command = command[:-2] + ["--asset-library", str(library)]
+        missing = subprocess.run(library_command, input=data, env={**env, "MOMO_LOCAL_API_KEY": ""}, capture_output=True, timeout=8)
+        require(missing.returncode == 1 and not library.exists(), "library key-before-disk gate")
+        for _ in range(2):
+            reopened = subprocess.run(library_command, input=data, env=env, capture_output=True, timeout=8)
+            require(reopened.returncode == 0 and reopened.stderr == b"", "library explicit restart/EOF")
+            replies = [json.loads(line) for line in reopened.stdout.splitlines()]
+            listing = json.loads(replies[2]["result"]["content"][0]["text"])
+            require(listing["scope"] == "explicit-local-library" and listing["assets"] == [], "library reopen scope")
+        rejected = subprocess.run(command[:-2] + ["--asset-library", str(directory)], input=data, env=env, capture_output=True, timeout=8)
+        require(rejected.returncode == 1 and rejected.stdout == b"" and not list(directory.iterdir()), "library refuses unmarked session directory")
         session.request("GET", "/v1/models", 401, authenticated=False)
 
 

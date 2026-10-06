@@ -149,6 +149,13 @@ func pluginMediaCatalog(data []byte) ([]byte, error) {
 	catalog["plugin_compatibility"] = json.RawMessage(`{"flat_arguments":true,"explicit_model_required":true,"task_status_names":true,"disk_assets":false,"automatic_downloads":false,"live_inference_verified":false}`)
 	if _, ok := catalog["asset_storage"]; ok {
 		catalog["plugin_compatibility"] = json.RawMessage(`{"flat_arguments":true,"explicit_model_required":true,"task_status_names":true,"disk_assets":true,"persistent_asset_library":false,"asset_references":true,"automatic_downloads":false,"live_inference_verified":false}`)
+		var storage struct {
+			Scope  string `json:"scope"`
+			Reopen bool   `json:"reopen"`
+		}
+		if json.Unmarshal(catalog["asset_storage"], &storage) == nil && storage.Scope == "explicit-local-library" && storage.Reopen {
+			catalog["plugin_compatibility"] = json.RawMessage(`{"flat_arguments":true,"explicit_model_required":true,"task_status_names":true,"disk_assets":true,"persistent_asset_library":true,"shared_node_library":false,"asset_references":true,"automatic_downloads":false,"live_inference_verified":false}`)
+		}
 	}
 	return json.Marshal(catalog)
 }

@@ -32,7 +32,8 @@ Node-style per-model limits and parameter_schema while retaining actual Core
 constraints. Default image results remain URL/base64 JSON. The separate explicit
 --asset-dir NEW-directory option adds inline saving/image_asset_get/list/asset:
 edit reuse within one connector session (see Explicit image assets below).
-No persistent shared library, signed vision or automatic URL downloads.
+Separate --asset-library enables explicitly marked Go-library restart recovery,
+not Node sharing. No signed vision or automatic URL downloads.
 Video returned remote_url is text, with no
 download or browser playback. No generate_audio/legacy video routes. The
 unchanged Node image Skill expects persistent/remote-save assets, so this is partial
@@ -904,6 +905,27 @@ Both modes share core/proxy/auth/admission implementation.
 ## Boundaries
 
 ### Explicit image assets (connector-session subset)
+
+Separate persistent option: replace --asset-dir with --asset-library <absolute
+directory>. Creates a NEW marked Go-format library or reopens that exact format;
+never imports an existing session/Node directory or discovers home/account files.
+Fixed marker/lock/bounded append-only reserve+commit journal, no directory scan
+or arbitrary persisted paths. Reserve Sync occurs before image creation; commit
+Sync after complete image Sync+Close. Incomplete reservations remain charged but
+invisible; corrupt/torn journal rejects reopen, without truncation/repair/deletion.
+Lifetime nonblocking OS lock allows only one connector writer; process exit
+releases it, no stale-lock deletion. Committed IDs, creation times and capacity
+charges survive restart; expiry stays absolute24h, not renewed by reopening.
+Access times after reopening begin at creation and are only tracked in memory.
+Control regular-file/identity checks and image digest/MIME checks still apply;
+not a sandbox against same-account control. No Node-shared library, remote URL
+downloads, signed vision, GIF saving, cloud upload, cleanup or cross-device sync.
+Files and library metadata are not encrypted; user explicitly chooses storage.
+File Sync plus fail-closed reopen is NOT a power-loss guarantee: directory-entry
+durability/filesystem behavior varies by OS; no automatic crash repair claim.
+Init/list read bounded local control records only; no upstream query or billed
+generation. Image contents are read only for requested verified metadata/reuse.
+The launcher config exporter does not add either disk permission automatically.
 
 Append --asset-dir <absolute NEW directory> to mcp image --endpoint <origin>.
 Parent must already exist; launcher override export intentionally does not add

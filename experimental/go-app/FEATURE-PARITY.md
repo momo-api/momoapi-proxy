@@ -19,11 +19,19 @@ get/list 与 asset: 编辑复用（仅connector会话、24h/128项/64MiB限额�
 无签名vision/跨设备同步，仍未实现完整现有Skill自动保存语义；视频音频控制/旧路线
 未迁移。不能据此声明两个已安装插件直接零配置替换或完整功能对齐。
 
+后续增量：独立 --asset-library 明确路径创建Go专用标记库或重开同格式库，
+恢复已commit ID/创建时间/容量计数；reserve/commit日志先后Sync、OS进程独占锁，
+不扫描目录、不导入旧图片或Node库、不修复/截断坏日志、不删文件/过期记录。
+未commit写入仍占限额且不可见，24h绝对TTL不被重启刷新；单库同一时刻一个connector。
+元数据不加密；不保证断电目录项持久性、不支持迁移共享/URL下载/签名vision/跨设备。
+普通--asset-dir会话语义不变。本提交仍须新的三OS CI，不借用旧绿灯。
+
 6a13969 push 37418360982 macOS 在 passthrough-start-enabled 失败，PR三OS
 成功不能覆盖该失败。accb37e 增加模型/额度查询8种时序回归，复现并围栏旧Active
 快照；Windows五次原生217TLS/生产blackbox通过；首轮push37424341948/PR37424347176
 三OS全部通过（未重跑）；两个main workflow成功。先前失败仍保留，不代表所有偶发
-竞争已消除。当前asset增量仍须新提交CI。
+竞争已消除。f5f4a14首轮native push37426448819/PR37426453521三OS均成功，
+两个main workflow也成功；没有重跑。当前持久库增量仍须新提交CI。
 
 asset增量本地验证：真实local TCP/TLS mock Core生成保存/元数据/有序复用编辑、
 SHA256原字节读回、同内容去重、篡改拒绝在发送前、保存失败exact单发送/不重试。

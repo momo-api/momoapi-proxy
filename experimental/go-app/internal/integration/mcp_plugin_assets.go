@@ -13,6 +13,7 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 	if store == nil {
 		return errAsset
 	}
+	scope := store.Scope()
 	resultFor := func(ctx context.Context, method string, params json.RawMessage, dispatch ImageDispatch, video bool) (any, int, string) {
 		if method == "tools/list" {
 			result, code, message := pluginMediaMCPResult(ctx, method, params, dispatch, false)
@@ -23,10 +24,10 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 			for _, value := range tools {
 				tool := value.(map[string]any)
 				if tool["name"] == "image_generate" || tool["name"] == "image_edit" {
-					tool["description"] = "May bill; explicit model/catalog/user intent required. One send, no retry. Valid inline PNG/JPEG/WebP results saved in explicit connector session directory; URLs not downloaded. Disk failure does not undo submission."
+					tool["description"] = "May bill; explicit model/catalog/user intent required. One send, no retry. Valid inline PNG/JPEG/WebP results saved in explicitly enabled local asset store (" + scope + "); URLs not downloaded. Disk failure does not undo submission."
 				}
 				if tool["name"] == "image_edit" {
-					tool["inputSchema"].(map[string]any)["properties"].(map[string]any)["reference_images"].(map[string]any)["description"] = "Opaque asset:img_<sha256> from this connector session, or existing supported data/HTTPS references. Hash/MIME verified before explicit edit; resolved request and Core wire <=1MiB; MCP input line <=160KiB. No arbitrary file paths."
+					tool["inputSchema"].(map[string]any)["properties"].(map[string]any)["reference_images"].(map[string]any)["description"] = "Opaque asset:img_<sha256> from this explicitly enabled store (" + scope + "), or existing supported data/HTTPS references. Hash/MIME verified before explicit edit; resolved request and Core wire <=1MiB; MCP input line <=160KiB. No arbitrary file paths."
 				}
 			}
 			for _, name := range []string{"image_asset_get", "image_asset_list"} {
@@ -36,7 +37,7 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 					schema["properties"] = map[string]any{"asset_id": map[string]any{"type": "string", "pattern": "^img_[a-f0-9]{64}$"}}
 					schema["required"] = []string{"asset_id"}
 				}
-				tools = append(tools, map[string]any{"name": name, "description": "Compact verified local metadata only. Current connector session; absolute 24h TTL, no import, inline preview, upstream query or signed vision.", "inputSchema": schema, "annotations": map[string]any{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false, "idempotentHint": false}})
+				tools = append(tools, map[string]any{"name": name, "description": "Compact verified local metadata only. Scope: " + scope + "; absolute 24h TTL, no import, inline preview, upstream query or signed vision.", "inputSchema": schema, "annotations": map[string]any{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": false, "idempotentHint": false}})
 			}
 			result.(map[string]any)["tools"] = tools
 			return result, 0, ""
@@ -73,7 +74,7 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 			if err != nil {
 				return assetMCPError(), 0, ""
 			}
-			return assetMCPText(map[string]any{"assets": assets, "scope": "connector-session", "ttl_hours": 24}), 0, ""
+			return assetMCPText(map[string]any{"assets": assets, "scope": scope, "ttl_hours": 24}), 0, ""
 		}
 		wrapped := func(ctx context.Context, path string, body []byte) ([]byte, int) {
 			if path == "/internal/images/edit" {
@@ -117,7 +118,7 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 				if !strictMCPJSON(data) || json.Unmarshal(data, &catalog) != nil || catalog == nil {
 					return nil, 502
 				}
-				catalog["asset_storage"] = json.RawMessage(`{"scope":"connector-session","inline_only":true,"ttl_hours":24,"max_entries":128,"max_bytes":67108864,"automatic_downloads":false,"reopen":false,"signed_vision":false}`)
+				catalog["asset_storage"] = mustAssetJSON(map[string]any{"scope": scope, "inline_only": true, "ttl_hours": 24, "max_entries": 128, "max_bytes": assetMaxBytes, "automatic_downloads": false, "reopen": scope == "explicit-local-library", "signed_vision": false})
 				return mustAssetJSON(catalog), 200
 			}
 			if path != "/internal/images/generate" && path != "/internal/images/edit" && !strings.HasPrefix(path, "/internal/images/tasks/") {
@@ -155,7 +156,7 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 				}
 			}
 			result["images"], _ = json.Marshal(images)
-			result["asset_scope"] = json.RawMessage(`"connector-session"`)
+			result["asset_scope"], _ = json.Marshal(scope)
 			return mustAssetJSON(result), 200
 		}
 		result, code, message := pluginMediaMCPResult(ctx, method, params, wrapped, false)

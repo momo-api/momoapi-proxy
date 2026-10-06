@@ -44,10 +44,10 @@ type storedImageAsset struct {
 	file os.FileInfo
 }
 
-// This is an explicit connector-owned SESSION library, not Node's shared
-// persistent library. The directory must be NEW; no scan/import/overwrite or
-// automatic eviction/deletion. Saved files remain after Close, but a new
-// connector cannot reopen their IDs. Local paths are output only, never input.
+// NewImageAssetStore is an explicit connector-owned SESSION store. A separate
+// OpenImageAssetLibrary opt-in enables marked Go-library restart recovery, not
+// Node sharing. Neither scans/imports/overwrites/automatically deletes files.
+// Local paths are output only, never model-supplied input.
 type ImageAssetStore struct {
 	mu        sync.Mutex
 	root      *os.Root
@@ -57,6 +57,7 @@ type ImageAssetStore struct {
 	bytes     int
 	slots     int
 	now       func() time.Time
+	library   *assetLibrary
 }
 
 func NewImageAssetStore(directory string, validate ImageAssetValidator) (*ImageAssetStore, error) {
@@ -112,6 +113,10 @@ func (s *ImageAssetStore) Close() error {
 	if s.root == nil {
 		return nil
 	}
+	if s.library != nil {
+		s.library.close()
+		s.library = nil
+	}
 	err := s.root.Close()
 	s.root = nil
 	return err
@@ -163,14 +168,26 @@ func (s *ImageAssetStore) Save(mime, b64 string) (ImageAsset, error) {
 		return ImageAsset{}, errAsset
 	}
 	name := id + assetExtension(mime)
+	now := s.now().UTC()
+	meta := ImageAsset{ID: id, Reference: "asset:" + id, Path: filepath.Join(s.directory, name), MIME: mime, Bytes: len(data), SHA256: digest, Created: now, Accessed: now}
+	if s.library != nil {
+		if err := s.library.append(assetJournalRecord{Kind: "reserve", ID: id, MIME: mime, Bytes: len(data), Created: now}); err != nil {
+			return ImageAsset{}, err
+		}
+		// Durable reservations charge failures across restarts as well.
+		s.slots++
+		s.bytes += len(data)
+	}
 	f, err := s.root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return ImageAsset{}, errAsset
 	}
 	// Charge even failed/partial writes against capacity. No unbounded orphan
 	// files if the disk fails repeatedly; never remove user-visible files.
-	s.slots++
-	s.bytes += len(data)
+	if s.library == nil {
+		s.slots++
+		s.bytes += len(data)
+	}
 	n, writeErr := f.Write(data)
 	syncErr := f.Sync()
 	info, statErr := f.Stat()
@@ -178,10 +195,16 @@ func (s *ImageAssetStore) Save(mime, b64 string) (ImageAsset, error) {
 	// A partial file is deliberately not deleted or registered; caller sees an
 	// error. Never retry generation or pretend disk failure undid upstream work.
 	if writeErr != nil || n != len(data) || syncErr != nil || statErr != nil || closeErr != nil || !info.Mode().IsRegular() {
+		if s.library != nil {
+			s.library.failed = true
+		}
 		return ImageAsset{}, errAsset
 	}
-	now := s.now().UTC()
-	meta := ImageAsset{ID: id, Reference: "asset:" + id, Path: filepath.Join(s.directory, name), MIME: mime, Bytes: len(data), SHA256: digest, Created: now, Accessed: now}
+	if s.library != nil {
+		if err := s.library.append(assetJournalRecord{Kind: "commit", ID: id}); err != nil {
+			return ImageAsset{}, err
+		}
+	}
 	s.entries[id] = storedImageAsset{meta: meta, name: name, file: info}
 	return meta, nil
 }
@@ -282,4 +305,13 @@ func (s *ImageAssetStore) Resolve(reference string) (string, error) {
 		return "", err
 	}
 	return "data:" + meta.MIME + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+func (s *ImageAssetStore) Scope() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.library != nil {
+		return "explicit-local-library"
+	}
+	return "connector-session"
 }

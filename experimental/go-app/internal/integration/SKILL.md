@@ -27,6 +27,14 @@ ONLY in that connector session. Hash/MIME/regular-file identity checked on reuse
 Saved files survive exit but IDs do NOT reopen; no shared Node library, remote
 URL download, signed vision or cross-device sync. MCP input160KiB, resolved
 edit/Core wire1MiB; larger saved results cannot be reused through this subset.
+Separate persistent opt-in: --asset-library <absolute directory> creates a NEW
+marked library or reopens ONLY this Go format. Fixed bounded reserve/commit
+journal and single-writer OS lock; no directory scan/old-file import or repair.
+Committed IDs/creation times/capacity charges survive restart; absolute24h TTL
+does not reset. Incomplete writes stay charged/invisible. Corrupt/torn control
+records fail closed; tampered live images fail hash/MIME verification before use.
+One connector owns a library at a time. No stale-lock deletion/automatic cleanup,
+Node library sharing, remote URL downloads, signed vision or cross-device sync.
 Stop still gates upstream sends; local connector metadata outlives gateway Stop.
 Disk/delivery failure may leave partial/complete files and does not undo billing.
 Do not follow the full Node Skill's persistent/remote-save workflow on Go.
