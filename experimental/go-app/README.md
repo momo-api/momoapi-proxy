@@ -1086,8 +1086,16 @@ config reference is cleared in finally (not secure-memory erasure).
 node internal/ui/page_test.mjs exercises the shipped script with a simulated
 DOM/fetch, including locked-store controls, persistent save-failure notice,
 polling/focus, key clearing, stale responses and timeout, plus rendered status,
-navigation/keyboard tabs and explicit capability gaps. Native appcheck now
-invokes the shipped DOM button handlers for Apply/Load/Start/Stop, asserts disabled
+navigation/keyboard tabs and explicit capability gaps.
+Data-only model/quota/image/video operations fence background State snapshots
+at both entry and exit; transient query Active counts cannot lock Start after
+completion. Polls issued before/during these operations are ignored if stale;
+Stop remains enabled during operations, and settled polls still observe native
+changes. The shipped-script regression covers all eight model/quota poll timing
+orders. This reproduces a possible mechanism for the macOS push failure at
+6a13969 (passthrough-start-enabled); it does not prove that CI failure is fixed
+until the unchanged native acceptance passes on macOS.
+Native appcheck invokes the shipped DOM button handlers for Apply/Load/Start/Stop, asserts disabled
 controls/key clearing, navigation/Load returning to Overview, rendered status,
 and automatically observes a native Stop then restarts.
 This is real WebView scripted DOM interaction in a tagged probe, NOT physical

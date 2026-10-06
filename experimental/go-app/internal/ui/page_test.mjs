@@ -422,6 +422,27 @@ await polling;
 assert.equal(run('lastState.Running'),false);
 
 // Native/tray changes are picked up by visible polling and focus; errors persist.
+// Catalog/quota calls return data, not State. A poll sampled while Core counts
+// the query as Active must not leave Start locked after that query finishes.
+// Exercise both arrival orders and polls issued before/during the query.
+for(const kind of ['models','quota'])for(const pollBefore of [true,false])for(const pollFirst of [true,false]){
+ handler=()=>response(200,state);await run("action('state')");
+ const query=pending(),snapshot=pending();
+ handler=url=>url==='/app/'+kind?query.promise:url==='/app/state'?snapshot.promise:response(200,state);
+ let concurrent;if(pollBefore){concurrent=run("action('state')");await flush()}
+ const checking=nodes.get(kind+'-refresh').onclick();await flush();
+ assert.equal(nodes.get('stop').disabled,false,'Stop remains usable while query State is fenced');
+ if(!pollBefore){concurrent=run("action('state')");await flush()}
+ const value=kind==='models'?{IDs:['gpt-test'],CheckedAt:1800000000}:quota;
+ if(pollFirst){snapshot.resolve(response(200,{...state,Active:1}));await concurrent;query.resolve(response(200,value));await checking}
+ else{query.resolve(response(200,value));await checking;snapshot.resolve(response(200,{...state,Active:1}));await concurrent}
+ assert.equal(nodes.get('start').disabled,false,`${kind}: stale in-flight query State locked Start (before=${pollBefore}, first=${pollFirst})`);
+ assert.equal(run('lastState.Active'),0);
+ assert.equal(nodes.get('active-count').textContent,'0');
+ // Once settled, genuine native changes must still be picked up, not fenced forever.
+ handler=()=>response(200,{...state,Running:true});await run("action('state')");
+ assert.equal(run('lastState.Running'),true);
+}
 // A poll launched DURING Start must not outrank Start's successful response.
 // Its server snapshot can have been taken before Start changes native state.
 for(const pollFirst of [true,false]){
