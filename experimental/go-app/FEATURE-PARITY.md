@@ -38,6 +38,15 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ### MOMO 公共入口与模型选路对齐（2026-10-06；当前待CI验收）
 
+最新首轮状态：73fdd64 的 PR 37409837757 三平台成功；push 37409835008
+Windows/Linux 成功，macOS native 第三遍在初次 Start 阶段失败，前两遍
+各217请求成功。原日志只有固定 `start` 标签，不能区分按钮门禁、action
+返回值、state或DOM断言；`native explicit image save` 是退出后的次生门禁，
+不是保存失败根因。保留失败、不 rerun、不以 PR 的绿灯替代 push 失败。
+增加仅测试编译的八个固定 Start 分阶段标签与成功返回值断言，不输出
+state/key/error、不改产品门禁/等待/重试/超时。此诊断增量不宣称修复根因；
+后续需定位原生失败，当前仍不得声明完整跨平台验收或产品功能对齐。
+
 按src/route-dispatch.mjs与model-routing.mjs逐项对照，新增四个无版本
 API别名与公共API尾斜线规范化；同canonical路径接入既有鉴权/浏览器拒绝/
 method/并发/预算/取消/history/compact策略，非redirect/新请求。不clean

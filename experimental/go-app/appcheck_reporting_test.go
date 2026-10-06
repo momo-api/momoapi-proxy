@@ -51,12 +51,20 @@ func TestProbeFailureValidationRetainsCapabilityWithoutQuery(t *testing.T) {
 }
 
 func TestProbeReportOnlyFixedLabels(t *testing.T) {
+	for _, phase := range []string{"passthrough", "routing"} {
+		for _, stage := range []string{"enabled", "action", "state", "render"} {
+			label := phase + "-start-" + stage
+			if probeFailureStep(label) != label {
+				t.Fatal("missing Start diagnostic label", label)
+			}
+		}
+	}
 	for _, step := range []string{"quota-refresh", "image-preview", "image-reference-select", "image-reference-preview", "image-save", "check-routing"} {
 		if probeFailureStep(step) != step {
 			t.Fatal("missing known label", step)
 		}
 	}
-	for _, step := range []string{"", "synthetic-secret-key", "quota-refresh\nprivate", strings.Repeat("x", 10000)} {
+	for _, step := range []string{"", "synthetic-secret-key", "quota-refresh\nprivate", "routing-start-action\nprivate", "private-start-state", "routing-start-private", strings.Repeat("x", 10000)} {
 		if probeFailureStep(step) != "unknown" {
 			t.Fatal("unsafe diagnostic label")
 		}
