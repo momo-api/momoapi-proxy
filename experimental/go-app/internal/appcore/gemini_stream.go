@@ -16,7 +16,7 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 	}
 	finished := false
 	terminal := "complete"
-	retained, callCount := 0, 0
+	retained, callCount, partCount := 0, 0, 0
 	ids := map[string]bool{}
 	var usage map[string]any
 	charge := func(s string) error {
@@ -30,7 +30,9 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 		if event != "" && event != "message" {
 			return false, errRouted
 		}
-		root, err := plan.decodeFrame(raw)
+		// Signed state must never pass through the permissive JSON decoder:
+		// duplicate keys/invalid UTF-8 could change opaque bytes on replay.
+		root, err := decodeVideoObject([]byte(raw))
 		if err != nil {
 			return false, err
 		}
@@ -107,25 +109,66 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				return false, errRouted
 			}
 			for _, part := range parts {
+				partCount++
+				if partCount > maxHistoryItems {
+					return false, errRouted
+				}
+				// Empty summaries/signed text still retain canonical item metadata.
+				// Bound both the number and a conservative metadata byte allowance.
+				retained += 512 + len(plan.model)
+				if retained > maxRoutedRetained {
+					return false, errRouted
+				}
 				p := obj(part)
 				if p == nil {
 					return false, errRouted
 				}
+				var state *geminiState
+				if signature, present := p["thoughtSignature"]; present {
+					s, ok := signature.(string)
+					if !ok || !validGeminiSignature(s) {
+						return false, errRouted
+					}
+					state = &geminiState{Model: plan.model, Signature: s}
+					if err := charge(s); err != nil {
+						return false, err
+					}
+				}
+				thought := false
+				if v, present := p["thought"]; present {
+					var ok bool
+					thought, ok = v.(bool)
+					if !ok {
+						return false, errRouted
+					}
+					if !thought && state != nil {
+						state.ThoughtFalse = true
+					}
+				}
 				if text, present := p["text"]; present {
 					s, ok := text.(string)
-					if !ok || !only(p, "text") {
+					if !ok || !only(p, "text", "thought", "thoughtSignature") {
 						return false, errRouted
 					}
 					if err := charge(s); err != nil {
 						return false, err
 					}
-					if err := e.accept(streamEvent{kind: "text", text: s}, plan); err != nil {
+					kind := "text"
+					if thought {
+						kind = "gemini-thought"
+						if state == nil {
+							state = &geminiState{Model: plan.model}
+						}
+					} else if state != nil {
+						kind = "gemini-text"
+					}
+					if err := e.accept(streamEvent{kind: kind, text: s, gemini: state}, plan); err != nil {
 						return false, err
 					}
 				} else if v, present := p["functionCall"]; present {
-					if !only(p, "functionCall") {
+					if thought || !only(p, "functionCall", "thoughtSignature", "thought") {
 						return false, errRouted
-					} // reject thoughtSignature, don't fake continuation
+					}
 					call := obj(v)
 					if call == nil || !only(call, "name", "args", "id") || obj(call["args"]) == nil {
 						return false, errRouted
@@ -145,6 +188,9 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 							return false, errRouted
 						}
 					} else {
+						if state != nil {
+							state.CallIDAbsent = true
+						}
 						id, err = newID("call_")
 						if err != nil {
 							return false, err
@@ -162,7 +208,7 @@ func convertGeminiStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 					if err := charge(id + name + string(args)); err != nil {
 						return false, err
 					}
-					if err := e.accept(streamEvent{kind: "tool", call: streamToolCall{id, name, string(args)}}, plan); err != nil {
+					if err := e.accept(streamEvent{kind: "tool", call: streamToolCall{id, name, string(args)}, gemini: state}, plan); err != nil {
 						return false, err
 					}
 				} else {

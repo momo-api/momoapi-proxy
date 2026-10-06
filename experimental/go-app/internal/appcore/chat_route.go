@@ -28,15 +28,20 @@ func resolveProtocol(model string) string {
 }
 
 // routeRequest is the bounded protocol-neutral subset. It never contains client wire JSON.
-type routeCall struct{ id, wire, args string }
+type routeCall struct {
+	id, wire, args string
+	gemini         *geminiState
+}
 
 // Block-capable providers retain text/tool interleaving within an assistant turn.
 // Chat has only content + tool_calls and cannot express that block order.
 type routePart struct {
-	text  string
-	call  *routeCall
-	image *routeImage
-	file  *routeFile
+	gemini  *geminiState
+	thought bool
+	text    string
+	call    *routeCall
+	image   *routeImage
+	file    *routeFile
 }
 type routeMessage struct {
 	role, text, resultID string
@@ -379,6 +384,17 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			}
 		}
 		switch str(m["type"]) {
+		case "reasoning":
+			part, err := geminiHistoryReasoning(m, ir.model)
+			hasPending := len(pending) != 0 || loading != nil && loading.pending != ""
+			if err != nil || hasPending && len(messages) > 0 && messages[len(messages)-1].role == "tool" {
+				return nil, errRouted
+			}
+			if len(messages) == 0 || messages[len(messages)-1].role != "assistant" {
+				messages = append(messages, routeMessage{role: "assistant"})
+			}
+			last := &messages[len(messages)-1]
+			last.parts = append(last.parts, part)
 		case "additional_tools", "tool_search_call", "tool_search_output":
 			if loading == nil {
 				return nil, errUnsupportedToolLoading
@@ -406,7 +422,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			if len(seen) >= 128 || len(pending) > 0 && len(messages) > 0 && messages[len(messages)-1].role == "tool" {
 				return nil, errRouted
 			}
-			if !only(m, "type", "name", "namespace", "call_id", "arguments", "input") {
+			if !only(m, "type", "name", "namespace", "call_id", "arguments", "input", "momo_gemini") {
 				return nil, errRouted
 			}
 			name := str(m["name"])
@@ -458,6 +474,12 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			seen[id] = true
 			pending[id] = tool.kind
 			call := routeCall{id: id, wire: wire, args: args}
+			if metadata, exists := m["momo_gemini"]; exists {
+				call.gemini, err = parseGeminiState(metadata, ir.model)
+				if err != nil || call.gemini.Signature == "" || tool.kind == "tool_search" {
+					return nil, errRouted
+				}
+			}
 			if len(messages) == 0 || messages[len(messages)-1].role != "assistant" {
 				messages = append(messages, routeMessage{role: "assistant"})
 			}
@@ -518,7 +540,14 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 			default:
 				return nil, errRouted
 			}
-			content, parts, err := messageParts(m["content"], role, ir.model, images)
+			var content string
+			var parts []routePart
+			var err error
+			if role == "assistant" {
+				content, parts, err = geminiAssistantParts(m["content"], ir.model)
+			} else {
+				content, parts, err = messageParts(m["content"], role, ir.model, images)
+			}
 			// Preserve upstream text interleaved within one tool-use turn;
 			// never accept user/system or partial-result interruptions.
 			hasPending := len(pending) != 0 || loading != nil && loading.pending != ""
@@ -538,7 +567,7 @@ func parseRoutedRequest(data []byte) (*routeRequest, error) {
 					last.text += "\n"
 				}
 				last.text += content
-				last.parts = append(last.parts, routePart{text: content})
+				last.parts = append(last.parts, parts...)
 				continue
 			}
 			messages = append(messages, routeMessage{role: role, text: content, parts: parts})

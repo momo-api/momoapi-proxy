@@ -93,7 +93,7 @@ func normalizedHistory(items []json.RawMessage) ([]json.RawMessage, error) {
 				return nil, errRouted
 			}
 			typ := str(item["type"])
-			if typ != "message" && typ != "function_call" && typ != "custom_tool_call" && typ != "tool_search_call" && typ != "tool_search_output" {
+			if typ != "message" && typ != "reasoning" && typ != "function_call" && typ != "custom_tool_call" && typ != "tool_search_call" && typ != "tool_search_output" {
 				return nil, errRouted
 			}
 			// Typed client input messages may carry local per-item labels. They
@@ -106,7 +106,7 @@ func normalizedHistory(items []json.RawMessage) ([]json.RawMessage, error) {
 		}
 		if v, present := item["status"]; present {
 			typ := str(item["type"])
-			if v != "completed" || (typ != "message" && typ != "function_call" && typ != "custom_tool_call" && typ != "tool_search_call" && typ != "tool_search_output") {
+			if v != "completed" || (typ != "message" && typ != "reasoning" && typ != "function_call" && typ != "custom_tool_call" && typ != "tool_search_call" && typ != "tool_search_output") {
 				return nil, errRouted
 			}
 			if typ == "message" && item["role"] != "assistant" {
@@ -170,6 +170,13 @@ func (c *Core) prepareRoutedHistoryPolicy(data []byte, model string, replay bool
 			return nil, nil, errRouted
 		}
 		if entry.model != model {
+			for _, raw := range entry.input {
+				item, err := decodeObject(string(raw))
+				if err != nil || hasGeminiState([]any{item}) {
+					c.mu.Unlock()
+					return nil, nil, errRouted
+				}
+			}
 			source, target := resolveProtocol(entry.model), resolveProtocol(model)
 			if !includes([]string{"chat", "claude", "gemini"}, source) || !includes([]string{"chat", "claude", "gemini"}, target) {
 				c.mu.Unlock()

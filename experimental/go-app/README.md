@@ -63,9 +63,33 @@ Chat entry itself remains passthrough.
 Gemini tool_choice maps auto/none/required to AUTO/NONE/ANY; declared aliases are
 used by calls and paired results. Model path segments are restricted to a bounded
 alphanumeric/dot/underscore/hyphen ID, never client-controlled URLs or query text.
-Only unsigned text/tool parts are supported: thoughtSignature/thought/inlineData/
-partialArgs are rejected, not erased. This is NOT Gemini 3 signed continuation
-support; no signature bypass, replay cache or artificial signature is introduced.
+Gemini text/function/custom Parts retain provider-issued thoughtSignature through
+canonical momo_gemini metadata and exact-model history replay. Public thought:true
+text is a separate reasoning summary, not an answer. Unsupported output inlineData/
+partialArgs and signature-only Parts still fail closed. This is a bounded subset,
+NOT full Gemini thinking/streaming-state compatibility. No signature bypass,
+cryptographic verification or artificial signature is introduced.
+
+Canonical `momo_gemini:{model,thought_signature}` metadata lives on function/custom
+items, signed assistant output_text blocks and public reasoning items (signature
+optional only for public summaries). Preserve exact part order and empty signed
+text. Different model/provider replay rejects even explicit replay-v1. Local
+checkpoint protects the entire state-bearing turn. Signatures are opaque
+canonical Base64, <=256KiB each; no cryptographic verification.
+`call_id_absent:true` (calls only) records that Gemini omitted its native ID:
+client matching uses a generated local ID but native replay does NOT insert it.
+`thought_false:true` records an explicit native false flag on signed text/calls.
+These are part-shape preservation flags, not proof of authenticity; clients must
+retain them. Summaries reject both flags, and text rejects call_id_absent.
+Decoder checks duplicate-free UTF8/depth64 framing, <=2048 native Parts and conservative metadata
+charging within the existing 1MiB retained/history/wire limits. Only completed
+clean EOF and successful terminal write can mint an anchor. Thinking effort and
+-thinking aliases remain rejected; no guessed model budgets or silent clamps.
+Only complete native text/function Parts are supported: signature-only streaming
+chunks/partial function arguments/Interactions API are not. Unsigned adjacent text
+keeps legacy coalescing; no claim of general native streaming boundary recovery.
+REST wire reference: https://ai.google.dev/api/generate-content (Part, not the
+Interactions API thinking steps). Synthetic mock evidence is not live capability.
 
 The adapter accepts text/instructions, ordinary function tools and custom input
 wrappers with namespaces, paired text-only tool history, string or named tool_choice and
@@ -474,7 +498,9 @@ instructions/knobs are per-turn, not inherited. Branches do not consume anchors.
 Claude/Gemini replay retains text/tool/text block order within one assistant turn.
 Chat only has content+tool_calls, so it cannot express block-level interleaving.
 Native/default passthrough delegates history unchanged. Cross-model/provider
-continuation, native/semantic compact and signed Gemini history remain unsupported.
+continuation requires explicit replay policy and cannot carry Gemini state across
+models. Signed Gemini history is supported only within the exact model; native
+opaque-state conversion and semantic compact remain unsupported.
 
 ### Explicit local checkpoint (not a semantic summary)
 
@@ -770,7 +796,7 @@ base_url/api_key: random LOCAL token, not upstream key. /v1/responses,
 exception, CORS, Origin or Sec-Fetch access. Request and successful SSE bytes
 kept unchanged in default passthrough, including namespace/unknown fields, Chat tool calls, usage and
 [DONE]. In default mode upstream must implement the matching protocol. Opt-in
-partial Chat/Claude/Gemini translation is described above; signed continuation, native/semantic compaction,
+partial Chat/Claude/Gemini translation is described above; full signed protocol compatibility and semantic compaction,
 attachment hosting and compatibility fallback remain unimplemented.
 
 Windows/macOS window close hides; Linux close quits (no tray required). Window

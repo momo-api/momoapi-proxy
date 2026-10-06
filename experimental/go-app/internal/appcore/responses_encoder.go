@@ -125,7 +125,7 @@ func (e *responseWriter) flushText() error {
 	e.text.Reset()
 	return nil
 }
-func (e *responseWriter) toolCall(call streamToolCall, tool chatTool) error {
+func (e *responseWriter) toolCall(call streamToolCall, tool chatTool, state *geminiState) error {
 	args, parseErr := decodeObject(call.args)
 	if parseErr != nil {
 		return errRouted
@@ -158,6 +158,9 @@ func (e *responseWriter) toolCall(call streamToolCall, tool chatTool) error {
 		return err
 	}
 	item := map[string]any{"id": id, "type": typ, "status": "completed", "call_id": call.id, "name": tool.name, field: value}
+	if state != nil {
+		item["momo_gemini"] = state
+	}
 	if tool.namespace != "" {
 		item["namespace"] = tool.namespace
 	}
@@ -213,10 +216,11 @@ func (e *responseWriter) searchCall(call streamToolCall, args map[string]any) er
 }
 
 type streamEvent struct {
-	kind  string
-	text  string
-	call  streamToolCall
-	usage map[string]any
+	gemini *geminiState
+	kind   string
+	text   string
+	call   streamToolCall
+	usage  map[string]any
 }
 
 func newRoutedResponseWriter(w http.ResponseWriter, plan *chatPlan) (*responseWriter, error) {
@@ -238,6 +242,8 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 	switch ev.kind {
 	case "text":
 		return e.textDelta(ev.text)
+	case "gemini-text", "gemini-thought":
+		return e.geminiPart(ev)
 	case "tool":
 		// This is a constraint on newly produced calls, not on historical tool
 		// turns. All protocols (including DSML and incomplete) share this gate.
@@ -264,7 +270,12 @@ func (e *responseWriter) accept(ev streamEvent, plan *chatPlan) error {
 			}
 		}
 		e.toolCount++
-		return e.toolCall(ev.call, tool)
+		if ev.gemini != nil {
+			if ev.gemini.Model != plan.model || !validGeminiSignature(ev.gemini.Signature) || tool.kind == "tool_search" {
+				return errRouted
+			}
+		}
+		return e.toolCall(ev.call, tool, ev.gemini)
 	case "complete", "incomplete":
 		if ev.kind == "complete" && (plan.choice == "required" || plan.selected != "") && e.toolCount == 0 {
 			return errRouted

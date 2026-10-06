@@ -210,7 +210,7 @@ func TestGeminiMalformedStreamsNeverComplete(t *testing.T) {
 		"duplicateID":           geminiFrame([]any{geminiCall("a", "pad__read", map[string]any{}), geminiCall("a", "pad__read", map[string]any{})}, "STOP", geminiUsageFixture()),
 		"invalidCustom":         geminiFrame([]any{geminiCall("a", "pad__write", map[string]any{"raw": "not input"})}, "STOP", geminiUsageFixture()),
 		"signature":             geminiFrame([]any{map[string]any{"functionCall": map[string]any{"name": "pad__read", "args": map[string]any{}}, "thoughtSignature": "opaque"}}, "STOP", geminiUsageFixture()),
-		"thought":               geminiFrame([]any{map[string]any{"text": "hidden", "thought": true}}, "STOP", geminiUsageFixture()),
+		"thought":               geminiFrame([]any{map[string]any{"text": "invalid summary flag", "thought": "true"}}, "STOP", geminiUsageFixture()),
 		"image":                 geminiFrame([]any{map[string]any{"inlineData": map[string]any{"data": "fake"}}}, "STOP", geminiUsageFixture()),
 		"cumulativeArgs":        geminiFrame([]any{map[string]any{"functionCall": map[string]any{"name": "pad__read", "partialArgs": "{}"}}}, "STOP", geminiUsageFixture()),
 		"blocked":               strings.Replace(good, `"index":0`, `"index":0,"safetyRatings":[{"blocked":true}]`, 1),

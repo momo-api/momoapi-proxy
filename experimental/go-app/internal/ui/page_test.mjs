@@ -116,7 +116,8 @@ assert.ok(source.includes('.routes .badge{white-space:normal;overflow-wrap:anywh
 assert.ok(source.includes('不代表真实上游非流式已验证'));
 assert.ok(!source.includes('压缩、非流式'));
 assert.ok(source.includes('不含 thinking/签名'));
-assert.ok(source.includes('不含 thinking/签名/输出媒体'));
+assert.ok(source.includes('文本与工具签名仅限原模型回放'));
+assert.ok(source.includes('不含 thinking 控制/输出媒体/完整签名协议'));
 assert.ok(source.includes('保留文字/图片顺序及同模型历史'));
 assert.ok(source.includes('不验证 DNS/重定向'));
 assert.ok(source.includes('Gemini URL 必须显式 mime_type'));

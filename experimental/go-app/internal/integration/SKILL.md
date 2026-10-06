@@ -162,8 +162,17 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   redirect validation. Native/default provider file IDs remain exact passthrough.
   Claude Messages text/tools plus validated token usage are supported; thinking,
   signatures and other media are not. Gemini text/tools,
-  paired unsigned history, tool choice and validated token usage are supported;
-  thinking/signatures/output media and signed continuation remain unsupported. Gemini
+  paired history, tool choice and validated token usage are supported. Public
+  thought:true text is a separate reasoning summary. Text/function/custom signatures
+  use momo_gemini:{model,thought_signature}; preserve EXACT metadata/part order,
+  including empty signed text, only for the same model. Never display, fabricate
+  or bypass signatures. Canonical Base64 <=256KiB each; provider verifies them.
+  call_id_absent:true (calls only) keeps absent native IDs absent on replay;
+  thought_false:true retains an explicit native false flag on signed text/calls.
+  Preserve these flags too; generated local call IDs are not native IDs.
+  Full/suffix anchors retain state; local checkpoint protects entire state-bearing
+  turns. Different-model replay rejects even with replay-v1. Thinking controls,
+  signature-only/partialArgs Parts and output media remain unsupported. Gemini
   requires STOP/MAX_TOKENS plus clean framed HTTP EOF; early EOF/errors abort without completed.
   max_output_tokens is an integer 1..1048576: Chat max_completion_tokens, Claude
   max_tokens (12240 when omitted), Gemini generationConfig.maxOutputTokens. A

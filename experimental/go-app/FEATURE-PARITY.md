@@ -12,10 +12,10 @@
 | 模型选路 | `src/model-routing.mjs`、`src/server.mjs` | 默认透传；明确启用 momo-routing 后 Responses 入口使用相同分类，Responses 原样转发、Chat / Claude / Gemini 子集转换；未迁移协议 501 |
 | Responses 客户端接入 Chat 上游（请求/响应转换） | `src/chat-adapter.mjs`、`src/responses-compat.mjs`、`src/responses-sse.mjs`、`src/server.mjs` | 严格文本/function/custom text（含 exec/apply_patch）子集、namespace 恢复、经校验 token usage；支持 SSE 和最终 JSON；有序用户/配对工具图片与 PDF 子集；未知选项/其他媒体/grammar 等拒绝，不宣称完整兼容 |
 | Claude | `src/claude-adapter.mjs` | 新增 Messages 流式文本/function/custom 子集、配对历史、namespace、基础 token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
-| Gemini | `src/gemini-adapter.mjs` | 新增原生 SSE 文本/function/custom 子集、无签名配对历史、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；thinking/签名/输出媒体不支持 |
+| Gemini | `src/gemini-adapter.mjs` | 原生 SSE 文本/function/custom 子集、namespace、tool_choice、token usage；有序用户图片/PDF 与配对工具结果输入；新增公开 thought 摘要独立输出与文本/工具签名 exact-model 回放；thinking 控制/签名-only Part/输出媒体/完整签名协议仍不支持 |
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；已完成搜索/加载/调用结果支持显式本地 checkpoint 与手动回放；hosted/复杂 schema 未支持 |
-| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或签名供应商状态转换 |
+| compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或跨模型签名供应商状态转换 |
 | 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；新增Claude/Gemini inline UTF8 text/plain/markdown/csv原生文本文档；Chat非PDF拒绝，其他非PDF/云上传/磁盘资产存储未迁移，非完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询；新增目录授权图片 JSON reference 编辑（含 Gemini Chat JSON），mask/legacy GPT Chat-media 编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；新增显式本地脱敏aggregate快照/离线CLI，不查询客户端账号或上游、不代表完整doctor；真实 Codex 全功能未验收，无自动接入/更新 |
@@ -35,6 +35,31 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 这些不是“兼容性改进”，不能直接替代 Node 的策略与附件限制。
 
 ## 本次实际验证范围
+
+### Gemini 有界签名状态（2026-10-06；本地增量，当前 CI 待验收）
+
+公开 thought:true 文本单独输出 reasoning summary；provider text/function/custom
+签名原样进入 momo_gemini exact-model metadata。完整/后缀 history 保留有序
+parts、namespace、空 signed text；跨模型即使 replay-v1 也拒绝，checkpoint
+保护完整 state-bearing 回合。签名是 opaque Base64，不验证密码学、不造签名。
+新增红测发现非 strict 流接受 duplicate signature/escaped key/invalid UTF8；
+改 Gemini frames 全量 strict UTF8/duplicate-free/depth64，失败不完成/不存历史。
+<=256KiB/signature、2048parts 与保守 metadata charge/1MiB 预算；取消、Stop、
+短写/flush 失败、incomplete、store:false、畸形、cross-model 与真实有损 compact
+均有回归。thinking 控制/-thinking alias、signature-only streaming chunks、
+partialArgs、Interactions API、Claude thinking/签名仍未支持；不宣称完整协议。
+统一黑盒新增16组，总505同 input/mock/resources；无native ID时只匹配双方
+独立生成的local ID，不修改内容。分别断言双方 signed call签名保留，以及
+Node suffix-only回放补入local ID改变原signed Part（full保持无ID）、public thought混入answer/standalone
+signed text状态丢失；Go call_id_absent/explicit thought:false形状原样回放。
+native增加4次 TLS（总201）SSE/JSON signed summary/text/call exact paired replay。
+Prism 再次启动 toolerror，无 job/报告/批准；未调用真实账户或付费推理。
+
+本地两tag全量各5、focused Gemini5、两vet、page/packaging、WSLfullrace、
+505统一TCP与Win五独立201TLS加最终native回归、普通Winbinary blackbox/
+官方MCP SDK图片视频连接通过。首次negative red和Node无ID full fixture假设
+失败保留；修为分别断言Node full无ID/suffix补ID后重新跑全量505通过，
+不冒充旧失败为成功。当前commit三平台CI/fresh artifacts须独立验收。
 
 ### 原生界面连续验收门禁（2026-10-06；新CI待验收）
 

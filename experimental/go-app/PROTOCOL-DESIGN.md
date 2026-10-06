@@ -130,6 +130,13 @@ Stop/configure/TTL/预算仍生效。无需另建provider状态机或复制历�
 
 ## Gemini 增量（2026-10-05）
 
+2026-10-06追加：Gemini有界完整text/function Part签名续接已实现。公开thought
+文本用reasoning summary；momo_gemini绑定原模型，signedtext/call保留Base64
+与顺序/空文本，checkpoint整回合保护；跨model/provider不得剥离状态。strict
+frame校验与metadata/part预算、success-only历史事务由回归覆盖。不是密码学
+验签、Interactions、signature-only chunk聚合或完整thinking协议；旧节以下
+记录是早期实现边界，不代表当前所有签名仍拒绝。详情见README/FEATURE-PARITY。
+
 最小 IR 现新增 Gemini 原生请求编码与 SSE decoder，同一 Responses encoder 保留。
 支持文本、function/custom 声明、无签名配对历史、namespace 与 choice，以及经校验
 prompt/candidate/total、cache/thought token 数值；不接受 thinking/签名/媒体内容。

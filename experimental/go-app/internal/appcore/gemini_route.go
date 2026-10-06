@@ -2,8 +2,8 @@ package appcore
 
 import "strings"
 
-// The bounded text/tool subset is encoded directly from the shared IR.
-// Signed thinking/tool continuation must not be silently stripped or forged.
+// The bounded text/tool/public-summary subset is encoded from the shared IR.
+// Opaque signed state is replayed without verification, stripping or fabrication.
 func buildGeminiPlan(data []byte) (*chatPlan, error) {
 	ir, err := parseRoutedRequest(data)
 	if err != nil {
@@ -15,7 +15,7 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 	contents := []any{}
 	systems := []any{}
 	seenSystem := map[string]bool{}
-	calls := map[string]string{}
+	calls := map[string]*routeCall{}
 	projections := []any{}
 	for _, m := range ir.messages {
 		// Hoisted instructions are not content boundaries. Keep projections
@@ -40,11 +40,14 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 		}
 		if role == "tool" {
 			role = "user"
-			name, ok := calls[m.resultID]
+			call, ok := calls[m.resultID]
 			if !ok {
 				return nil, errRouted
 			}
-			response := map[string]any{"id": m.resultID, "name": name, "response": map[string]string{"result": m.text}}
+			response := map[string]any{"id": m.resultID, "name": call.wire, "response": map[string]string{"result": m.text}}
+			if call.gemini != nil && call.gemini.CallIDAbsent {
+				delete(response, "id")
+			}
 			if hasMedia(m.parts) {
 				if ir.toolImages == "user-projection" || hasFiles(m.parts) {
 					marker := toolMediaMarker(m.resultID, m.parts)
@@ -87,6 +90,19 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 					continue
 				}
 				if part.call == nil {
+					if part.gemini != nil {
+						p := map[string]any{"text": part.text}
+						if part.thought {
+							p["thought"] = true
+						} else if part.gemini.ThoughtFalse {
+							p["thought"] = false
+						}
+						if part.gemini.Signature != "" {
+							p["thoughtSignature"] = part.gemini.Signature
+						}
+						parts = append(parts, p)
+						continue
+					}
 					if part.text != "" {
 						parts = append(parts, map[string]string{"text": part.text})
 					}
@@ -97,8 +113,19 @@ func buildGeminiPlan(data []byte) (*chatPlan, error) {
 				if err != nil {
 					return nil, err
 				}
-				calls[call.id] = call.wire
-				parts = append(parts, map[string]any{"functionCall": map[string]any{"id": call.id, "name": call.wire, "args": args}})
+				calls[call.id] = call
+				function := map[string]any{"id": call.id, "name": call.wire, "args": args}
+				p := map[string]any{"functionCall": function}
+				if call.gemini != nil {
+					if call.gemini.ThoughtFalse {
+						p["thought"] = false
+					}
+					if call.gemini.CallIDAbsent {
+						delete(function, "id")
+					}
+					p["thoughtSignature"] = call.gemini.Signature
+				}
+				parts = append(parts, p)
 			}
 		}
 		if len(parts) == 0 {

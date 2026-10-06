@@ -105,5 +105,5 @@ func probeTextFileRequests(core *appcore.Core) error {
 			}
 		}
 	}
-	return probeMediaRequests(core)
+	return probeGeminiStateRequests(core)
 }

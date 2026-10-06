@@ -74,6 +74,9 @@ func buildLocalCheckpoint(data []byte) (map[string]any, error) {
 		}
 		protectedTurn := false
 		for i := start; i < end; i++ {
+			if hasGeminiState([]any{objects[i]}) {
+				protectedTurn = true
+			}
 			if values, ok := objects[i]["content"].([]any); ok {
 				for _, value := range values {
 					if obj(value)["type"] == "input_image" || obj(value)["type"] == "input_file" {
