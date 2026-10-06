@@ -16,6 +16,8 @@ func configureImageEdit(p *imageProfile, row, parameters map[string]any, edit bo
 		cap, transport = 4, "images-generations-reference"
 	case "apimart":
 		cap, transport = 16, "images-generations-image-urls"
+	case "gemini":
+		cap, transport = 1, "chat-completions-multimodal"
 	case "legacy":
 		if p.ID == "gpt-image-2" {
 			cap, transport = 1, "images-generations-reference"
@@ -136,10 +138,19 @@ func buildImageEdit(data []byte, p imageProfile) ([]byte, int, string, error) {
 	case "images-edits-json-images":
 		path, field = "/v1/images/edits", "images"
 	case "images-generations-reference", "images-generations-image-urls":
+	case "chat-completions-multimodal":
+		content := []any{map[string]any{"type": "text", "text": body["prompt"]}}
+		for _, ref := range references {
+			content = append(content, map[string]any{"type": "image_url", "image_url": map[string]any{"url": ref}})
+		}
+		body = map[string]any{"model": p.ID, "messages": []any{map[string]any{"role": "user", "content": content}}, "modalities": []string{"text", "image"}, "extra_body": map[string]any{"google": map[string]any{"image_config": map[string]any{"aspect_ratio": body["size"], "image_size": body["quality"]}}}}
+		path, field = "/v1/chat/completions", ""
 	default:
 		return nil, 0, "", errImage
 	}
-	body[field] = references
+	if field != "" {
+		body[field] = references
+	}
 	wire, err = json.Marshal(body)
 	if err != nil || len(wire) > MaxRequest {
 		return nil, 0, "", errImage

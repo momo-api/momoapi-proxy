@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -24,7 +25,36 @@ func probeMediaUpstream(w http.ResponseWriter, r *http.Request, data []byte) boo
 			return true
 		}
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"models":[{"id":"momoapi-gpt-image-2-5-flare","modality":"image","available":true,"operations":["generate","edit"],"parameters":{"max_reference_images":{"maximum":2}}}]}`)
+		io.WriteString(w, `{"models":[{"id":"momoapi-gpt-image-2-5-flare","modality":"image","available":true,"operations":["generate","edit"],"parameters":{"max_reference_images":{"maximum":2}}},{"id":"gemini-3.1-flash-image","modality":"image","available":true,"operations":["generate","edit"],"parameters":{},"transports":{"edit":"chat-completions-multimodal"}}]}`)
+	case "/v1/chat/completions":
+		var body map[string]any
+		if json.Unmarshal(data, &body) != nil || body["model"] != "gemini-3.1-flash-image" {
+			return false
+		}
+		messages, _ := body["messages"].([]any)
+		if len(messages) != 1 {
+			w.WriteHeader(400)
+			return true
+		}
+		m, _ := messages[0].(map[string]any)
+		parts, _ := m["content"].([]any)
+		if len(parts) != 2 {
+			w.WriteHeader(400)
+			return true
+		}
+		text, _ := parts[0].(map[string]any)
+		prompt, _ := text["text"].(string)
+		if prompt != "gemini-edit-api" && prompt != "gemini-edit-mcp" && prompt != "gemini-edit-connected" && prompt != "gemini-edit-gui" {
+			w.WriteHeader(400)
+			return true
+		}
+		want := map[string]any{"model": "gemini-3.1-flash-image", "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": prompt}, map[string]any{"type": "image_url", "image_url": map[string]any{"url": probeImageURL}}}}}, "modalities": []any{"text", "image"}, "extra_body": map[string]any{"google": map[string]any{"image_config": map[string]any{"aspect_ratio": "1:1", "image_size": "1K"}}}}
+		if r.Method != "POST" || !reflect.DeepEqual(body, want) {
+			w.WriteHeader(400)
+			return true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"index": 0, "finish_reason": "stop", "message": map[string]any{"role": "assistant", "images": []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": probeImageURL}}}}}}})
 	case "/v1/images/edits":
 		var body map[string]any
 		if r.Method != "POST" || json.Unmarshal(data, &body) != nil || len(body) != 4 || body["model"] != "momoapi-gpt-image-2-5-flare" || body["n"] != float64(1) {
@@ -177,6 +207,24 @@ func probeImageEditRequests(core *appcore.Core) error {
 		var out bytes.Buffer
 		if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &out, tc.dispatch) != nil || strings.Count(out.String(), "\n") != 2 || strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "edited.png") || strings.Contains(out.String(), key) {
 			return errors.New("image edit MCP submit/task")
+		}
+	}
+	for _, tc := range []struct {
+		prompt   string
+		dispatch integration.ImageDispatch
+	}{{"gemini-edit-api", core.DesktopImages}, {"gemini-edit-mcp", core.DesktopImages}, {"gemini-edit-connected", connected}} {
+		raw, _ := json.Marshal(map[string]any{"model": "gemini-3.1-flash-image", "prompt": tc.prompt, "reference_images": []string{reference}})
+		if tc.prompt == "gemini-edit-api" {
+			data, code := tc.dispatch(context.Background(), "/internal/images/edit", raw)
+			if code != 200 || !strings.Contains(string(data), `"terminal":true`) || !strings.Contains(string(data), "b64_json") {
+				return errors.New("Gemini API image edit")
+			}
+		} else {
+			input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"image_edit","arguments":{"confirmed":true,"request":` + string(raw) + `}}}` + "\n"
+			var out bytes.Buffer
+			if integration.ServeImageMCP(context.Background(), strings.NewReader(input), &out, tc.dispatch) != nil || strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), "b64_json") {
+				return errors.New("Gemini MCP image edit")
+			}
 		}
 	}
 	return nil

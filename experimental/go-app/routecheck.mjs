@@ -7,6 +7,7 @@ import {request as httpRequest} from 'node:http';
 import {createMomoSwitch} from '../../src/server.mjs';
 import {fileCases,assertFileCase} from './routecheck_files.mjs';
 import {imageBlackbox} from './routecheck_images.mjs';
+import {chatImageBlackbox} from './routecheck_chat_images.mjs';
 import {videoBlackbox} from './routecheck_videos.mjs';
 import {dsmlBlackbox} from './routecheck_dsml.mjs';
 import {providerReplayBlackbox} from './routecheck_provider_replay.mjs';
@@ -463,6 +464,7 @@ for(const status of [200,404]){
 }
 const imageCount=await imageBlackbox(launch,invoke);
 const imageEditCount=await imageBlackbox(launch,invoke,true);
+const chatImageCount=await chatImageBlackbox(launch,invoke);
 const videoCount=await videoBlackbox(launch,invoke);
 const dsmlCount=await dsmlBlackbox(launch,invoke);
 const providerReplayCount=await providerReplayBlackbox(launch,invoke);
@@ -470,4 +472,4 @@ const toolAliasCount=await toolAliasBlackbox(launch,invoke);
 const parallelToolsCount=await parallelToolsBlackbox(launch,invoke);
 const ordinaryStrictCount=await ordinaryStrictBlackbox(launch,invoke);
 const searchCheckpointCount=await searchCheckpointBlackbox(launch,invoke);
-console.log('PASS '+(cases.length+8+imageCount+imageEditCount+videoCount+dsmlCount+providerReplayCount+toolAliasCount+parallelToolsCount+ordinaryStrictCount+searchCheckpointCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; converted provider replay and DSML explicit text conversion and marker-leak differences independently asserted; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');
+console.log('PASS '+(cases.length+8+imageCount+imageEditCount+chatImageCount+videoCount+dsmlCount+providerReplayCount+toolAliasCount+parallelToolsCount+ordinaryStrictCount+searchCheckpointCount)+' shared mock/resource routing cases; registered snapshots compare Node canonical inline against Go explicit memory references (not identical API); images/videos use same exact generation/task upstream with independently asserted output/storage/status differences; converted provider replay and DSML explicit text conversion and marker-leak differences independently asserted; explicit JSON/namespace/history/system/choice/usage/limits/compact/truncation differences, not full parity or performance proof');

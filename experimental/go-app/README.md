@@ -545,12 +545,20 @@ operations edit (model-list fallback NEVER permits editing). Same model/prompt/N
 and controls, plus ordered reference_images strings. Web aliases send JSON
 images to /v1/images/edits; Adobe and gpt-image-2 send image_urls to
 /v1/images/generations; APIMart 2.5 sends image_urls to that same fixed path.
+Gemini3.1-flash-image sends fixed /v1/chat/completions messages (prompt then
+one inline image), modalities text/image, extra_body.google.image_config with
+aspect_ratio/image_size, no stream or invented N field. Same catalog permission
+and one-reference/one-output cap. Only completed JSON choice0/assistant/stop
+images[] or content[] typed image_url parts accepted; prose never image-scanned,
+length/refusal/toolcalls/duplicate/invalid JSON rejected. No SSE/native candidates/
+arbitrary recursive metadata extraction/task inference/URL fetch. Returned inline
+bytes use the existing output header/static framing gate; URLs remain text only.
 Inline PNG/JPEG/static GIF/WebP data URLs are bounded and header/framing checked,
 not full content/safety validated. Only APIMart permits lexically public HTTPS
 delegated upstream; no proxy fetch/DNS/content guarantee. Catalog count controls
 intersect safety ceilings Web/Adobe4, APIMart16, GPT1 (not live upstream maxima).
 An explicit conflicting catalog edit transport denies editing. Unknown/duplicate
-fields, masks, file/asset references and Chat-media edits reject before send.
+fields, masks, file/asset references and legacy GPT Chat-media edits reject before send.
 Same single send, 300s context, admission, task reservation/TTL, manual task lookup
 and Stop/configure behavior; no fallback/retry/remote rollback. Desktop operation
 selector, explicit local file picker and reference textarea reuse consent/task UI, with a1MiB edit
@@ -591,7 +599,7 @@ one GET /v1/tasks/<id>, no auto-poll or alternate endpoint fallback. 64 slots
 reserved before generation (pending included), absolute30minTTL, no refresh.
 Stop/configure clears local catalog/tasks, not remote jobs or billed effects;
 delivery failure can leave submitted/tracked task, no rollback or auto-retry.
-Catalog-authorized JSON reference edits are described below; no masks/Chat-media edit/video/cloud assets/disk assets in this subset.
+Catalog-authorized JSON reference edits include Gemini Chat JSON; no masks/legacy GPT Chat-media edit/video/cloud assets/disk assets in this subset.
 Readonly MCP exposes this contract as image_generation; media:false still means
 the full Node media suite is not implemented. Node remains primary.
 

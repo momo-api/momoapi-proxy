@@ -29,7 +29,7 @@ func TestImageEditProfilesAndStrictReferences(t *testing.T) {
 			p := profiles[id]
 			raw, _ := json.Marshal(map[string]any{"model": id, "prompt": "hi", "reference_images": []string{reference}})
 			wire, n, path, err := buildImageEdit(raw, p)
-			if id == "gemini-3.1-flash-image" || id == "gpt-image-2-momoapi" {
+			if id == "gpt-image-2-momoapi" {
 				if err == nil || includes(p.Operations, "edit") {
 					t.Fatal("unimplemented Chat media edit")
 				}
@@ -39,6 +39,12 @@ func TestImageEditProfilesAndStrictReferences(t *testing.T) {
 				t.Fatal("implemented edit profile", err)
 			}
 			body, _ := decodeVideoObject(wire)
+			if id == "gemini-3.1-flash-image" {
+				if path != "/v1/chat/completions" || body["messages"] == nil {
+					t.Fatal("Gemini edit transport")
+				}
+				return
+			}
 			field := "image_urls"
 			if p.profile == "web" {
 				field = "images"

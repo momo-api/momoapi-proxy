@@ -145,7 +145,12 @@ func (c *Core) imageRequest(ctx context.Context, w http.ResponseWriter, r *http.
 			http.Error(w, "image upstream unavailable or rejected", status)
 			return
 		}
-		result, err := parseImageResult(data, "", n)
+		var result imageResult
+		if upstreamPath == "/v1/chat/completions" {
+			result, err = parseChatImageResult(data, n)
+		} else {
+			result, err = parseImageResult(data, "", n)
+		}
 		if err != nil {
 			http.Error(w, "image upstream response rejected", 502)
 			return
