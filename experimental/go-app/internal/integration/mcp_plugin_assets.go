@@ -10,10 +10,22 @@ import (
 // Only this separate explicit mode creates assets. Ordinary plugin, confirmed
 // and read-only modes retain their previous contracts and never touch disk.
 func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.Writer, dispatch ImageDispatch, store *ImageAssetStore) error {
+	return ServePluginImageDownloadsMCP(ctx, input, output, dispatch, store, nil)
+}
+
+// ImageAssetDownload is supplied only by the explicit origin-enabled launcher.
+// It must enforce origin/TLS/public DNS/size/MIME boundaries without auth/retry.
+type ImageAssetDownload func(context.Context, string) (mime, b64 string, err error)
+
+func ServePluginImageDownloadsMCP(ctx context.Context, input io.Reader, output io.Writer, dispatch ImageDispatch, store *ImageAssetStore, download ImageAssetDownload) error {
 	if store == nil {
 		return errAsset
 	}
 	scope := store.Scope()
+	resultSource := "Valid inline PNG/JPEG/WebP results saved; URLs not downloaded."
+	if download != nil {
+		resultSource = "Valid inline PNG/JPEG/WebP and explicitly origin-allowed URL results saved; unauthenticated HTTPS download, no redirect/retry."
+	}
 	resultFor := func(ctx context.Context, method string, params json.RawMessage, dispatch ImageDispatch, video bool) (any, int, string) {
 		if method == "tools/list" {
 			result, code, message := pluginMediaMCPResult(ctx, method, params, dispatch, false)
@@ -24,7 +36,7 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 			for _, value := range tools {
 				tool := value.(map[string]any)
 				if tool["name"] == "image_generate" || tool["name"] == "image_edit" {
-					tool["description"] = "May bill; explicit model/catalog/user intent required. One send, no retry. Valid inline PNG/JPEG/WebP results saved in explicitly enabled local asset store (" + scope + "); URLs not downloaded. Disk failure does not undo submission."
+					tool["description"] = "May bill; explicit model/catalog/user intent required. One send, no retry. " + resultSource + " Store: " + scope + ". Download/disk failure does not undo submission."
 				}
 				if tool["name"] == "image_edit" {
 					tool["inputSchema"].(map[string]any)["properties"].(map[string]any)["reference_images"].(map[string]any)["description"] = "Opaque asset:img_<sha256> from this explicitly enabled store (" + scope + "), or existing supported data/HTTPS references. Hash/MIME verified before explicit edit; resolved request and Core wire <=1MiB; MCP input line <=160KiB. No arbitrary file paths."
@@ -118,7 +130,8 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 				if !strictMCPJSON(data) || json.Unmarshal(data, &catalog) != nil || catalog == nil {
 					return nil, 502
 				}
-				catalog["asset_storage"] = mustAssetJSON(map[string]any{"scope": scope, "inline_only": true, "ttl_hours": 24, "max_entries": 128, "max_bytes": assetMaxBytes, "automatic_downloads": false, "reopen": scope == "explicit-local-library", "signed_vision": false})
+				catalog["asset_storage"] = mustAssetJSON(map[string]any{"scope": scope, "inline_only": download == nil, "ttl_hours": 24, "max_entries": 128, "max_bytes": assetMaxBytes, "automatic_downloads": download != nil, "download_policy": "explicit-origin-https-public-dns-no-auth-no-redirect-no-retry", "download_max_bytes": 8 << 20, "reopen": scope == "explicit-local-library", "signed_vision": false})
+				catalog["asset_notes"] = mustAssetJSON("Core notes describe default API behavior. This explicitly enabled connector adds local storage; asset_storage describes its separately enabled URL-download policy. No signed vision or complete Node plugin parity.")
 				return mustAssetJSON(catalog), 200
 			}
 			if path != "/internal/images/generate" && path != "/internal/images/edit" && !strings.HasPrefix(path, "/internal/images/tasks/") {
@@ -135,9 +148,19 @@ func ServePluginImageAssetsMCP(ctx context.Context, input io.Reader, output io.W
 				}
 				var b64, mime string
 				if image["b64_json"] == nil {
-					continue
-				} // Remote URL remains unsaved, never fetched.
-				if json.Unmarshal(image["b64_json"], &b64) != nil || json.Unmarshal(image["mime_type"], &mime) != nil {
+					if download == nil {
+						continue // Default mode still never fetches URL results.
+					}
+					var source string
+					if json.Unmarshal(image["url"], &source) != nil {
+						return nil, 502
+					}
+					var err error
+					mime, b64, err = download(ctx, source)
+					if err != nil || ctx.Err() != nil {
+						return nil, 502
+					}
+				} else if json.Unmarshal(image["b64_json"], &b64) != nil || json.Unmarshal(image["mime_type"], &mime) != nil {
 					return nil, 502
 				}
 				meta, err := store.Save(mime, b64)

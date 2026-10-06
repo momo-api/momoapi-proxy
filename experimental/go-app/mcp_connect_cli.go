@@ -41,6 +41,10 @@ func runConnectedMediaLibraryMode(endpoint, directory string) error {
 	return runConnectedMediaStoreMode(endpoint, false, true, directory, true)
 }
 func runConnectedMediaStoreMode(endpoint string, video, plugin bool, assetDirectory string, persistent bool) error {
+	return runConnectedMediaDownloadMode(endpoint, video, plugin, assetDirectory, persistent, "")
+}
+
+func runConnectedMediaDownloadMode(endpoint string, video, plugin bool, assetDirectory string, persistent bool, downloadOrigin string) error {
 	if integration.ValidateLocalEndpoint(endpoint) != nil {
 		return errors.New("local MCP endpoint unavailable")
 	}
@@ -65,6 +69,18 @@ func runConnectedMediaStoreMode(endpoint string, video, plugin bool, assetDirect
 		return err
 	}
 	defer closeClient()
+	var download integration.ImageAssetDownload
+	if downloadOrigin != "" {
+		if video || !plugin || assetDirectory == "" {
+			return errors.New("image result download mode unavailable")
+		}
+		var closeDownload func()
+		download, closeDownload, err = appcore.NewImageResultDownloader(downloadOrigin)
+		if err != nil {
+			return err // Validate before any library creation, no URL reflection.
+		}
+		defer closeDownload()
+	}
 	if assetDirectory != "" {
 		if video || !plugin {
 			return errors.New("image asset mode unavailable")
@@ -79,7 +95,7 @@ func runConnectedMediaStoreMode(endpoint string, video, plugin bool, assetDirect
 		}
 		defer store.Close()
 		serve = func(ctx context.Context, input io.Reader, output io.Writer, dispatch integration.ImageDispatch) error {
-			return integration.ServePluginImageAssetsMCP(ctx, input, output, dispatch, store)
+			return integration.ServePluginImageDownloadsMCP(ctx, input, output, dispatch, store, download)
 		}
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

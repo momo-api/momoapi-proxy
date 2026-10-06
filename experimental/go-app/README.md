@@ -33,12 +33,38 @@ constraints. Default image results remain URL/base64 JSON. The separate explicit
 --asset-dir NEW-directory option adds inline saving/image_asset_get/list/asset:
 edit reuse within one connector session (see Explicit image assets below).
 Separate --asset-library enables explicitly marked Go-library restart recovery,
-not Node sharing. No signed vision or automatic URL downloads.
+not Node sharing. No signed vision. URL downloads are disabled unless the
+separate --download-origin option below is explicitly supplied.
 Video returned remote_url is text, with no
 download or browser playback. No generate_audio/legacy video routes. The
 unchanged Node image Skill expects persistent/remote-save assets, so this is partial
 compatibility plus manual launcher override, NOT full existing-plugin parity.
 Mock lifecycle verification is not a real paid upstream generation claim.
+
+### Explicit origin-allowed image result downloads
+
+Append `--download-origin https://<chosen-image-host>` AFTER either
+`--asset-dir <absolute NEW directory>` or `--asset-library <absolute Go library>`
+on the `mcp image --endpoint ...` launcher. Exactly one user-selected origin,
+HTTPS port443 only; no default/CDN discovery, arbitrary URL tool, reference-image
+fetch, video download, desktop URL save or implicit exported launcher enable.
+Origin and local key validation precede disk creation; init/list never fetch.
+
+Only normalized URL results of explicit generation/edit/manual completed task
+queries are fetched. Same public-IP policy as Core, rejecting mixed DNS answers
+and connecting to validated literal IPs; no proxy/cookies/Authorization/referrer,
+redirects, compression or keepalive GET replay. TLS hostname/system trust remains
+enabled (no product bypass). One GET per URL,30s deadline,16KiB response headers,
+8MiB original body;200 plus PNG/JPEG/WebP Content-Type required, MIME/header/
+framing/dimension validation before save (not full integrity/content safety).
+Private/NAT64/transition addresses are denied; no automatic origin fallback.
+URL query may contain a provider-signed access value required for that one GET;
+the URL/query is not persisted in the library or returned in saved metadata.
+Denied origin/download/save returns a fixed tool error, not unsaved URL success;
+earlier saved results may remain. Billing cannot be undone and generation is
+never replayed. This option is NOT complete Node remote-save/signed-vision parity.
+Existing storage TTL/capacity, compact metadata and opaque explicit edit reuse
+remain unchanged; downloaded results larger than the1MiB edit wire cannot be reused.
 
 Public route dispatch matches Node: GET /v1/models or /models; POST /v1/responses
 or /responses, /v1/chat/completions or /chat/completions, /v1/responses/compact
@@ -918,8 +944,9 @@ releases it, no stale-lock deletion. Committed IDs, creation times and capacity
 charges survive restart; expiry stays absolute24h, not renewed by reopening.
 Access times after reopening begin at creation and are only tracked in memory.
 Control regular-file/identity checks and image digest/MIME checks still apply;
-not a sandbox against same-account control. No Node-shared library, remote URL
-downloads, signed vision, GIF saving, cloud upload, cleanup or cross-device sync.
+not a sandbox against same-account control. Without --download-origin no URL
+downloads. No Node-shared library, signed vision, GIF saving, cloud upload,
+cleanup or cross-device sync.
 Files and library metadata are not encrypted; user explicitly chooses storage.
 File Sync plus fail-closed reopen is NOT a power-loss guarantee: directory-entry
 durability/filesystem behavior varies by OS; no automatic crash repair claim.
@@ -930,7 +957,8 @@ The launcher config exporter does not add either disk permission automatically.
 Append --asset-dir <absolute NEW directory> to mcp image --endpoint <origin>.
 Parent must already exist; launcher override export intentionally does not add
 this disk permission automatically. No default home/Node library discovery,
-existing-directory scan/import, overwrite, URL download or remote upload.
+existing-directory scan/import, overwrite or remote upload; URL download requires
+the separate explicit --download-origin option described above.
 Validated inline PNG/JPEG/WebP generation/edit/completed-task results are saved
 with original bytes and compact asset_id/reference/local_path/MIME/size/SHA256
 metadata, not inline Base64. image_asset_get/list return verified local metadata;

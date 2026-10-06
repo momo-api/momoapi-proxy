@@ -25,7 +25,7 @@ metadata; image_asset_get/list and asset:img_<sha256> edit reuse are supported
 ONLY in that connector session. Hash/MIME/regular-file identity checked on reuse;
 24h absolute TTL,128 entries/64MiB capacity (reject, never auto delete),dedupe.
 Saved files survive exit but IDs do NOT reopen; no shared Node library, remote
-URL download, signed vision or cross-device sync. MCP input160KiB, resolved
+URL download without --download-origin, signed vision or cross-device sync. MCP input160KiB, resolved
 edit/Core wire1MiB; larger saved results cannot be reused through this subset.
 Separate persistent opt-in: --asset-library <absolute directory> creates a NEW
 marked library or reopens ONLY this Go format. Fixed bounded reserve/commit
@@ -34,10 +34,20 @@ Committed IDs/creation times/capacity charges survive restart; absolute24h TTL
 does not reset. Incomplete writes stay charged/invisible. Corrupt/torn control
 records fail closed; tampered live images fail hash/MIME verification before use.
 One connector owns a library at a time. No stale-lock deletion/automatic cleanup,
-Node library sharing, remote URL downloads, signed vision or cross-device sync.
+Node library sharing, signed vision or cross-device sync; remote URL downloads
+require the separate --download-origin opt-in described below.
 Stop still gates upstream sends; local connector metadata outlives gateway Stop.
 Disk/delivery failure may leave partial/complete files and does not undo billing.
 Do not follow the full Node Skill's persistent/remote-save workflow on Go.
+Separate explicit --download-origin https://<chosen-image-host> AFTER an asset
+option enables saving normalized URL results from generation/edit/manual task
+query only. One selected HTTPS443 origin, public-only pinned DNS (mixed/private/
+NAT64 rejected), system TLS trust, no proxy/auth/cookies/redirect/compression/
+keepalive replay. No arbitrary URL or reference fetch tool; init/list offline.
+One GET/result,30s,16KiB headers,8MiB PNG/JPEG/WebP original bytes validated and
+saved compactly. Provider URL/query is used for that GET only, not persisted or
+returned after save; no signed vision. Failure is a fixed tool error; may already
+bill or leave earlier files, never retry generation. Defaults still do not fetch.
 Video no generate_audio/legacy routes/downloads.
 This is call-format compatibility, NOT full installed-plugin compatibility.
 

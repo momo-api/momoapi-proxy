@@ -150,11 +150,19 @@ func pluginMediaCatalog(data []byte) ([]byte, error) {
 	if _, ok := catalog["asset_storage"]; ok {
 		catalog["plugin_compatibility"] = json.RawMessage(`{"flat_arguments":true,"explicit_model_required":true,"task_status_names":true,"disk_assets":true,"persistent_asset_library":false,"asset_references":true,"automatic_downloads":false,"live_inference_verified":false}`)
 		var storage struct {
-			Scope  string `json:"scope"`
-			Reopen bool   `json:"reopen"`
+			Scope     string `json:"scope"`
+			Reopen    bool   `json:"reopen"`
+			Downloads bool   `json:"automatic_downloads"`
 		}
 		if json.Unmarshal(catalog["asset_storage"], &storage) == nil && storage.Scope == "explicit-local-library" && storage.Reopen {
 			catalog["plugin_compatibility"] = json.RawMessage(`{"flat_arguments":true,"explicit_model_required":true,"task_status_names":true,"disk_assets":true,"persistent_asset_library":true,"shared_node_library":false,"asset_references":true,"automatic_downloads":false,"live_inference_verified":false}`)
+		}
+		if storage.Downloads {
+			var compatibility map[string]any
+			json.Unmarshal(catalog["plugin_compatibility"], &compatibility)
+			compatibility["automatic_downloads"] = true
+			compatibility["download_policy"] = "explicit-origin-https-public-dns-no-auth-no-redirect-no-retry"
+			catalog["plugin_compatibility"], _ = json.Marshal(compatibility)
 		}
 	}
 	return json.Marshal(catalog)

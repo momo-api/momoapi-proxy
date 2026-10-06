@@ -353,6 +353,20 @@ def check_plugin_asset_mode(binary, session):
             require(listing["scope"] == "explicit-local-library" and listing["assets"] == [], "library reopen scope")
         rejected = subprocess.run(command[:-2] + ["--asset-library", str(directory)], input=data, env=env, capture_output=True, timeout=8)
         require(rejected.returncode == 1 and rejected.stdout == b"" and not list(directory.iterdir()), "library refuses unmarked session directory")
+        download_directory = Path(parent) / "download-assets"
+        download_command = command[:-1] + [str(download_directory), "--download-origin", "https://images.example"]
+        missing = subprocess.run(download_command, input=data, env={**env, "MOMO_LOCAL_API_KEY": ""}, capture_output=True, timeout=8)
+        require(missing.returncode == 1 and not download_directory.exists(), "download key-before-disk gate")
+        for origin in ("http://images.example", "https://127.0.0.1", "https://user:synthetic-only@images.example", "https://images.example/path", "https://images.example?token=synthetic-only"):
+            rejected = subprocess.run(download_command[:-1] + [origin], input=data, env=env, capture_output=True, timeout=8)
+            require(rejected.returncode == 1 and rejected.stdout == b"" and not download_directory.exists() and b"synthetic-only" not in rejected.stderr,
+                    "download origin-before-disk/redaction gate")
+        enabled = subprocess.run(download_command, input=data, env=env, capture_output=True, timeout=8)
+        require(enabled.returncode == 0 and enabled.stderr == b"", "explicit download startup/EOF")
+        require(download_directory.is_dir() and not list(download_directory.iterdir()), "download init/metadata network/disk isolation")
+        replies = [json.loads(line) for line in enabled.stdout.splitlines()]
+        description = next(t["description"] for t in replies[1]["result"]["tools"] if t["name"] == "image_generate")
+        require("origin-allowed URL" in description, "download mode description")
         session.request("GET", "/v1/models", 401, authenticated=False)
 
 

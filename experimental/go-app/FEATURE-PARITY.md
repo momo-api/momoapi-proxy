@@ -6,6 +6,15 @@
 
 ## 可核查的差距
 
+URL保存增量：图片asset模式额外明确 --download-origin 一个HTTPS443来源，
+只获取生成/编辑/手动任务查询返回的规范URL结果，保存原PNG/JPEG/WebP字节并返回
+compact元数据。默认模式不下载，不是任意fetch工具；不下载编辑输入、视频或桌面URL。
+共用Core public DNS策略（混合/私网/NAT64拒绝、IP固定连接）、系统TLS验证；无代理/
+鉴权/Cookie/跳转/压缩/复用GET重放。30s/16KiB headers/8MiB body，MIME与有界
+图像头/framing/尺寸验证；不保证像素完整性或内容安全。URL/query不落库/不回显，
+下载或保存失败固定错误且不重发计费生成；之前保存的结果可能保留。
+仍无签名vision/共享Node库/跨设备同步/完整已安装插件兼容，需本提交新CI验收。
+
 2026-10-06 媒体插件接入增量（未全量兼容）：显式 `mcp image|video
 --endpoint <loopback-origin>` 接入当前 Go gateway，平铺 generate/edit 参数、
 image_task_status/video_task_status 与现有 Node 工具调用名一致。目录增加

@@ -70,7 +70,7 @@ func publicIP(ip net.IP) bool {
 		return false
 	}
 	// Block non-public special-use ranges beyond Go's RFC1918/ULA classification.
-	for _, cidr := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "2001:db8::/32", "2001::/32", "2002::/16"} {
+	for _, cidr := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "64:ff9b::/96", "64:ff9b:1::/48", "100::/64", "2001:db8::/32", "2001::/32", "2002::/16"} {
 		_, block, _ := net.ParseCIDR(cidr)
 		if block.Contains(ip) {
 			return false
@@ -79,11 +79,17 @@ func publicIP(ip net.IP) bool {
 	return true
 }
 func publicDial(ctx context.Context, network, address string) (net.Conn, error) {
+	dial := net.Dialer{Timeout: 10 * time.Second}
+	return publicDialWith(ctx, network, address, net.DefaultResolver.LookupIPAddr, dial.DialContext)
+}
+
+// Dependencies are injected only by package tests, never via product flags.
+func publicDialWith(ctx context.Context, network, address string, lookup func(context.Context, string) ([]net.IPAddr, error), connect func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil || port != "443" {
 		return nil, errors.New("upstream address rejected")
 	}
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := lookup(ctx, host)
 	if err != nil || len(ips) == 0 {
 		return nil, errors.New("upstream resolution failed")
 	}
@@ -93,9 +99,8 @@ func publicDial(ctx context.Context, network, address string) (net.Conn, error) 
 			return nil, errors.New("upstream address rejected")
 		}
 	}
-	dial := net.Dialer{Timeout: 10 * time.Second}
 	for _, ip := range ips {
-		conn, err := dial.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		conn, err := connect(ctx, network, net.JoinHostPort(ip.IP.String(), port))
 		if err == nil {
 			return conn, nil
 		}
