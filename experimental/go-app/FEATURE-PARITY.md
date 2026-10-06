@@ -13,9 +13,25 @@ Node-style limits/parameter_schema；`plugin-mcp-config` 只打印无密钥 laun
 override，需可信客户端手动审阅配置/明确继承 local session env，不自动替换
 现有插件或读取配置。普通只读/confirmed-request接口不变。插件模式启动代表
 启用平铺计费调用，client intent 不等于已核验人工同意；仍先查目录/明确model、
-无自动fallback/retry/poll。图片磁盘asset库/get/list/asset复用/签名vision与
-现有Skill的自动保存语义未实现，结果仍URL/base64文本；视频音频控制/旧路线
+无自动fallback/retry/poll。独立 --asset-dir 显式新目录可保存 inline 图片、
+get/list 与 asset: 编辑复用（仅connector会话、24h/128项/64MiB限额、拒绝不删除、
+校验hash/MIME/文件身份）；退出保留文件但不重开ID。URL不下载、不共享Node库、
+无签名vision/跨设备同步，仍未实现完整现有Skill自动保存语义；视频音频控制/旧路线
 未迁移。不能据此声明两个已安装插件直接零配置替换或完整功能对齐。
+
+6a13969 push 37418360982 macOS 在 passthrough-start-enabled 失败，PR三OS
+成功不能覆盖该失败。accb37e 增加模型/额度查询8种时序回归，复现并围栏旧Active
+快照；Windows五次原生217TLS/生产blackbox通过；首轮push37424341948/PR37424347176
+三OS全部通过（未重跑）；两个main workflow成功。先前失败仍保留，不代表所有偶发
+竞争已消除。当前asset增量仍须新提交CI。
+
+asset增量本地验证：真实local TCP/TLS mock Core生成保存/元数据/有序复用编辑、
+SHA256原字节读回、同内容去重、篡改拒绝在发送前、保存失败exact单发送/不重试。
+官方MCP SDK1.32.1通过普通production Windows binary跑完该链（exact3计费路径
+mock发送）；Windows正式binary及Linux nogui binary通过新增--asset-dir门禁blackbox。
+两tag全量测试/vet、页面/packaging、Windows五独立原生217TLS、全621统一路由通过；
+WSL全量race通过，最终asset定向race也通过且symlink拒绝未跳过（Windows该项无
+建链接权限跳过）。不是真实付费推理/安装插件/已发布跨平台产品验收。
 
 e291c81 的首轮 PR 37411195542 / push 37411192549 三OS CI成功，两个main
 workflow也成功；这是状态回执，不证明先前73fdd64 macOS Start失败根因修复。

@@ -29,11 +29,13 @@ modes are unchanged. Init/list do not query the provider.
 Tools: image_capabilities, image_generate, image_edit, image_task_status;
 video_capabilities, video_generate, video_task_status. Catalog also includes
 Node-style per-model limits and parameter_schema while retaining actual Core
-constraints. Image results remain URL/base64 JSON, NOT saved asset references;
-image_asset_get/list, asset: reuse, signed vision references and automatic image
-downloads are NOT implemented. Video returned remote_url is text, with no
+constraints. Default image results remain URL/base64 JSON. The separate explicit
+--asset-dir NEW-directory option adds inline saving/image_asset_get/list/asset:
+edit reuse within one connector session (see Explicit image assets below).
+No persistent shared library, signed vision or automatic URL downloads.
+Video returned remote_url is text, with no
 download or browser playback. No generate_audio/legacy video routes. The
-unchanged Node image Skill expects disk assets, so this is call-format
+unchanged Node image Skill expects persistent/remote-save assets, so this is partial
 compatibility plus manual launcher override, NOT full existing-plugin parity.
 Mock lifecycle verification is not a real paid upstream generation claim.
 
@@ -901,6 +903,31 @@ Both modes share core/proxy/auth/admission implementation.
 
 ## Boundaries
 
+### Explicit image assets (connector-session subset)
+
+Append --asset-dir <absolute NEW directory> to mcp image --endpoint <origin>.
+Parent must already exist; launcher override export intentionally does not add
+this disk permission automatically. No default home/Node library discovery,
+existing-directory scan/import, overwrite, URL download or remote upload.
+Validated inline PNG/JPEG/WebP generation/edit/completed-task results are saved
+with original bytes and compact asset_id/reference/local_path/MIME/size/SHA256
+metadata, not inline Base64. image_asset_get/list return verified local metadata;
+explicit image_edit resolves only requested asset:img_<sha256> references,
+retaining order. MIME/header checks are not full image integrity/content safety.
+Input lines160KiB; this mode alone allows resolved edit JSON up to Core's1MiB
+request/wire ceiling; larger saved images cannot be edited through this subset.
+Absolute24h TTL/128entries/64MiB budget/dedupe; reject when full, no eviction or
+automatic deletion. Failed partial writes consume budget; disk/delivery failure
+may leave files and does not undo upstream billing or cause a retry. Fresh
+catalog/model/Stop gates remain Core-owned. Local metadata survives gateway Stop
+but only until connector exit; saved files remain, IDs do not reopen. No shared
+Node persistent library, signed vision, GIF storage or cross-device sync.
+os.Root/generated filenames/O_EXCL/regular-file identity/digest verification
+anchor accesses; not a sandbox against processes controlling the same OS account.
+Windows UNC/device/ADS destinations rejected; Unix mounts/Windows mapped drives
+are OS-managed and are not certified local/offline storage. Default media modes
+and Node product are unchanged. This does NOT complete installed-plugin parity.
+
 ### Manual Codex provider export
 
 The Skill/MCP page now also explicitly copies the same secret-free gpt-5.5
@@ -1093,8 +1120,10 @@ completion. Polls issued before/during these operations are ignored if stale;
 Stop remains enabled during operations, and settled polls still observe native
 changes. The shipped-script regression covers all eight model/quota poll timing
 orders. This reproduces a possible mechanism for the macOS push failure at
-6a13969 (passthrough-start-enabled); it does not prove that CI failure is fixed
-until the unchanged native acceptance passes on macOS.
+6a13969 (passthrough-start-enabled). accb37e first-attempt push37424341948 and
+PR37424347176 completed all3OS unchanged five-probe native acceptance; both
+main workflows also succeeded. These greens do not prove all intermittent
+state races eliminated; the earlier failed run remains recorded.
 Native appcheck invokes the shipped DOM button handlers for Apply/Load/Start/Stop, asserts disabled
 controls/key clearing, navigation/Load returning to Overview, rendered status,
 and automatically observes a native Stop then restarts.

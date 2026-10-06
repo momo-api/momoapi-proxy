@@ -23,6 +23,10 @@ func main() {
 	}
 }
 func run() error {
+	// Explicit NEW directory; never choose a home/profile/default library.
+	if len(os.Args) == 7 && os.Args[1] == "mcp" && os.Args[2] == "image" && os.Args[3] == "--endpoint" && os.Args[5] == "--asset-dir" && os.Args[6] != "" {
+		return runConnectedMediaAssetsMode(os.Args[4], false, true, os.Args[6])
+	}
 	// Explicit compatibility launcher; no Node/profile/endpoint discovery.
 	if len(os.Args) == 5 && os.Args[1] == "mcp" && (os.Args[2] == "image" || os.Args[2] == "video") && os.Args[3] == "--endpoint" {
 		return runConnectedPluginMCP(os.Args[4], os.Args[2] == "video")
@@ -79,7 +83,7 @@ func run() error {
 		return desktop()
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("MOMO preview: desktop (no args) | --version | diagnostics (offline, not running app health) | codex-text-tools-catalog --model gpt-5.5 | mcp (read-only stdio) | mcp image|video --endpoint <local-origin> (explicit flat plugin subset) | plugin-mcp-config image|video --endpoint <local-origin> (secret-free launcher override) | mcp-videos | mcp-videos-connect --endpoint <local-origin> | mcp-images | mcp-images-connect --endpoint <local-origin> | serve (upstream config on private stdin)")
+		return errors.New("MOMO preview: desktop (no args) | --version | diagnostics (offline, not running app health) | codex-text-tools-catalog --model gpt-5.5 | mcp (read-only stdio) | mcp image|video --endpoint <local-origin> (explicit flat plugin subset; image optionally --asset-dir <absolute NEW directory>) | plugin-mcp-config image|video --endpoint <local-origin> (secret-free launcher override) | mcp-videos | mcp-videos-connect --endpoint <local-origin> | mcp-images | mcp-images-connect --endpoint <local-origin> | serve (upstream config on private stdin)")
 	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
 	_ = os.Stdin.Close()

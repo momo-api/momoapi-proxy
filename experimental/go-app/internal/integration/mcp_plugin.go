@@ -147,5 +147,8 @@ func pluginMediaCatalog(data []byte) ([]byte, error) {
 	}
 	catalog["models"], _ = json.Marshal(models)
 	catalog["plugin_compatibility"] = json.RawMessage(`{"flat_arguments":true,"explicit_model_required":true,"task_status_names":true,"disk_assets":false,"automatic_downloads":false,"live_inference_verified":false}`)
+	if _, ok := catalog["asset_storage"]; ok {
+		catalog["plugin_compatibility"] = json.RawMessage(`{"flat_arguments":true,"explicit_model_required":true,"task_status_names":true,"disk_assets":true,"persistent_asset_library":false,"asset_references":true,"automatic_downloads":false,"live_inference_verified":false}`)
+	}
 	return json.Marshal(catalog)
 }

@@ -5,10 +5,12 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/integration"
 )
 
@@ -29,6 +31,10 @@ func runConnectedPluginMCP(endpoint string, video bool) error {
 }
 
 func runConnectedMediaMode(endpoint string, video, plugin bool) error {
+	return runConnectedMediaAssetsMode(endpoint, video, plugin, "")
+}
+
+func runConnectedMediaAssetsMode(endpoint string, video, plugin bool, assetDirectory string) error {
 	if integration.ValidateLocalEndpoint(endpoint) != nil {
 		return errors.New("local MCP endpoint unavailable")
 	}
@@ -38,6 +44,9 @@ func runConnectedMediaMode(endpoint string, video, plugin bool) error {
 	serve := integration.ServeImageMCP
 	if video {
 		connect, serve = integration.NewLocalVideoDispatch, integration.ServeVideoMCP
+	}
+	if assetDirectory != "" && !video && plugin {
+		connect = integration.NewLocalImageAssetDispatch
 	}
 	if plugin {
 		serve = integration.ServePluginImageMCP
@@ -50,6 +59,19 @@ func runConnectedMediaMode(endpoint string, video, plugin bool) error {
 		return err
 	}
 	defer closeClient()
+	if assetDirectory != "" {
+		if video || !plugin {
+			return errors.New("image asset mode unavailable")
+		}
+		store, err := integration.NewImageAssetStore(assetDirectory, appcore.DecodeLocalImageSave)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		serve = func(ctx context.Context, input io.Reader, output io.Writer, dispatch integration.ImageDispatch) error {
+			return integration.ServePluginImageAssetsMCP(ctx, input, output, dispatch, store)
+		}
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	input, output, err := imageMCPStreams()

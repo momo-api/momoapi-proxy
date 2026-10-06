@@ -80,6 +80,16 @@ func NewLocalVideoDispatch(endpoint, token string) (ImageDispatch, func(), error
 }
 
 func newLocalMediaDispatch(endpoint, token string, video bool) (ImageDispatch, func(), error) {
+	return localMediaDispatchLimit(endpoint, token, video, ImageMCPLineLimit)
+}
+
+// Only explicit asset mode may expand opaque local refs past the input-line
+// budget. Core's existing 1MiB request/wire and decoded-image limits still apply.
+func NewLocalImageAssetDispatch(endpoint, token string) (ImageDispatch, func(), error) {
+	return localMediaDispatchLimit(endpoint, token, false, 1<<20)
+}
+
+func localMediaDispatchLimit(endpoint, token string, video bool, bodyLimit int) (ImageDispatch, func(), error) {
 	if ValidateLocalEndpoint(endpoint) != nil || !validLocalSessionToken(token) {
 		return nil, nil, errors.New("local MCP connection unavailable")
 	}
@@ -117,7 +127,7 @@ func newLocalMediaDispatch(endpoint, token string, video bool) (ImageDispatch, f
 		default:
 			return nil, 400
 		}
-		if len(body) > ImageMCPLineLimit || (method == "GET" && len(body) != 0) {
+		if len(body) > bodyLimit || (method == "GET" && len(body) != 0) {
 			return nil, 400
 		}
 		ctx, cancel := context.WithTimeout(parent, timeout)

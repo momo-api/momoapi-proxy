@@ -17,10 +17,20 @@ video_generate arguments plus image_task_status/video_task_status; explicit
 model and fresh catalog still required. A call is client intent, NOT verified
 human consent; obtain user intent for potentially billed operations.
 Init/list do not query providers; normal readonly/confirmed-request modes stay
-unchanged. No retry or automatic polling. Results remain URL/base64 JSON;
-image_asset_get/list, asset: reuse, disk library and signed vision references
-are NOT implemented. Do not follow the Node image Skill's automatic-save or
-saved-asset workflow on Go. Video no generate_audio/legacy routes/downloads.
+unchanged. No retry or automatic polling. Default results remain URL/base64 JSON.
+Explicit image-only opt-in: append --asset-dir <absolute NEW directory> to the
+mcp image launcher. Parent must exist; no default/profile/library discovery or
+import. Valid inline PNG/JPEG/WebP outputs are saved and returned as compact
+metadata; image_asset_get/list and asset:img_<sha256> edit reuse are supported
+ONLY in that connector session. Hash/MIME/regular-file identity checked on reuse;
+24h absolute TTL,128 entries/64MiB capacity (reject, never auto delete),dedupe.
+Saved files survive exit but IDs do NOT reopen; no shared Node library, remote
+URL download, signed vision or cross-device sync. MCP input160KiB, resolved
+edit/Core wire1MiB; larger saved results cannot be reused through this subset.
+Stop still gates upstream sends; local connector metadata outlives gateway Stop.
+Disk/delivery failure may leave partial/complete files and does not undo billing.
+Do not follow the full Node Skill's persistent/remote-save workflow on Go.
+Video no generate_audio/legacy routes/downloads.
 This is call-format compatibility, NOT full installed-plugin compatibility.
 
 ## Local redacted diagnostics

@@ -9,6 +9,7 @@ import signal
 import socket
 import subprocess
 import threading
+import tempfile
 import time
 from urllib.parse import urlsplit
 
@@ -310,6 +311,39 @@ def check_plugin_mcp(binary, session):
         session.request("GET", "/v1/models", 401, authenticated=False)
 
 
+def check_plugin_asset_mode(binary, session):
+    endpoint = "http://127.0.0.1:" + str(session.port)
+    env = {**os.environ, "MOMO_LOCAL_API_KEY": session.token}
+    with tempfile.TemporaryDirectory(prefix="momo-owned-asset-cli-test-") as parent:
+        directory = Path(parent) / "new-assets"
+        command = [str(binary), "mcp", "image", "--endpoint", endpoint, "--asset-dir", str(directory)]
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "image_asset_list", "arguments": {}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "image_asset_get", "arguments": {"asset_id": "img_" + "0" * 64}}},
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "image_edit", "arguments": {"model": "momoapi-gpt-image-2-5-flare", "prompt": "synthetic", "reference_images": ["asset:img_" + "0" * 64]}}},
+        ]
+        data = ("\n".join(json.dumps(m) for m in messages) + "\n").encode()
+        # Missing inherited key must not create the chosen directory.
+        failed = subprocess.run(command, input=data, env={**env, "MOMO_LOCAL_API_KEY": ""}, capture_output=True, timeout=8)
+        require(failed.returncode == 1 and not directory.exists() and failed.stdout == b"", "asset key-before-disk gate")
+        result = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
+        require(result.returncode == 0 and result.stderr == b"", "asset connector startup/EOF")
+        require(session.token.encode() not in result.stdout and SYNTHETIC_KEY.encode() not in result.stdout, "asset secret reflection")
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        names = [t["name"] for t in replies[1]["result"]["tools"]]
+        require("image_asset_get" in names and "image_asset_list" in names, "asset mode tools")
+        listing = json.loads(replies[2]["result"]["content"][0]["text"])
+        require(listing["assets"] == [] and listing["scope"] == "connector-session", "asset empty metadata")
+        require(replies[3]["result"]["isError"] and replies[4]["result"]["isError"], "asset foreign ID gates")
+        require(directory.is_dir() and not list(directory.iterdir()), "metadata created files")
+        # Existing directories must never be scanned or imported on restart.
+        again = subprocess.run(command, input=data, env=env, capture_output=True, timeout=8)
+        require(again.returncode == 1 and again.stdout == b"", "asset existing-directory gate")
+        session.request("GET", "/v1/models", 401, authenticated=False)
+
+
 class Session:
     def __init__(self, binary):
         self.process = None
@@ -579,6 +613,7 @@ def check_runtime(binary):
         check_connected_image_mcp(binary, first)
         check_connected_video_mcp(binary, first)
         check_plugin_mcp(binary, first)
+        check_plugin_asset_mode(binary, first)
         require(first.port != second.port and first.token != second.token, "multiple instances share session")
         second.request("GET", "/v1/models", 401, headers={"Authorization": "Bearer " + first.token})
         check_boundaries(first)
@@ -593,7 +628,7 @@ def check_runtime(binary):
             session.force_stop()
         if allocated_console:
             kernel.FreeConsole()
-    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + owned and connected video MCP whitelist/confirmation/Core gates/EOF/idle and blocked-output signals/gateway survival + explicit flat plugin image/video connector/task_status/config-export/local-key/catalog/private-DNS/foreign-task/shape/EOF gates + video API auth/browser/catalog/foreign-ID/private-DNS/method/duplicate-JSON gates + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
+    print("PASS normal packaged binary: read-only MCP/Skill + opt-in image MCP private prelude/buffered input/consent/catalog/task/private-DNS/EOF/idle and blocked-output signals + connected MCP separate process/exact endpoint/local key/auth/Core gates/EOF/signals/gateway remains live + owned and connected video MCP whitelist/confirmation/Core gates/EOF/idle and blocked-output signals/gateway survival + explicit flat plugin image/video connector/task_status/config-export/local-key/catalog/private-DNS/foreign-task/shape/EOF gates + opt-in asset NEW-dir/key-before-disk/get-list/foreign-ref/EOF/no-import/owner-survival gates + video API auth/browser/catalog/foreign-ID/private-DNS/method/duplicate-JSON gates + invalid config/auth/browser/body/route/private-DNS/120 requests/two instances/stalled uploads/clean signals/closed ports")
 
 
 if __name__ == "__main__":
