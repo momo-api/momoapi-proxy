@@ -110,7 +110,8 @@ or auto, not quality equivalence. Explicit low/high reject before sending rather
 than silently removing the requested contract.
 
 User images and explicitly paired tool image results are converted. Bounded PDF
-inputs/results are described below; file_id, non-PDF files/audio/video,
+inputs/results and Claude/Gemini UTF8 text files are described below; file_id,
+unsupported non-PDF files/audio/video,
 assistant/system images and cloud asset uploads on converted text routes are not
 implemented. Invalid input returns fixed unsupported_image_input without echoing
 image bytes/URLs; no fallback or local fetching. Local compact retains every
@@ -129,14 +130,14 @@ file_data:"data:application/pdf;base64,..." or file_url HTTPS/443 reference.
 URL files require explicit mime_type:"application/pdf" and Claude/Gemini;
 Chat accepts inline only. Optional filename is UTF-8, 1..255 bytes, without
 slashes/control characters: metadata, never a local path. file_id, momo_asset,
-detail, non-PDF MIME and assistant/system/developer file parts reject.
+detail, unsupported MIME and assistant/system/developer file parts reject.
 
 Canonical Base64, version header (%PDF-1.0..1.7 or 2.0 plus newline) and terminal
 %%EOF framing are checked. This is NOT PDF structure/content/integrity/safety,
 encryption or page validation. No reads, uploads, extraction, decompression,
 local URL fetch, DNS/redirect checking or live model acceptance is implied.
 Scoped IP literals reject for both images and files; URL checks remain lexical.
-At most16 PDFs and32 images across replayed input, sharing <=1MiB decoded-inline
+At most16 TOTAL PDF/text files and32 images across replayed input, sharing <=1MiB decoded-inline
 budget; the stricter full JSON/history <=1MiB gate still includes Base64.
 
 Chat emits ordered file.file_data/filename blocks; Claude emits document
@@ -157,13 +158,42 @@ suffix/full history retains original input; local checkpoint protects whole
 file-bearing turns including interpretation, not just PDF bytes. Native/default
 Responses remains byte-preserving, including provider file IDs; no cloud upload or generation.
 
+### Ordered UTF-8 text attachments
+
+Claude/Gemini converted user or paired tool input_file additionally accepts inline
+`data:text/plain;base64,...`, `text/markdown`, or `text/csv`. Canonical Base64,
+nonempty valid UTF8, no control characters except tab/CR/LF; BOM, newlines and
+whitespace stay exact. Optional mime_type must match the data URL. No charset
+parameters, remote text URL, HTML, JSON, office/ZIP/binary parsing, Markdown/CSV
+rendering, filesystem lookup, fetching, upload, citations or inference probes.
+Claude uses native document source `{type:"text",media_type:"text/plain",data:...}`
+plus optional title. Gemini uses inlineData MIME `text/plain`, unchanged Base64
+and optional displayName. These text MIME types are explicitly submitted as plain
+text, not treated as PDF; history/checkpoints/local snapshots retain original MIME
+and Base64. Chat non-PDF file input is rejected: official Chat supports PDF files
+only, and the proxy does NOT silently downgrade documents to user text.
+
+Existing role/order/pairing, all16 file/32 image decoded1MiB, full JSON/history1MiB
+and final encoded-wire limits apply; JSON escaping expansion rejects, not truncates.
+Claude tool results remain nested; ALL Gemini need per-request
+`momo_tool_files:"user-projection"`, mixed images need their separate projection
+policy. No inherited policy/native trust equivalence or prompt-injection safety.
+Same-model/cross-converted replay revalidates target support (Chat rejects retained
+text documents). Whole text-document-bearing turns and interpretation are protected
+by local checkpoint; invalid inputs never send or create successful history.
+Official structure references (mock tests do not prove live model acceptance):
+- https://developers.openai.com/api/docs/guides/file-inputs
+- https://platform.claude.com/docs/en/build-with-claude/citations
+- https://ai.google.dev/gemini-api/docs/document-processing
+
 ### Explicit local attachment snapshots
 
 This is a separate bounded in-memory API, NOT Node's cloud upload/metadata store.
 With Mode=momo-routing, an authenticated nonbrowser loopback client can POST
-`/internal/attachments` with `{"part":<one canonical inline input_image or PDF
+`/internal/attachments` with `{"part":<one canonical inline input_image or PDF/text
 input_file>}`. It uses the same validators described above (not full integrity or
-content-safety validation). The response contains random `asset_id` (`att_` plus
+content-safety validation). Registration does not select/prove an inference
+provider; Chat expansion still rejects non-PDF. The response contains random `asset_id` (`att_` plus
 64 hex digits), MIME, decoded byte count, optional filename and absolute timestamps,
 never bytes/paths/keys. GET `/internal/attachments/<asset_id>` reads only metadata;
 DELETE removes it. No listing, file content export, disk persistence, URL fetching,

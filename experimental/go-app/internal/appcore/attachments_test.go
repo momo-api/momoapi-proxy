@@ -120,7 +120,7 @@ func TestAttachmentPartsStrictAndBudgets(t *testing.T) {
 		map[string]any{"type": "input_file", "file_url": "https://files.example/report", "mime_type": "application/pdf"},
 		map[string]any{"type": "input_file", "file_id": "foreign"},
 		map[string]any{"type": "input_image", "image_url": "https://images.example/a"},
-		map[string]any{"type": "input_file", "file_data": "data:text/plain;base64,aGk="},
+		map[string]any{"type": "input_file", "file_data": "data:text/html;base64,aGk="},
 		map[string]any{"type": "input_image", "image_url": "data:image/png;base64,aGk="},
 		map[string]any{"type": "input_text", "text": "hi"},
 	} {

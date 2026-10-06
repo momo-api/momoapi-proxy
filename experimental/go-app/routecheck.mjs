@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {request as httpRequest} from 'node:http';
 import {createMomoSwitch} from '../../src/server.mjs';
-import {fileCases,assertFileCase} from './routecheck_files.mjs';
+import {fileCases,assertFileCase,textFileCases,assertTextFileCase} from './routecheck_files.mjs';
 import {imageBlackbox} from './routecheck_images.mjs';
 import {chatImageBlackbox} from './routecheck_chat_images.mjs';
 import {videoBlackbox} from './routecheck_videos.mjs';
@@ -144,6 +144,8 @@ cases.push(...toolImageFixtures.flatMap(f=>[true,false].flatMap(stream=>['functi
 })))));
 cases.push(...fileCases(toolImageFixtures));
 cases.push(...fileCases(toolImageFixtures).map(f=>({...f,name:f.name+' registered memory snapshot',attachment:true})));
+cases.push(...textFileCases(toolImageFixtures));
+cases.push(...textFileCases(toolImageFixtures).filter(f=>f.fileMIME==='text/plain').map(f=>({...f,name:f.name+' registered memory snapshot',attachment:true})));
 async function launch(fixture){
  const child=spawn(binary,[],{stdio:['pipe','pipe','pipe'],windowsHide:true});
  let stderr='';child.stderr.on('data',b=>{stderr+=b});
@@ -195,7 +197,7 @@ for(const fixture of cases){
     for(let i=0;i<item[field].length;i++)if(item[field][i].type==='input_file'){
      const registration=await invoke(goURL,handoff.api_key,{part:item[field][i]},'/internal/attachments');
      assert.equal(registration.status,200);const meta=JSON.parse(registration.body);assert.match(meta.asset_id,/^att_[a-f0-9]{64}$/);
-     assert.equal(meta.mime_type,'application/pdf');assert.equal(meta.filename,'report.pdf');assert.ok(meta.decoded_bytes>0);
+     assert.equal(meta.mime_type,fixture.fileMIME||'application/pdf');assert.equal(meta.filename,fixture.textFiles?'notes.txt':'report.pdf');assert.ok(meta.decoded_bytes>0);
      assert.ok(!registration.body.includes('file_data'));assert.ok(!registration.body.includes('base64'));
      item[field][i]={type:'momo_attachment',asset_id:meta.asset_id};registered++;
     }
@@ -231,6 +233,7 @@ for(const fixture of cases){
    console.log('DIFFERENCE Go Gemini uses parametersJsonSchema and preserves constraints; Node uses restricted parameters for JSON Schema');
   }
   if(fixture.files){assertFileCase(fixture,captures[0],captures[1],nodeResults[0],goResults[0]);console.log('PASS uniform blackbox '+fixture.name);continue}
+  if(fixture.textFiles){assertTextFileCase(fixture,captures[0],captures[1],nodeResults[0],goResults[0]);console.log('PASS uniform blackbox '+fixture.name);continue}
   if(fixture.search){
    const [n,g]=captures;
    const declarations=b=>!fixture.path?b.tools.map(t=>t.function):fixture.path==='/v1/messages'?b.tools:b.tools[0].functionDeclarations;

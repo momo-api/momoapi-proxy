@@ -131,23 +131,33 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   retains whole image-bearing turns including assistant interpretation; no useful
   safe reduction rejects instead of dropping required images. Fixed
   unsupported_image_input error; native/default bytes unchanged.
-  User input_file accepts PDF only: exactly one canonical
+  User input_file accepts PDF: exactly one canonical
   file_data:"data:application/pdf;base64,..." or HTTPS file_url. URL requires
   mime_type:"application/pdf" and Claude/Gemini; Chat inline only. Optional
   filename is metadata, 1..255 UTF-8 bytes without slashes/control characters.
-  Max16 PDFs/32 images across replay; decoded inline bytes share <=1MiB budget,
+  Max16 PDFs/32 images remains the PDF ceiling, but TOTAL PDF/text files <=16
+  across replay; decoded inline bytes share <=1MiB budget,
   full JSON/history <=1MiB including Base64. PDF header/EOF framing only, NOT
   structural/content/safety/encryption validation; no reads/uploads/extraction/fetch.
   Chat ordered file blocks, Claude document source/title, Gemini inlineData/fileData
-  mimeType/displayName. file_id/non-PDF/assistant or instruction file parts reject.
-  Paired PDF results nest in Claude tool_result. Chat/ALL Gemini need per-request
+  mimeType/displayName. file_id/unsupported MIME/assistant or instruction file parts reject.
+  Claude/Gemini additionally accept canonical inline text/plain,text/markdown,
+  text/csv input_file. Exact nonempty UTF8 with no control characters except
+  tab/CR/LF; preserve BOM/newlines/whitespace, do not render Markdown/CSV. Optional
+  mime_type must match data URL, no charset/URL text/HTML/JSON/office/archive.
+  Claude native document source type:text/media_type:text/plain/data decoded text;
+  Gemini inlineData MIME text/plain/original Base64/displayName. History/local
+  snapshots retain ORIGINAL MIME/Base64. Chat non-PDF rejects (no silent user
+  text downgrade); native/default passthrough unchanged. Not injection defense,
+  document content safety or real-provider support proof; no citations requested.
+  Paired PDF/text results nest in Claude tool_result. Chat PDF/ALL Gemini need per-request
   momo_tool_files:"user-projection"; Gemini native PDF tool MIME is unverified.
   Mixed image/PDF projections also need momo_tool_images:"user-projection".
   All parallel results precede attributed ordered projections, not native trust
   equivalence/injection defense. Policy forbidden on Claude, never inherited or
   forwarded; re-declare for history/compact replay. Fixed unsupported_file_input/
   unsupported_tool_file_output; same-model replay preserves original input, local
-  compact retains whole PDF-bearing turns including assistant interpretation.
+  compact retains whole PDF/text-bearing turns including assistant interpretation.
   Scoped IP URL literals reject for images/files; lexical checks are NOT DNS/
   redirect validation. Native/default provider file IDs remain exact passthrough.
   Claude Messages text/tools plus validated token usage are supported; thinking,
@@ -166,7 +176,7 @@ when to load it. No API keys are embedded. Never search for other apps' accounts
   Muse conversion is out of scope and
   muse-auto is rejected in opt-in routing mode. No fallback or duplicate send.
 - Explicit memory attachments (not Node cloud offloading): routing mode only.
-  POST /internal/attachments with {part:<one canonical inline input_image or PDF
+  POST /internal/attachments with {part:<one canonical inline input_image or PDF/text
   input_file>} registers a validated snapshot. GET/DELETE
   /internal/attachments/att_<random64hex> reads metadata/deletes it; no listing,
   file contents export, disk, URL fetching or provider file IDs. Local-token auth

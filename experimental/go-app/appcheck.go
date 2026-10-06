@@ -162,6 +162,10 @@ func check() error {
 				upstreamRequests.Add(1)
 				return
 			}
+			if probeTextFileUpstream(w, r, data) {
+				upstreamRequests.Add(1)
+				return
+			}
 			if probeFileUpstream(w, r, data) {
 				upstreamRequests.Add(1)
 				return
@@ -264,11 +268,11 @@ func check() error {
 				_ = conn.Close()
 			}
 			closeMock()
-			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 185 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || codexCatalogCopies.Load() != 1 || imageMCPCopies.Load() != 1 || videoMCPCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
+			if !passed.Load() || !proxied.Load() || savedProfiles.Load() != 1 || loadedProfiles.Load() != 1 || upstreamRequests.Load() != 197 || quotaQueries.Load() != 1 || skillCopies.Load() != 1 || mcpCopies.Load() != 1 || codexCopies.Load() != 1 || codexCatalogCopies.Load() != 1 || imageMCPCopies.Load() != 1 || videoMCPCopies.Load() != 1 || s.Running || s.Configured || s.Active != 0 || dialErr == nil {
 				fmt.Println("FAIL native E2E/shutdown")
 				os.Exit(1)
 			}
-			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (185 upstream requests; explicit converted provider replay and bounded long tool aliases/history and explicit single-tool constraint and ordinary nullable strict arguments and completed search lifecycle checkpoint/replay/paired second turn; desktop video catalog/explicit controls/confirmed generation/manual task/URL text/Stop clear + desktop image catalog/generation/local FileReader references/pure metadata validation/explicit local preview/edit/task/native explicit inline save byte readback/Stop reference clear + image/video API subsets + opt-in direct and connected image/video MCP catalog/generation/task streams plus direct/connected image edit lifecycle plus Gemini Chat JSON image edits through API/direct+connected MCP/DOM) + stalled upload Stop + owned shutdown")
+			fmt.Println("PASS real WebView DOM buttons + native Stop polling + local TCP + TLS mock Responses/Chat/Claude/Gemini/models + routed SSE/JSON/omitted stream/usage/named and allowed tools/raw exec/apply_patch/client search/ordered user and paired tool images/PDF/registered memory snapshots/history/output limits/incomplete/local and explicit native compact (197 upstream requests; ordered UTF8 text document user/paired tool/native plaintext wire; explicit converted provider replay and bounded long tool aliases/history and explicit single-tool constraint and ordinary nullable strict arguments and completed search lifecycle checkpoint/replay/paired second turn; desktop video catalog/explicit controls/confirmed generation/manual task/URL text/Stop clear + desktop image catalog/generation/local FileReader references/pure metadata validation/explicit local preview/edit/task/native explicit inline save byte readback/Stop reference clear + image/video API subsets + opt-in direct and connected image/video MCP catalog/generation/task streams plus direct/connected image edit lifecycle plus Gemini Chat JSON image edits through API/direct+connected MCP/DOM) + stalled upload Stop + owned shutdown")
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{

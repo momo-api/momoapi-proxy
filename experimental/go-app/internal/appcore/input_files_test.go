@@ -130,7 +130,7 @@ func TestPDFStrictInputAndTransactionalSharedBudget(t *testing.T) {
 		func(m map[string]any) { m["file_url"] = "https://files.example/a" },
 		func(m map[string]any) { m["mime_type"] = "text/plain" },
 		func(m map[string]any) { m["file_data"] = "data:application/pdf;base64,secret-invalid" },
-		func(m map[string]any) { m["file_data"] = "data:text/plain;base64,YQ==" },
+		func(m map[string]any) { m["file_data"] = "data:text/html;base64,YQ==" },
 		func(m map[string]any) { m["filename"] = "../report.pdf" },
 		func(m map[string]any) { m["filename"] = "line\nreport.pdf" },
 		func(m map[string]any) { m["filename"] = nil },

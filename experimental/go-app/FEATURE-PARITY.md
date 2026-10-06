@@ -16,7 +16,7 @@
 | Muse | `src/muse-adapter.mjs` | 用户明确不迁移；不属于后续验收目标。实验选路保留 501，避免误转为 Chat |
 | 客户端 tool_search / defer_loading | `src/responses-compat.mjs`、`src/tools.mjs` | 显式 client-search 策略三协议有序加载、对象参数、身份与本地 strict 子集校验；不执行搜索/MCP，不是原生 deferred prompt/cache；已完成搜索/加载/调用结果支持显式本地 checkpoint 与手动回放；hosted/复杂 schema 未支持 |
 | compact、previous_response_id、切换供应商状态 | `src/compact-endpoint.mjs`、`src/compaction.mjs`、`src/responses-state.mjs`、`src/provider-switch-state.mjs` | 转换同模型有界内存回放、本地有损 checkpoint；原生 compact 可显式尝试透传/保留 opaque（非真实能力验证）。新增逐请求显式跨转换模型完整canonical回放；无语义摘要/本地 opaque envelope/原生opaque或签名供应商状态转换 |
-| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；非 PDF、云上传/磁盘资产存储未迁移，非完整附件管理 |
+| 附件资产与模型适配 | `src/attachment-assets.mjs`、`src/attachment-routing.mjs` | 有序图片/PDF 与配对结果、同模型回放；新增显式本地内存附件快照注册/元数据/删除与转换引用，64条/8MiB/30分钟，历史保存独立 inline；新增Claude/Gemini inline UTF8 text/plain/markdown/csv原生文本文档；Chat非PDF拒绝，其他非PDF/云上传/磁盘资产存储未迁移，非完整附件管理 |
 | 图片 / 视频插件接口 | `src/image-service.mjs`、`src/video-service.mjs`、`src/server.mjs` | 图片生成/工作台/opt-in MCP 子集；视频新增两种 APIMart JSON API 与桌面工作台显式目录/生成/本会话任务子集；不自动下载/保存/轮询；新增目录授权图片 JSON reference 编辑（含 Gemini Chat JSON），mask/legacy GPT Chat-media 编辑、旧视频路线与完整媒体插件未迁移；独立显式 video MCP 子集见下 |
 | Codex 配置、目录同步、诊断、升级 | `src/codex-route.mjs`、`src/catalog.mjs`、`src/sync.mjs`、`src/doctor.mjs`、`src/updater.mjs` | 可显式复制无 Key 的 user-level TOML Provider 片段与本地连接；模型列表检查/筛选不代表推理验证；新增显式本地脱敏aggregate快照/离线CLI，不查询客户端账号或上游、不代表完整doctor；真实 Codex 全功能未验收，无自动接入/更新 |
 | 系统凭据库 | Go `internal/vault/` | 可选单配置保存/读取/删除；启动不自动读取，不同步设备 |
@@ -36,7 +36,34 @@ Go 安全与资源边界也不同：一个公开 HTTPS/443 上游、1 MiB 请求
 
 ## 本次实际验证范围
 
-### Gemini Chat JSON 图片参考编辑（2026-10-06；当前增量本地验收）
+### 有界 UTF-8 文本附件（2026-10-06；本地增量，当前CI待验收）
+
+Claude/Gemini用户与配对工具input_file新增canonical inline text/plain、
+text/markdown、text/csv；非空UTF8且控制字符仅tab/CR/LF，BOM/换行/空白
+不改。Claude原生document source text/plain decoded text，Gemini inlineData
+text/plain原Base64/displayName；原MIME/bytes存history/checkpoint/localasset。
+明确plaintext非Markdown/CSV渲染、无URL/HTML/JSON/Office/ZIP/上传/读盘。
+官方OpenAI文档明确Chat nonPDF不支持：转换拒绝，不发伪file或偷偷转user文本。
+16 TOTAL PDF/text files、32images、decoded1MiB及fullJSON/history/wire1MiB
+保持；nativeescaping导致wire超预算拒绝不截断。Claude嵌套结果，全部Gemini
+仍需每请求momo_tool_files:user-projection；混合图片双策略，不继承/不执行。
+同/跨转换history重验目标，Chat含历史text拒绝；compact整回合与解读保留；
+asset删除不撤回已存snapshot，Stop清空；取消one-send/nohistory/no retry。
+先红测不支持text再绿；新增48same mock/resources/input黑盒（36原inline
+及12明确localasset），总489本地通过；Node Claude丢为marker、Gemini tool
+拆离/丢title与Go原生plaintext/保顺序分别断言，不装作完全等价。
+Win真实WebView197TLSmock已通过（12新增文本文档API），两tag全量各5、两vet、
+page/packaging、WSL全量race、普通Winbinary blackbox/官方SDK图片视频通过；
+新HEAD三平台仍须验收。
+首轮全量发现旧attachment负例仍把合法text/plain列为unsupported，改为text/html
+拒绝用例并新增合法text/共享预算/元数据/引用/重放/Stop正负门禁；不放宽生产。
+新history夹具起初误用passthrough Core导致502，改为明确routed；checkpoint
+比较按既有normalizedHistory去合法completed标签，非文本字节/内容丢失。
+Prism启动toolerror，无job/报告/批准。无真实账户/付费推理/本机installer。
+官方wire参考README，不等于真实provider能力或注入/文档内容安全证明。
+
+
+### Gemini Chat JSON 图片参考编辑（2026-10-06；58209ac已三平台验收）
 
 补齐gemini-3.1-flash-image目录授权edit：固定Chat messages有序prompt+单张
 inline reference，modalities[text,image]与google.image_config ratio/uppercase
@@ -50,7 +77,11 @@ resolution，同Node wire；目录数量/transport gate保持，缺省目录不�
 总441通过，Node递归prose/截断/拒答/重复字段接受与持久化差异分别断言。
 真实WinWebView185TLSmock通过（新增4API/direct+connectedMCP/DOM明确edit）；
 不是真实模型/完整媒体插件/实际agent推理。双tag全量各5、vet/page/packaging/
-WSLfullrace通过，新HEAD三平台/fresh artifacts仍需独立验收。
+WSLfullrace通过；58209ac首轮PR+显式workflow_dispatch（非push/非retry）
+18checks/6native全成功，每native441TCP185TLS+普通payload/隔离installer，
+Unix各5独立fullrace；3OS freshSHA/manifest/version/mode/format与下载Win
+blackbox/官方SDK图片视频+Gemini实际connector生命周期exact1send通过。
+PR保持draft未合并，本机installer/真实推理/正式签名/产品全对齐未完成。
 Prism启动toolerror，无专家报告/批准。未使用真实账户/付费推理/本机installer。
 
 ### 内联结果明确另存（2026-10-06；d58b531已三平台验收）

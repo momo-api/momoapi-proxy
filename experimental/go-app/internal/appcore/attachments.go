@@ -101,7 +101,10 @@ func attachmentPart(data []byte) (json.RawMessage, attachmentMetadata, error) {
 		if !strings.HasPrefix(str(part["file_data"]), "data:") {
 			return nil, meta, errUnsupportedFile
 		}
-		file, err := parseRouteFile(part, "gpt-5.5", budget)
+		// Local registration does not choose an inference provider. The
+		// eventual routed request revalidates provider support (Chat rejects
+		// non-PDF); no capability/permission is inferred from registration.
+		file, err := parseRouteFile(part, "claude-sonnet-4-6", budget)
 		if err != nil {
 			return nil, meta, err
 		}
