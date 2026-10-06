@@ -18,6 +18,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 )
@@ -53,8 +54,55 @@ func desktopConfigured(configure func(*application.Options, *appcore.Core)) erro
 		origin = "http://wails.localhost"
 	}
 	var app *application.App
+	var pendingRoute struct {
+		path, revision string
+		options        integration.CodexRouteOptions
+	}
 	store := vault.System() // construction does not read the credential store
 	assets := ui.HandlerWithActions(origin, core, ui.Actions{
+		PreviewCodexRoute: func(ctx context.Context, options integration.CodexRouteOptions) (integration.CodexRoutePreview, error) {
+			pendingRoute.path = ""
+			pendingRoute.revision = ""
+			if options.Mode == "direct" {
+				state := core.State()
+				if !state.Configured {
+					return integration.CodexRoutePreview{}, errors.New("configure explicit upstream first")
+				}
+				options.Endpoint = state.Endpoint
+			}
+			if options.Mode == "proxy" {
+				state := core.State()
+				if !state.Running {
+					return integration.CodexRoutePreview{}, errors.New("start gateway first")
+				}
+				options.Endpoint = state.LocalEndpoint
+			}
+			path, err := app.Dialog.OpenFile().AddFilter("Codex user-level config.toml", "*.toml").SetMessage("选择 user-level config.toml；仅预览，不读取登录文件").PromptForSingleSelection()
+			if err != nil || path == "" || ctx.Err() != nil || filepath.Base(path) != "config.toml" {
+				return integration.CodexRoutePreview{}, errors.New("route selection cancelled")
+			}
+			preview, err := integration.PreviewCodexRouteFile(path, options)
+			if err != nil {
+				return integration.CodexRoutePreview{}, err
+			}
+			pendingRoute.path = path
+			pendingRoute.revision = preview.Revision
+			pendingRoute.options = options
+			return preview, nil
+		},
+		ApplyCodexRoute: func(revision string) (integration.CodexRoutePreview, error) {
+			path, expected, options := pendingRoute.path, pendingRoute.revision, pendingRoute.options
+			pendingRoute.path = ""
+			pendingRoute.revision = ""
+			if path == "" || revision != expected {
+				return integration.CodexRoutePreview{}, errors.New("preview expired")
+			}
+			state := core.State()
+			if options.Mode == "proxy" && (!state.Running || state.LocalEndpoint != options.Endpoint) || options.Mode == "direct" && (!state.Configured || state.Endpoint != options.Endpoint) {
+				return integration.CodexRoutePreview{}, errors.New("gateway changed")
+			}
+			return integration.ApplyCodexRouteFile(path, options, revision)
+		},
 		SaveImage: func(ctx context.Context, mime string, data []byte) (bool, error) {
 			if ctx.Err() != nil {
 				return false, errors.New("save cancelled")

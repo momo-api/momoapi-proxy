@@ -103,6 +103,13 @@ func check() error {
 		}
 		var upstreamRequests, savedProfiles, loadedProfiles, quotaQueries, skillCopies, mcpCopies, codexCopies, imageMCPCopies, videoMCPCopies atomic.Int32
 		var codexCatalogCopies atomic.Int32
+		var codexRoutePreviews, codexRouteApplies atomic.Int32
+		codexRoutePath := filepath.Join(profile, "config.toml")
+		if err := os.WriteFile(codexRoutePath, []byte("model_provider='momo-local-preview'\nmodel='gpt-5.6-luna'\n[mcp_servers.synthetic]\ncommand='preserve'\n[model_providers.momo-local-preview]\nbase_url='http://127.0.0.1:12345/v1'\n"), 0600); err != nil {
+			panic("synthetic route fixture")
+		}
+		var routeOptions integration.CodexRouteOptions
+		var routeRevision string
 		var imageSaves atomic.Int32
 		var stalled []net.Conn
 		var savedProfile appcore.Config
@@ -265,6 +272,11 @@ func check() error {
 			}
 		}))
 		options.PostShutdown = func() {
+			routeBytes, routeErr := os.ReadFile(codexRoutePath)
+			if routeErr != nil || codexRoutePreviews.Load() != 1 || codexRouteApplies.Load() != 1 || !strings.Contains(string(routeBytes), "model_provider=\"openai\"") || !strings.Contains(string(routeBytes), "command='preserve'") || !strings.Contains(string(routeBytes), "[model_providers.momo-local-preview]") {
+				fmt.Println("FAIL native route preview/apply preservation")
+				os.Exit(1)
+			}
 			savedImage, saveErr := os.ReadFile(filepath.Join(profile, "synthetic-save.png"))
 			wantImage, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
 			if imageSaves.Load() != 1 || saveErr != nil || string(savedImage) != string(wantImage) {
@@ -288,6 +300,27 @@ func check() error {
 			os.Exit(0) // test-only: macOS Run does not necessarily return
 		}
 		original := ui.HandlerWithActions(origin, core, ui.Actions{
+			// Synthetic selected file, NOT an OS OpenFile dialog acceptance.
+			PreviewCodexRoute: func(ctx context.Context, o integration.CodexRouteOptions) (integration.CodexRoutePreview, error) {
+				p, err := integration.PreviewCodexRouteFile(codexRoutePath, o)
+				if err == nil {
+					routeOptions = o
+					routeRevision = p.Revision
+					codexRoutePreviews.Add(1)
+				}
+				return p, err
+			},
+			ApplyCodexRoute: func(revision string) (integration.CodexRoutePreview, error) {
+				if revision != routeRevision {
+					return integration.CodexRoutePreview{}, errors.New("route revision")
+				}
+				p, err := integration.ApplyCodexRouteFile(codexRoutePath, routeOptions, revision)
+				if err == nil {
+					codexRouteApplies.Add(1)
+				}
+				routeRevision = ""
+				return p, err
+			},
 			// Isolated synthetic native destination, not an OS dialog test.
 			SaveImage: func(ctx context.Context, mime string, data []byte) (bool, error) {
 				if err := writeSelectedImage(ctx, filepath.Join(profile, "synthetic-save.png"), mime, data); err != nil {
@@ -338,7 +371,7 @@ func check() error {
 		close(appReady)
 		options.Assets.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
-			case "/app/videos/catalog", "/app/videos/generate", "/app/videos/task", "/app/images/catalog", "/app/images/generate", "/app/images/edit", "/app/images/task", "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/codex-catalog", "/app/skill", "/app/mcp-config", "/app/image-mcp-config", "/app/video-mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
+			case "/app/codex-route-preview", "/app/codex-route-apply", "/app/videos/catalog", "/app/videos/generate", "/app/videos/task", "/app/images/catalog", "/app/images/generate", "/app/images/edit", "/app/images/task", "/app/configure", "/app/load", "/app/start", "/app/stop", "/app/codex-config", "/app/codex-catalog", "/app/skill", "/app/mcp-config", "/app/image-mcp-config", "/app/video-mcp-config", "/app/quota", "/app/models", "/check-proxy", "/check-routing", "/check-stall", "/check-native-stop", "/check-done", "/check-page-failure":
 				latestStep.Store(r.URL.Path)
 			}
 			if r.URL.Path == "/" {

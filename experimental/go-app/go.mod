@@ -3,6 +3,7 @@ module github.com/momo-api/momoapi-proxy/experimental/go-app
 go 1.26.2
 
 require (
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/wailsapp/wails/v3 v3.0.0-beta.24
 	github.com/zalando/go-keyring v0.2.8
 	golang.org/x/image v0.41.0

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/appcore"
+	"github.com/momo-api/momoapi-proxy/experimental/go-app/internal/integration"
 	"io"
 	"net/http"
 	"strings"
@@ -32,6 +33,8 @@ type Actions struct {
 	CopyVideoMCPConfig func() error
 	CopyCodexConfig    func() error
 	CopyCodexCatalog   func() error
+	PreviewCodexRoute  func(context.Context, integration.CodexRouteOptions) (integration.CodexRoutePreview, error)
+	ApplyCodexRoute    func(string) (integration.CodexRoutePreview, error)
 	// WebKit custom schemes can omit Origin or serialize it as null. Require a
 	// separate unguessable page capability; never accept either by itself.
 	AllowOpaqueOrigin bool
@@ -79,6 +82,60 @@ func HandlerWithActions(origin string, core *appcore.Core, actions Actions) http
 		}
 		imageAction := r.URL.Path == "/app/images/catalog" || r.URL.Path == "/app/images/generate" || r.URL.Path == "/app/images/edit" || r.URL.Path == "/app/images/task" || r.URL.Path == "/app/images/validate-references" || r.URL.Path == "/app/images/save"
 		videoAction := r.URL.Path == "/app/videos/catalog" || r.URL.Path == "/app/videos/generate" || r.URL.Path == "/app/videos/task"
+		if r.URL.Path == "/app/codex-route-preview" || r.URL.Path == "/app/codex-route-apply" {
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
+				http.Error(w, "page capability required", 403)
+				return
+			}
+			if !actionMu.TryLock() {
+				http.Error(w, "another native action is pending", 409)
+				return
+			}
+			defer actionMu.Unlock()
+			data, err := io.ReadAll(io.LimitReader(r.Body, 2049))
+			if err != nil || len(data) > 2048 || !strictVideoAction(data) {
+				http.Error(w, "invalid route action", 400)
+				return
+			}
+			var preview integration.CodexRoutePreview
+			if r.URL.Path == "/app/codex-route-preview" {
+				var options integration.CodexRouteOptions
+				d := json.NewDecoder(bytes.NewReader(data))
+				d.DisallowUnknownFields()
+				if d.Decode(&options) != nil || options.Endpoint != "" || (options.Mode != "native" && options.Mode != "direct" && options.Mode != "proxy") {
+					http.Error(w, "invalid route preview", 400)
+					return
+				}
+				if actions.PreviewCodexRoute == nil {
+					http.Error(w, "native route selection unavailable", 503)
+					return
+				}
+				preview, err = actions.PreviewCodexRoute(r.Context(), options)
+			} else {
+				var input struct {
+					Revision  string `json:"revision"`
+					Confirmed bool   `json:"confirmed"`
+				}
+				d := json.NewDecoder(bytes.NewReader(data))
+				d.DisallowUnknownFields()
+				if d.Decode(&input) != nil || !input.Confirmed || len(input.Revision) != 64 {
+					http.Error(w, "explicit route confirmation required", 400)
+					return
+				}
+				if actions.ApplyCodexRoute == nil {
+					http.Error(w, "native route apply unavailable", 503)
+					return
+				}
+				preview, err = actions.ApplyCodexRoute(input.Revision)
+			}
+			if err != nil {
+				http.Error(w, "route cancelled, unavailable or conflicting; reselect and review config, profiles, catalog and legacy overrides; apply failure may leave private backup/temp; no automatic retry", 409)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(preview)
+			return
+		}
 		if (videoAction || imageAction || r.URL.Path == "/app/image-mcp-config" || r.URL.Path == "/app/video-mcp-config" || r.URL.Path == "/app/codex-catalog" || r.URL.Path == "/app/diagnostics") && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-MOMO-Bridge")), []byte(bridgeNonce)) != 1 {
 			http.Error(w, "page capability required", 403)
 			return

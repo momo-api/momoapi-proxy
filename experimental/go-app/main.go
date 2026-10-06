@@ -23,6 +23,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) >= 2 && os.Args[1] == "codex-route" {
+		return runCodexRoute(os.Args[2:], os.Stdout)
+	}
 	if len(os.Args) == 9 && os.Args[1] == "mcp" && os.Args[2] == "image" && os.Args[3] == "--endpoint" && (os.Args[5] == "--asset-dir" || os.Args[5] == "--asset-library") && os.Args[6] != "" && os.Args[7] == "--download-origin" && os.Args[8] != "" {
 		return runConnectedMediaDownloadMode(os.Args[4], false, true, os.Args[6], os.Args[5] == "--asset-library", os.Args[8])
 	}

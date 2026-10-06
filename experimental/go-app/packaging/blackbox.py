@@ -606,7 +606,42 @@ def check_diagnostics(binary):
         require(result.returncode == 1 and result.stdout == b'', 'diagnostic arbitrary arguments')
 
 
+def check_codex_three_routes(binary):
+    with tempfile.TemporaryDirectory(prefix="momo-codex-route-") as directory:
+        path = Path(directory) / "config.toml"
+        original = 'model_provider="openai"\nmodel="gpt-5.6-luna"\n[mcp_servers.synthetic]\ncommand="preserve"\n'
+        path.write_text(original, encoding="utf-8")
+        (path.parent / "auth.json").mkdir()  # Must not attempt login-file reads.
+        def run(action, options, extra=(), success=True):
+            result = subprocess.run([str(binary), "codex-route", action, *options, *extra],
+                                    capture_output=True, timeout=8)
+            require((result.returncode == 0) == success, "three-route CLI status")
+            require(str(path).encode() not in result.stdout and b'command' not in result.stdout,
+                    "route reflected private file")
+            return json.loads(result.stdout) if success else None
+        for mode, endpoint in (("direct", "https://momoapi.us"),
+                               ("proxy", "http://127.0.0.1:12345"), ("native", None),
+                               ("proxy", "http://127.0.0.1:12345"), ("native", None)):
+            options = ["--config", str(path), "--mode", mode]
+            if endpoint:
+                options += ["--endpoint", endpoint]
+            before = path.read_bytes()
+            preview = run("preview", options)
+            require(path.read_bytes() == before, "route preview modified file")
+            run("apply", options, ("--confirm", "--revision", "wrong"), success=False)
+            require(path.read_bytes() == before, "stale route changed file")
+            run("apply", options, ("--confirm", "--revision", preview["revision"]))
+            content = path.read_text(encoding="utf-8")
+            require('command="preserve"' in content and 'model="gpt-5.6-luna"' in content
+                    and (path.parent / "auth.json").is_dir(), "route changed unrelated settings")
+        require('model_provider="openai"' in content and '[model_providers.momo-go-direct]' in content
+                and '[model_providers.momo-go-proxy]' in content, "native removed history providers")
+        require(len(list(path.parent.glob("config.toml.momo-*.bak"))) == 5, "private route backups")
+    print("PASS normal binary Codex three-route preview/revision/confirm/backup/preservation (not live login)")
+
+
 def check_runtime(binary):
+    check_codex_three_routes(binary)
     binary = Path(binary).resolve(strict=True)
     check_diagnostics(binary)
     check_codex_catalog(binary)
