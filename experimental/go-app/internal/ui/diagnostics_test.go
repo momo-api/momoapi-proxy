@@ -52,7 +52,7 @@ func TestDiagnosticsNativeGateRedactionAndNoPublicRoute(t *testing.T) {
 			}
 			if tc.code == 200 {
 				var r appcore.DiagnosticReport
-				if json.Unmarshal(out.Body.Bytes(), &r) != nil || r.Scope != "current-core" || !r.Gateway.Configured || r.VerifiedUpstream {
+				if json.Unmarshal(out.Body.Bytes(), &r) != nil || r.Scope != "current-core" || !r.Gateway.Configured || r.VerifiedUpstream || r.Routing.Schema != "momo-route-diagnostics-v1" || r.Routing.Scope != "current-core-since-reset" || len(r.Routing.Routes) != 6 {
 					t.Fatal("report scope")
 				}
 			}

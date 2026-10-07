@@ -14,6 +14,13 @@ without reading configuration/credentials or making network calls. It is not a
 model availability or provider-conformance probe. See [ROUTE-CAPABILITIES.md](ROUTE-CAPABILITIES.md)
 for the strict send-time preflight, evidence boundaries and unchanged opt-in policies.
 
+`momo-preview route-explain --mode momo-routing --model gpt-5.5` explains only
+offline selection through the same registry, without validating a payload or
+probing a provider. It emits fixed redacted labels, `request_validated:false`
+and upstream `unverified`. Native diagnostics also include bounded in-memory
+route-evaluation counters, not inference/usage totals; CLI diagnostics remain
+offline zero counters. See the same document for lifecycle and scope details.
+
 ### Explicit Node media-plugin call compatibility (partial)
 
 The existing Node plugins use flat arguments and image_task_status /

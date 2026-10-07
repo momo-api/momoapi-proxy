@@ -95,6 +95,9 @@ func TestRoutePreflightBuildOnceAndClosedStates(t *testing.T) {
 	if _, _, err := preflightAdapter(adapter, "test-model", nil); err != nil || calls != 1 {
 		t.Fatal("build count")
 	}
+	if decision, err := adapterDecision(adapter); err != nil || decision.Status != CapabilityTranslated || calls != 1 {
+		t.Fatal("selection invoked builder")
+	}
 	for _, state := range []CapabilityStatus{CapabilityUnsupported, CapabilityUnverified, CapabilityLossy, "future-state"} {
 		adapter.capability.Status = state
 		if _, plan, err := preflightAdapter(adapter, "test-model", nil); err == nil || plan != nil || calls != 1 {
@@ -105,6 +108,9 @@ func TestRoutePreflightBuildOnceAndClosedStates(t *testing.T) {
 	adapter.convert = nil
 	if _, _, err := preflightAdapter(adapter, "test-model", nil); err == nil || calls != 1 {
 		t.Fatal("missing converter passed preflight")
+	}
+	if decision, err := adapterDecision(adapter); err == nil || decision.Status != CapabilityUnsupported || decision.Reason != "protocol_not_migrated" {
+		t.Fatal("unbound selection claimed translation")
 	}
 }
 
@@ -167,6 +173,9 @@ func TestRouteRegistryNativeBytesAreExact(t *testing.T) {
 			status, _, _ := request(t, c, endpoint, "/v1/responses", "POST", payload, nil)
 			if status != 200 {
 				t.Fatal("native path rejected")
+			}
+			if routeCount(t, c.Diagnostics().Routing, "responses").NativeSelected != 1 {
+				t.Fatal("native selection not counted")
 			}
 		}
 	}

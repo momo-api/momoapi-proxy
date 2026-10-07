@@ -65,7 +65,50 @@ rejection, all three converters with JSON/SSE output and byte-exact native paths
 The existing unified routing blackbox remains the regression baseline.
 
 This is not a general raw-request dry-run API: preflight operates on already
-prepared request bytes inside Core. Full route explanation/audit, exhaustive
-model x feature matrix, real provider conformance and soak remain separate work.
+prepared request bytes inside Core. Exhaustive model x feature matrix, real
+provider conformance, persistent audit trails and soak remain separate work.
 Frozen native-namespace experiments, accounts, Muse, default product switching,
 production deployment and formal releases are not part of this increment.
+
+## Offline selection explanation
+
+Run `momo-preview route-explain --mode momo-routing --model gpt-5.5`.
+Both named flags are required, in either order; mode must be `passthrough` or
+`momo-routing`. Model input is bounded to 256 UTF-8 bytes without whitespace or
+control characters. Invalid arguments yield fixed text without reflecting input.
+
+`momo-route-explanation-v1` / `offline-selection` shares the live selector and
+registry, but never invokes builders, policies, history, Core, configuration,
+stdin, credential discovery or network. Only fixed protocol/status/reason labels
+are emitted, not the supplied model or a concrete upstream path. Muse explains
+as unsupported; it is not enabled. Unknown names retain the existing classifier's
+Chat fallback rather than inventing a model whitelist. `request_validated:false`
+and `upstream_status:unverified` are unconditional. A translated selection does
+not imply an accepted payload, available model or successful inference.
+
+## Redacted in-memory route diagnostics
+
+The existing protected native diagnostics bridge includes additive `routing`
+data with schema `momo-route-diagnostics-v1`. The enclosing
+`momo-local-diagnostics-v1` remains unchanged; consumers must tolerate additive
+fields. No new public TCP/MCP endpoint, logging, persistence or polling is added.
+There are six fixed rows: five registry protocols and a reserved `unclassified`
+row for selector misses. Inputs cannot create rows.
+
+Counters measure only `/v1/responses` route evaluation after common admission,
+policy/attachment processing and history preparation:
+- `native_selected`: selection without a strict builder; bytes remain unchanged.
+- `preflight_accepted`: strict builder produced an accepted plan.
+- `preflight_rejected`: unsupported route or strict builder rejected the request.
+
+These are not sends, completions, inference successes, usage or charges. A later
+policy rejection (including DSML/client-search conflict), cancellation or upstream
+failure does not undo an already-recorded evaluation. Earlier JSON/model/policy/
+history rejection, compact, native Chat and media entry points are excluded.
+
+Snapshots are detached under the Core lock. Counts saturate at 2^53-1 for JSON
+integer safety. Successful Configure, Stop and Close clear counters and advance
+an independent route epoch; old in-flight work cannot increment a new session.
+The report includes no models, keys, account data, request/error bodies or URLs.
+CLI `diagnostics` reports only its fresh `offline-process` with zero route counts;
+it never discovers or reads the running desktop's statistics.
