@@ -178,7 +178,8 @@ momo_claude:{model,type,signature|data} 保留 provider opaque 字符串，不�
 也拒绝；checkpoint保护完整状态回合。显式 momo_claude_thinking adaptive/
 enabled/disabled，display summarized/omitted；manual预算>=1024且<max_tokens，
 不clamp/猜模型能力。effort仅显式adaptive下映射output_config.effort，别名冲突
-拒绝。enabled/adaptive拒绝强制named/required，-thinking alias仍拒绝。
+拒绝。enabled/adaptive拒绝强制named/required；唯一末尾-thinking alias需显式有效
+enabled/adaptive，缺失/disabled/仅effort及嵌入/重复后缀拒绝，不改模型或预算。
 single final signature_delta；全部Claude帧strict UTF8/duplicate-free/depth64/
 拒绝unpaired surrogate；128blocks/256KiB opaque/1MiB保留与历史预算。final
 thinking_tokens只映射已验证reasoning_tokens。clean EOF+终端写成功才存history。

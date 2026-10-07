@@ -9,8 +9,11 @@ func buildClaudePlan(data []byte) (*chatPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	if ir.effort != "" && ir.claudeThinking == nil || strings.Contains(ir.model, "-thinking") {
+	if ir.effort != "" && ir.claudeThinking == nil {
 		return nil, errRouted
+	}
+	if strings.Contains(ir.model, "-thinking") && (strings.Count(ir.model, "-thinking") != 1 || !strings.HasSuffix(ir.model, "-thinking") || !includes([]string{"enabled", "adaptive"}, str(ir.claudeThinking["type"]))) {
+		return nil, errRouted // alias never supplies implicit thinking/budgets
 	}
 	messages := []any{}
 	system := []string{}

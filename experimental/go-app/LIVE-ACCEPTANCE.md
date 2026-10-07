@@ -28,7 +28,7 @@ Synthetic tests fail on the baseline and pass with the parser fix.
 | momo-routing native / gpt-5.6-luna Responses SSE | PASS | Small fixed text smoke |
 | momo-routing Chat / gpt-5.5 | PASS after fix | Text SSE, namespaced allowed-tool call, paired output with local previous_response_id |
 | momo-routing Gemini / gemini-3.8-flash | PASS bounded protocol/tool continuation | Text SSE, exact tool identity/arguments, paired output continuation with tools disabled |
-| momo-routing Claude / claude-opus-4-6-thinking | NOT SUPPORTED | Current key exposes thinking alias, deliberately rejected by builder before send |
+| momo-routing Claude / claude-opus-4-6-thinking | PASS after explicit-control follow-up | Signed text, namespace allowed-auto tool, paired local-history continuation; see below |
 
 Initially Chat streaming aborted. An equivalent passthrough Chat request had
 valid finish_reason, DONE and totals; prompt_tokens_details also included
@@ -51,7 +51,36 @@ checks; it excludes the separately recorded unsupported Claude route.
 
 ## Still required
 
-Claude thinking-alias design/conformance, nonzero cache-write accounting semantics,
+Broader Claude model/thinking conformance, nonzero cache-write accounting semantics,
 long-running/multi-client failures and broader model/feature matrices. No broad
 upstream_status promotion, signed thinking/media conformance or model availability
 guarantee follows from these probes. Draft PRs remain unmerged; no release/deploy.
+
+## Claude explicit thinking-alias follow-up
+
+Base c3fa896 (#185). The new gate permits a unique final `-thinking` alias only
+with explicitly validated enabled/adaptive controls. Missing/disabled/effort-only,
+embedded/repeated suffixes and forced named/required tools remain rejected. Exact
+model identity, opaque signatures and existing replay/retention checks stay intact.
+No alias stripping, cross-model state rebinding or guessed budgets is introduced.
+
+First real conversion aborted. An isolated diagnostic executable emitted only a
+fixed rejection line number (never data); an independent Go Messages probe found
+exact returned alias, one final signature_delta and clean message_stop. The initial
+thinking block omitted the signature key. Converter now allows initial absence or
+empty string only; null/nonempty and missing/duplicate final signatures still fail.
+Diagnostic instrumentation is outside Git and excluded from the product binary.
+
+Read-only non-root runtime with private stdin key tested max_tokens=1536 and
+enabled budget_tokens=1024. A later real run passed 4/4: authenticated catalog,
+signed text with exact alias state, allowed-auto namespaced echo call with exact
+arguments, and previous_response_id paired tool-output continuation with tools
+disabled. Thinking cannot force calls; allowed-auto follows the existing gate.
+One earlier text run completed protocol/signatures but failed an exact-string
+assertion; the next explicit experiment tested marker containment (and happened
+to be exact). Continuation contained the correct marker but was not exact-string.
+These are bounded protocol/tool-flow observations, not deterministic model behavior.
+
+Synthetic tests cover the alias gate, omitted initial signature completion, invalid
+initial/missing final signatures and exact-alias signed suffix/full replay in
+JSON/SSE with cross-model denial. Prism static review approved; not execution proof.
