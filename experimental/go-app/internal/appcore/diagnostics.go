@@ -16,6 +16,7 @@ type DiagnosticReport struct {
 	Gateway          DiagnosticGateway `json:"gateway"`
 	Stores           DiagnosticStores  `json:"stores"`
 	Limits           DiagnosticLimits  `json:"limits"`
+	Routing          RouteDiagnostics  `json:"routing"`
 	VerifiedUpstream bool              `json:"verified_upstream"`
 	AccountWallet    bool              `json:"account_wallet"`
 	CrossDevice      bool              `json:"cross_device"`
@@ -75,6 +76,7 @@ func OfflineDiagnostics() DiagnosticReport {
 		Schema: "momo-local-diagnostics-v1", Scope: "offline-process", Version: Version,
 		CapturedAt: time.Now().UTC(), Runtime: DiagnosticRuntime{runtime.GOOS, runtime.GOARCH, runtime.Version()},
 		Gateway: DiagnosticGateway{Mode: "passthrough"},
+		Routing: routeDiagnosticSnapshot("offline-process", [routeDiagnosticSlots]routeDiagnosticCounter{}),
 		Limits:  DiagnosticLimits{MaxRequest, MaxResponse, 4, 32, maxHistoryEntries, maxHistoryBytes, maxHistoryItems, int(historyTTL / time.Second), maxAttachments, maxAttachmentBytes, int(attachmentTTL / time.Second), maxImageTasks, maxVideoTasks, int(imageCatalogTTL / time.Second), int(imageTaskTTL / time.Second)},
 	}
 }
@@ -86,6 +88,7 @@ func (c *Core) Diagnostics() DiagnosticReport {
 	report.Scope = "current-core"
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	report.Routing = routeDiagnosticSnapshot("current-core-since-reset", c.routeCounts)
 	now := time.Now().UTC()
 	report.CapturedAt = now
 	mode := c.config.Mode

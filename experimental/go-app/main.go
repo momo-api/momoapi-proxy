@@ -23,6 +23,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) >= 2 && os.Args[1] == "route-explain" {
+		return runRouteExplain(os.Args[2:], os.Stdout)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "route-capabilities" {
 		return writeRouteCapabilities(os.Stdout)
 	}
@@ -95,7 +98,7 @@ func run() error {
 		return desktop()
 	}
 	if len(os.Args) != 2 || os.Args[1] != "serve" {
-		return errors.New("MOMO preview: desktop (no args) | --version | diagnostics (offline, not running app health) | codex-text-tools-catalog --model gpt-5.5 | mcp (read-only stdio) | mcp image|video --endpoint <local-origin> (explicit flat plugin subset; image optionally --asset-dir <absolute NEW directory> or --asset-library <absolute Go library directory>, then optionally --download-origin <HTTPS443 origin>) | plugin-mcp-config image|video --endpoint <local-origin> (secret-free launcher override) | mcp-videos | mcp-videos-connect --endpoint <local-origin> | mcp-images | mcp-images-connect --endpoint <local-origin> | serve (upstream config on private stdin)")
+		return errors.New("MOMO preview: desktop (no args) | --version | route-capabilities (offline) | route-explain --mode passthrough|momo-routing --model <name> (offline selection only) | diagnostics (offline, not running app health) | codex-text-tools-catalog --model gpt-5.5 | mcp (read-only stdio) | mcp image|video --endpoint <local-origin> (explicit flat plugin subset; image optionally --asset-dir <absolute NEW directory> or --asset-library <absolute Go library directory>, then optionally --download-origin <HTTPS443 origin>) | plugin-mcp-config image|video --endpoint <local-origin> (secret-free launcher override) | mcp-videos | mcp-videos-connect --endpoint <local-origin> | mcp-images | mcp-images-connect --endpoint <local-origin> | serve (upstream config on private stdin)")
 	}
 	data, err := io.ReadAll(io.LimitReader(os.Stdin, 8193))
 	_ = os.Stdin.Close()

@@ -137,35 +137,53 @@ var errRouteNotMigrated = errors.New("route_protocol_not_migrated")
 // Native paths intentionally bypass strict conversion parsing; Core still owns
 // their admission, framing, model/stream and transport validation.
 func preflightResponses(mode, model string, body []byte) (RouteDecision, *chatPlan, error) {
-	decision := RouteDecision{UpstreamStatus: CapabilityUnverified}
-	if mode == "" || mode == "passthrough" {
-		decision.Protocol, decision.Status, decision.Reason = "responses", CapabilityNative, "default_passthrough"
-		return decision, nil, nil
-	}
-	if mode != "momo-routing" {
-		return decision, nil, errRouted
-	}
-	adapter, ok := responseRouteAdapter(resolveProtocol(model))
-	if !ok {
-		return decision, nil, errRouteNotMigrated
+	decision, adapter, err := selectResponsesRoute(mode, model)
+	if err != nil || decision.Status == CapabilityNative {
+		return decision, nil, err
 	}
 	return preflightAdapter(adapter, model, body)
 }
-func preflightAdapter(adapter routeAdapter, model string, body []byte) (RouteDecision, *chatPlan, error) {
+func selectResponsesRoute(mode, model string) (RouteDecision, routeAdapter, error) {
 	decision := RouteDecision{UpstreamStatus: CapabilityUnverified}
+	if mode == "" || mode == "passthrough" {
+		decision.Protocol, decision.Status, decision.Reason = "responses", CapabilityNative, "default_passthrough"
+		return decision, routeAdapter{}, nil
+	}
+	if mode != "momo-routing" {
+		return decision, routeAdapter{}, errRouted
+	}
+	adapter, ok := responseRouteAdapter(resolveProtocol(model))
+	if !ok {
+		decision.Protocol, decision.Status, decision.Reason = "unclassified", CapabilityUnsupported, "unclassified_protocol"
+		return decision, routeAdapter{}, errRouteNotMigrated
+	}
+	decision, err := adapterDecision(adapter)
+	return decision, adapter, err
+}
+func adapterDecision(adapter routeAdapter) (RouteDecision, error) {
+	decision := RouteDecision{Protocol: adapter.capability.Protocol, UpstreamStatus: CapabilityUnverified}
 	switch adapter.capability.Status {
 	case CapabilityNative, CapabilityTranslated:
 	default:
 		decision.Status, decision.Reason = CapabilityUnsupported, "protocol_not_migrated"
-		return decision, nil, errRouteNotMigrated
+		return decision, errRouteNotMigrated
 	}
 	decision.Protocol, decision.Status = adapter.capability.Protocol, adapter.capability.Status
 	if decision.Status == CapabilityNative {
 		decision.Reason = "native_model_passthrough"
-		return decision, nil, nil
+		return decision, nil
 	}
 	if adapter.build == nil || adapter.convert == nil {
-		return decision, nil, errRouteNotMigrated
+		decision.Status, decision.Reason = CapabilityUnsupported, "protocol_not_migrated"
+		return decision, errRouteNotMigrated
+	}
+	decision.Reason = "explicit_strict_conversion"
+	return decision, nil
+}
+func preflightAdapter(adapter routeAdapter, model string, body []byte) (RouteDecision, *chatPlan, error) {
+	decision, err := adapterDecision(adapter)
+	if err != nil || decision.Status == CapabilityNative {
+		return decision, nil, err
 	}
 	plan, err := adapter.build(body)
 	if err != nil {

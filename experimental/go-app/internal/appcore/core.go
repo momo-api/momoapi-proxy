@@ -41,19 +41,21 @@ type State struct {
 	Mode          string
 }
 type Core struct {
-	mu          sync.Mutex
-	config      Config
-	running     bool
-	active      int
-	cancels     map[uint64]context.CancelFunc
-	serial      uint64
-	token       string
-	endpoint    string
-	client      *http.Client
-	history     responseHistory
-	attachments attachmentStore
-	images      imageSession
-	videos      videoSession
+	mu              sync.Mutex
+	config          Config
+	running         bool
+	active          int
+	cancels         map[uint64]context.CancelFunc
+	serial          uint64
+	token           string
+	endpoint        string
+	client          *http.Client
+	history         responseHistory
+	attachments     attachmentStore
+	images          imageSession
+	videos          videoSession
+	routeCounts     [routeDiagnosticSlots]routeDiagnosticCounter
+	routeGeneration uint64
 }
 
 func New() (*Core, error) {
@@ -140,6 +142,8 @@ func (c *Core) Configure(config Config) error {
 	c.attachments.clear()
 	c.images.clear()
 	c.videos.clear()
+	c.routeCounts = [routeDiagnosticSlots]routeDiagnosticCounter{}
+	c.routeGeneration++
 	return nil
 }
 func (c *Core) State() State {
@@ -172,6 +176,8 @@ func (c *Core) Stop() {
 	c.attachments.clear()
 	c.images.clear()
 	c.videos.clear()
+	c.routeCounts = [routeDiagnosticSlots]routeDiagnosticCounter{}
+	c.routeGeneration++
 	for _, cancel := range c.cancels {
 		cancel()
 	}
@@ -274,6 +280,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	config := c.config
 	generation := c.history.generation
+	routeGeneration := c.routeGeneration
 	c.serial++
 	id := c.serial
 	requestTimeout := 120 * time.Second
@@ -422,6 +429,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			// All explicit policies, attachment expansion and history preparation
 			// precede this single strict build. No completion/history is committed.
 			decision, plan, routeErr := preflightResponses(config.Mode, model, body)
+			c.recordRoutePreflight(routeGeneration, decision, routeErr)
 			if routeErr != nil {
 				routePreflightError(w, routeErr)
 				return
@@ -450,6 +458,10 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				}
 				routed.prepareCompletion = c.historyCompletion(ctx, seed)
 			}
+		}
+		if r.URL.Path == "/v1/responses" && config.Mode != "momo-routing" {
+			decision, _, routeErr := preflightResponses(config.Mode, model, body)
+			c.recordRoutePreflight(routeGeneration, decision, routeErr)
 		}
 		if r.URL.Path == "/v1/chat/completions" {
 			var messages []json.RawMessage
