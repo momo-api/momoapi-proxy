@@ -229,7 +229,7 @@ func chatTokenUsage(u map[string]any) (map[string]any, error) {
 		count       int64
 		dest        *int64
 	}{
-		{"prompt_tokens_details", "cached_tokens", []string{"cached_tokens", "audio_tokens"}, in, &cached},
+		{"prompt_tokens_details", "cached_tokens", []string{"cached_tokens", "audio_tokens", "cache_write_tokens", "cached_creation_tokens"}, in, &cached},
 		{"completion_tokens_details", "reasoning_tokens", []string{"reasoning_tokens", "audio_tokens", "accepted_prediction_tokens", "rejected_prediction_tokens"}, out, &reasoning},
 	} {
 		if v, present := u[spec.key]; present && v != nil {
@@ -240,6 +240,12 @@ func chatTokenUsage(u map[string]any) (map[string]any, error) {
 			for key, value := range details {
 				n, ok := tokenCount(value)
 				if !ok || (key == spec.mapped || key == "audio_tokens") && n > spec.count {
+					return nil, errRouted
+				}
+				// Live MOMO emits these zero-valued cache-write metadata keys.
+				// Their nonzero accounting semantics are not verified: do not
+				// discard real usage or guess a Responses cache representation.
+				if (key == "cache_write_tokens" || key == "cached_creation_tokens") && n != 0 {
 					return nil, errRouted
 				}
 				if key == spec.mapped {
