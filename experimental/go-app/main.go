@@ -23,6 +23,9 @@ func main() {
 	}
 }
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "route-capabilities" {
+		return writeRouteCapabilities(os.Stdout)
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "codex-route" {
 		return runCodexRoute(os.Args[2:], os.Stdout)
 	}
