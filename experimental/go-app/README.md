@@ -7,6 +7,13 @@ autostart or production deployment. Entire experiment excluded from npm.
 
 ## Use
 
+### Offline Router capability matrix
+
+`momo-preview route-capabilities` exports the local adapter contract as JSON,
+without reading configuration/credentials or making network calls. It is not a
+model availability or provider-conformance probe. See [ROUTE-CAPABILITIES.md](ROUTE-CAPABILITIES.md)
+for the strict send-time preflight, evidence boundaries and unchanged opt-in policies.
+
 ### Explicit Node media-plugin call compatibility (partial)
 
 The existing Node plugins use flat arguments and image_task_status /

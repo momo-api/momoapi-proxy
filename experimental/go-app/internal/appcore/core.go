@@ -151,7 +151,7 @@ func (c *Core) State() State {
 	}
 	capability := Capability
 	if mode == "momo-routing" {
-		capability = "partial-momo-responses-chat-claude-gemini-routing"
+		capability = routedCapabilityLabel()
 	}
 	return State{Version, c.config.Endpoint, c.endpoint, c.config.APIKey != "", c.running, c.active, capability, mode}
 }
@@ -320,6 +320,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	stream := false
 	var routed *chatPlan
+	var selectedAdapter routeAdapter
 	routedProtocol := ""
 	upstreamPath := r.URL.Path
 	if r.Method == "GET" {
@@ -349,7 +350,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 		stream = string(payload["stream"]) == "true"
 		protocol := resolveProtocol(model)
-		converted := r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" && (protocol == "chat" || protocol == "claude" || protocol == "gemini")
+		converted := r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" && responseConversionProtocol(protocol)
 		if replay && !converted {
 			http.Error(w, "history replay policy requires converted routing", 400)
 			return
@@ -383,7 +384,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "invalid explicit conversion request", 400)
 				return
 			}
-			if config.Mode != "momo-routing" || nativeCompact || protocol != "chat" && protocol != "claude" && protocol != "gemini" {
+			if config.Mode != "momo-routing" || nativeCompact || !responseConversionProtocol(protocol) {
 				http.Error(w, "attachment policy requires converted routing", 400)
 				return
 			}
@@ -410,7 +411,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/responses" && config.Mode == "momo-routing" {
 			var seed *historySeed
 			protocol := resolveProtocol(model)
-			if protocol == "chat" || protocol == "claude" || protocol == "gemini" {
+			if responseConversionProtocol(protocol) {
 				var historyErr error
 				body, seed, historyErr = c.prepareRoutedHistoryPolicy(body, model, replay)
 				if historyErr != nil {
@@ -418,41 +419,19 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			switch resolveProtocol(model) {
-			case "chat":
-				routedProtocol = "chat"
-				var routeErr error
-				routed, routeErr = buildChatPlan(body)
-				if routeErr != nil {
-					routedPayloadError(w, routeErr)
-					return
-				}
-				body = routed.body
-				upstreamPath = "/v1/chat/completions"
-			case "claude":
-				routedProtocol = "claude"
-				var routeErr error
-				routed, routeErr = buildClaudePlan(body)
-				if routeErr != nil {
-					routedPayloadError(w, routeErr)
-					return
-				}
-				body = routed.body
-				upstreamPath = "/v1/messages"
-			case "responses": // preserve existing exact native protocol bytes
-			case "gemini":
-				routedProtocol = "gemini"
-				var routeErr error
-				routed, routeErr = buildGeminiPlan(body)
-				if routeErr != nil {
-					routedPayloadError(w, routeErr)
-					return
-				}
-				body = routed.body
-				upstreamPath = "/v1beta/models/" + url.PathEscape(model) + ":streamGenerateContent?alt=sse"
-			default:
-				http.Error(w, "model protocol not migrated", 501)
+			// All explicit policies, attachment expansion and history preparation
+			// precede this single strict build. No completion/history is committed.
+			decision, plan, routeErr := preflightResponses(config.Mode, model, body)
+			if routeErr != nil {
+				routePreflightError(w, routeErr)
 				return
+			}
+			routed = plan
+			if routed != nil {
+				routedProtocol = decision.Protocol
+				selectedAdapter, _ = responseRouteAdapter(routedProtocol)
+				body = routed.body
+				upstreamPath = selectedAdapter.targetPath(model)
 			}
 			if routed != nil {
 				if replay {
@@ -514,14 +493,7 @@ func (c *Core) proxy(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "upstream protocol mismatch", 502)
 			return
 		}
-		var convertErr error
-		if routedProtocol == "claude" {
-			convertErr = convertClaudeStream(ctx, w, upstream.Body, routed)
-		} else if routedProtocol == "gemini" {
-			convertErr = convertGeminiStream(ctx, w, upstream.Body, routed)
-		} else {
-			convertErr = convertChatStream(ctx, w, upstream.Body, routed)
-		}
+		convertErr := selectedAdapter.convert(ctx, w, upstream.Body, routed)
 		if convertErr != nil {
 			if !routed.stream && !errors.Is(convertErr, errRoutedWrite) {
 				http.Error(w, "upstream conversion failed", 502)
