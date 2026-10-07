@@ -125,9 +125,12 @@ func convertClaudeStream(ctx context.Context, w http.ResponseWriter, body io.Rea
 				if returnedModel != plan.model {
 					return false, errRouted
 				}
-				if !only(b, "type", "thinking", "signature") || b["thinking"] != "" || b["signature"] != "" {
+				if !only(b, "type", "thinking", "signature") || b["thinking"] != "" {
 					return false, errRouted
 				}
+				if signature, present := b["signature"]; present && signature != "" {
+					return false, errRouted
+				} // absent initial signature is supplied by final signature_delta
 				active.state = &claudeState{Model: plan.model, Type: "thinking"}
 				if err := chargeMetadata(); err != nil {
 					return false, err

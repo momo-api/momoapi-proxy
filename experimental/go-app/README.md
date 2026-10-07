@@ -171,12 +171,15 @@ display may instead be omitted (empty signed summary) or absent. Manual
 effort low/medium/high/xhigh/max requires explicit adaptive mode and maps to
 native output_config.effort; conflicting aliases reject. Availability is delegated
 to the provider, not guessed from model names. Forced named/required tool choice
-with enabled/adaptive thinking and -thinking aliases reject. Controls are per
+with enabled/adaptive thinking rejects. A unique final `-thinking` Claude alias
+requires explicit validated enabled/adaptive control; absent/disabled/effort-only
+or embedded/repeated aliases reject. Model and budgets are never rewritten. Controls are per
 request, never inherited. text-tools-v1 still strips reasoning.summary; use native
 display for Claude instead. No updates/interleaved beta/output-media/full-native
 stream compatibility or live-provider claim.
 
-Claude accepts one final signature_delta per thinking block; duplicate signatures,
+Claude accepts an omitted or empty initial signature, then requires one final
+signature_delta per thinking block; duplicate signatures,
 thinking after signature, missing signature, malformed/duplicate JSON, invalid
 UTF8 or unpaired UTF16 surrogates reject. 128 blocks,256KiB opaque string and
 1MiB retained/history/wire budgets. Final thinking_tokens if supplied maps to

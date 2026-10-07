@@ -27,73 +27,80 @@ func claudeRedactedFixture(index int, data string) string {
 	return claudeFrame("content_block_start", map[string]any{"index": index, "content_block": map[string]any{"type": "redacted_thinking", "data": data}}) + claudeFrame("content_block_stop", map[string]any{"index": index})
 }
 func TestClaudeThinkingSignedOrderedSuffixFullReplay(t *testing.T) {
-	model := "claude-sonnet-4-6"
-	signature := "opaque synthetic signature: not necessarily Base64 中文"
-	data := "opaque redacted ciphertext: not prose"
-	wire := claudeStart() + claudeThinkingFixture(0, " public summary \r\n", signature) + claudeRedactedFixture(1, data) + claudeText(2, "before") + claudeTool(3, "read_signed", "pad__read", `{"n":1}`) + claudeThinkingFixture(4, "", signature) + claudeTool(5, "write_signed", "pad__write", `{"input":" raw \r\n"}`) + claudeEnd("tool_use")
-	for _, stream := range []bool{false, true} {
-		t.Run(map[bool]string{true: "SSE", false: "JSON"}[stream], func(t *testing.T) {
-			var mu sync.Mutex
-			var captures []map[string]any
-			c, endpoint := routedClaudeCore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				b, _ := io.ReadAll(r.Body)
-				p, _ := decodeVideoObject(b)
-				mu.Lock()
-				captures = append(captures, p)
-				n := len(captures)
-				mu.Unlock()
-				w.Header().Set("Content-Type", "text/event-stream")
-				if n == 1 {
-					io.WriteString(w, wire)
-				} else {
-					io.WriteString(w, goodClaudeSSE())
-				}
-			}))
-			input := []any{map[string]any{"role": "user", "content": "first"}}
-			p, _ := decodeObject(historyPayload(model, input, "", stream))
-			p["momo_claude_thinking"] = map[string]any{"type": "adaptive", "display": "summarized"}
-			first := historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
-			output := first["output"].([]any)
-			if len(output) != 6 || obj(output[0])["type"] != "reasoning" || obj(output[1])["type"] != "reasoning" || len(obj(output[1])["summary"].([]any)) != 0 {
-				t.Fatal("thinking/redacted order lost")
+	for _, model := range []string{"claude-sonnet-4-6", "claude-opus-4-6-thinking"} {
+		t.Run(model, func(t *testing.T) {
+			signature := "opaque synthetic signature: not necessarily Base64 中文"
+			data := "opaque redacted ciphertext: not prose"
+			wire := claudeStart() + claudeThinkingFixture(0, " public summary \r\n", signature) + claudeRedactedFixture(1, data) + claudeText(2, "before") + claudeTool(3, "read_signed", "pad__read", `{"n":1}`) + claudeThinkingFixture(4, "", signature) + claudeTool(5, "write_signed", "pad__write", `{"input":" raw \r\n"}`) + claudeEnd("tool_use")
+			wire = strings.ReplaceAll(wire, "claude-sonnet-4-6", model)
+			if strings.HasSuffix(model, "-thinking") {
+				wire = strings.ReplaceAll(wire, `"signature":"",`, "")
 			}
-			suffix := []any{map[string]any{"type": "custom_tool_call_output", "call_id": "write_signed", "output": "written"}, map[string]any{"type": "function_call_output", "call_id": "read_signed", "output": "read"}}
-			p["previous_response_id"] = first["id"]
-			p["input"] = suffix
-			historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
-			full := append(append(append([]any{}, input...), output...), suffix...)
-			p["input"] = full
-			historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
-			delete(p, "previous_response_id")
-			historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
-			mu.Lock()
-			saved := append([]map[string]any{}, captures...)
-			mu.Unlock()
-			if len(saved) != 4 || !reflect.DeepEqual(saved[1], saved[2]) || !reflect.DeepEqual(saved[1], saved[3]) {
-				t.Fatal("signed suffix/full mismatch")
-			}
-			want := []any{map[string]any{"type": "thinking", "thinking": " public summary \r\n", "signature": signature}, map[string]any{"type": "redacted_thinking", "data": data}, map[string]any{"type": "text", "text": "before"}, map[string]any{"type": "tool_use", "id": "read_signed", "name": "pad__read", "input": map[string]any{"n": json.Number("1")}}, map[string]any{"type": "thinking", "thinking": "", "signature": signature}, map[string]any{"type": "tool_use", "id": "write_signed", "name": "pad__write", "input": map[string]any{"input": " raw \r\n"}}}
-			if !reflect.DeepEqual(obj(saved[1]["messages"].([]any)[1])["content"], want) {
-				t.Fatal("native thinking blocks changed", string(mustJSON(saved[1])))
-			}
-			for _, target := range []string{"gpt-5.5", "gemini-3.1-pro-preview", "claude-opus-4-6"} {
-				for _, items := range [][]any{suffix, full} {
-					q, _ := decodeObject(historyPayload(target, items, str(first["id"]), false))
-					code, _, _ := request(t, c, endpoint, "/v1/responses", "POST", string(mustJSON(q)), map[string]string{"X-MOMO-History": "replay-v1"})
-					if code != 400 {
-						t.Fatal("signed foreign model accepted", target, code)
+			for _, stream := range []bool{false, true} {
+				t.Run(map[bool]string{true: "SSE", false: "JSON"}[stream], func(t *testing.T) {
+					var mu sync.Mutex
+					var captures []map[string]any
+					c, endpoint := routedClaudeCore(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						b, _ := io.ReadAll(r.Body)
+						p, _ := decodeVideoObject(b)
+						mu.Lock()
+						captures = append(captures, p)
+						n := len(captures)
+						mu.Unlock()
+						w.Header().Set("Content-Type", "text/event-stream")
+						if n == 1 {
+							io.WriteString(w, wire)
+						} else {
+							io.WriteString(w, strings.ReplaceAll(goodClaudeSSE(), "claude-sonnet-4-6", model))
+						}
+					}))
+					input := []any{map[string]any{"role": "user", "content": "first"}}
+					p, _ := decodeObject(historyPayload(model, input, "", stream))
+					p["momo_claude_thinking"] = map[string]any{"type": "adaptive", "display": "summarized"}
+					first := historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
+					output := first["output"].([]any)
+					if len(output) != 6 || obj(output[0])["type"] != "reasoning" || obj(output[1])["type"] != "reasoning" || len(obj(output[1])["summary"].([]any)) != 0 {
+						t.Fatal("thinking/redacted order lost")
 					}
-				}
-				q, _ := decodeObject(historyPayload(target, full, "", false))
-				code, _, _ := request(t, c, endpoint, "/v1/responses", "POST", string(mustJSON(q)), map[string]string{"X-MOMO-History": "replay-v1"})
-				if code != 400 {
-					t.Fatal("unanchored foreign state accepted", target, code)
-				}
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if len(captures) != 4 {
-				t.Fatal("rejected context sent")
+					suffix := []any{map[string]any{"type": "custom_tool_call_output", "call_id": "write_signed", "output": "written"}, map[string]any{"type": "function_call_output", "call_id": "read_signed", "output": "read"}}
+					p["previous_response_id"] = first["id"]
+					p["input"] = suffix
+					historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
+					full := append(append(append([]any{}, input...), output...), suffix...)
+					p["input"] = full
+					historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
+					delete(p, "previous_response_id")
+					historyFinal(t, c, endpoint, string(mustJSON(p)), stream)
+					mu.Lock()
+					saved := append([]map[string]any{}, captures...)
+					mu.Unlock()
+					if len(saved) != 4 || !reflect.DeepEqual(saved[1], saved[2]) || !reflect.DeepEqual(saved[1], saved[3]) {
+						t.Fatal("signed suffix/full mismatch")
+					}
+					want := []any{map[string]any{"type": "thinking", "thinking": " public summary \r\n", "signature": signature}, map[string]any{"type": "redacted_thinking", "data": data}, map[string]any{"type": "text", "text": "before"}, map[string]any{"type": "tool_use", "id": "read_signed", "name": "pad__read", "input": map[string]any{"n": json.Number("1")}}, map[string]any{"type": "thinking", "thinking": "", "signature": signature}, map[string]any{"type": "tool_use", "id": "write_signed", "name": "pad__write", "input": map[string]any{"input": " raw \r\n"}}}
+					if !reflect.DeepEqual(obj(saved[1]["messages"].([]any)[1])["content"], want) {
+						t.Fatal("native thinking blocks changed", string(mustJSON(saved[1])))
+					}
+					for _, target := range []string{"gpt-5.5", "gemini-3.1-pro-preview", "claude-opus-4-6"} {
+						for _, items := range [][]any{suffix, full} {
+							q, _ := decodeObject(historyPayload(target, items, str(first["id"]), false))
+							code, _, _ := request(t, c, endpoint, "/v1/responses", "POST", string(mustJSON(q)), map[string]string{"X-MOMO-History": "replay-v1"})
+							if code != 400 {
+								t.Fatal("signed foreign model accepted", target, code)
+							}
+						}
+						q, _ := decodeObject(historyPayload(target, full, "", false))
+						code, _, _ := request(t, c, endpoint, "/v1/responses", "POST", string(mustJSON(q)), map[string]string{"X-MOMO-History": "replay-v1"})
+						if code != 400 {
+							t.Fatal("unanchored foreign state accepted", target, code)
+						}
+					}
+					mu.Lock()
+					defer mu.Unlock()
+					if len(captures) != 4 {
+						t.Fatal("rejected context sent")
+					}
+				})
 			}
 		})
 	}
@@ -158,7 +165,7 @@ func TestClaudeThinkingControls(t *testing.T) {
 		{"reasoning_effort": "low", "model_reasoning_effort": "high"},
 		{"reasoning_effort": "", "reasoning": map[string]any{"effort": "high"}, "model_reasoning_effort": "low"},
 		{"model": "gpt-5.5"},
-		{"model": "claude-sonnet-4-6-thinking"},
+		{"model": "claude-sonnet-4-6-thinking-preview"},
 	} {
 		p, _ := decodeObject(claudePayload)
 		p["momo_claude_thinking"] = map[string]any{"type": "adaptive"}
